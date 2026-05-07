@@ -1,4 +1,5 @@
 import { listCompanies } from '@/lib/companies/queries';
+import { requireMembership } from '@/lib/membership';
 import { requireTenant } from '@/lib/tenant';
 
 import { CompaniesView } from './_components/companies-view';
@@ -14,7 +15,10 @@ export default async function CompaniesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const tenant = await requireTenant();
+  const [tenant, membership] = await Promise.all([
+    requireTenant(),
+    requireMembership(),
+  ]);
   const { q } = await searchParams;
   const search = q?.trim() || undefined;
 
@@ -29,7 +33,11 @@ export default async function CompaniesPage({
         </p>
       </header>
 
-      <CompaniesView initialItems={items} initialSearch={search ?? ''} />
+      <CompaniesView
+        initialItems={items}
+        initialSearch={search ?? ''}
+        currentRole={membership.role}
+      />
     </main>
   );
 }

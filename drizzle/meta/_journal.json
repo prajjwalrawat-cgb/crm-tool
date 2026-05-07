@@ -15,6 +15,13 @@
       "when": 1778054240932,
       "tag": "0001_add_clerk_org_id",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778141399766,
+      "tag": "0002_soft_delete_and_activity",
+      "breakpoints": true
     }
   ]
 }

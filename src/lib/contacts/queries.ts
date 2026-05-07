@@ -1,6 +1,17 @@
 import 'server-only';
 
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 
 import { db } from '@/db';
 import { companies, contacts, type Contact } from '@/db/schema';
@@ -14,10 +25,6 @@ export type ContactOption = {
   label: string;
 };
 
-/**
- * Lightweight projection for picker UIs. Label falls back through name → email
- * → '(unnamed)' so every option has something readable.
- */
 export async function listContactOptions(tenantId: string): Promise<ContactOption[]> {
   const rows = await db
     .select({
@@ -27,7 +34,7 @@ export async function listContactOptions(tenantId: string): Promise<ContactOptio
       email: contacts.email,
     })
     .from(contacts)
-    .where(eq(contacts.tenantId, tenantId))
+    .where(and(eq(contacts.tenantId, tenantId), isNull(contacts.deletedAt)))
     .orderBy(
       asc(sql`coalesce(${contacts.lastName}, ${contacts.firstName}, ${contacts.email})`),
     );
@@ -45,19 +52,16 @@ export type ListContactsOptions = {
   search?: string;
 };
 
-/**
- * List contacts for a tenant, joined with the company name (if any). Search
- * does case-insensitive substring match across first/last/email/title — backed
- * by the (tenant_id, email) and (tenant_id, last_name) composite indexes for
- * the most common lookups.
- */
 export async function listContacts(
   tenantId: string,
   options: ListContactsOptions = {},
 ): Promise<ContactRow[]> {
   const term = options.search?.trim();
 
-  const conditions: SQL[] = [eq(contacts.tenantId, tenantId)];
+  const conditions: SQL[] = [
+    eq(contacts.tenantId, tenantId),
+    isNull(contacts.deletedAt),
+  ];
   if (term) {
     const pattern = `%${term}%`;
     const searchPredicate = or(
@@ -81,6 +85,8 @@ export async function listContacts(
       title: contacts.title,
       createdAt: contacts.createdAt,
       updatedAt: contacts.updatedAt,
+      deletedAt: contacts.deletedAt,
+      deletedBy: contacts.deletedBy,
       companyName: companies.name,
     })
     .from(contacts)
@@ -89,4 +95,30 @@ export async function listContacts(
     .orderBy(desc(contacts.createdAt));
 
   return rows;
+}
+
+export async function getContactById(
+  tenantId: string,
+  id: string,
+): Promise<Contact | null> {
+  const [row] = await db
+    .select()
+    .from(contacts)
+    .where(
+      and(
+        eq(contacts.tenantId, tenantId),
+        eq(contacts.id, id),
+        isNull(contacts.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function listDeletedContacts(tenantId: string): Promise<Contact[]> {
+  return await db
+    .select()
+    .from(contacts)
+    .where(and(eq(contacts.tenantId, tenantId), isNotNull(contacts.deletedAt)))
+    .orderBy(desc(contacts.deletedAt));
 }

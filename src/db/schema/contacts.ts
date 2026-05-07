@@ -25,12 +25,15 @@ export const contacts = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: text('deleted_by'),
   },
   (t) => [
     index('contacts_tenant_id_idx').on(t.tenantId),
     index('contacts_tenant_email_idx').on(t.tenantId, t.email),
     index('contacts_tenant_last_name_idx').on(t.tenantId, t.lastName),
     index('contacts_tenant_company_idx').on(t.tenantId, t.companyId),
+    index('contacts_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
   ],
 );
 

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, desc, eq, ilike, type SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNotNull, isNull, type SQL } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { companies, contacts, deals, type Deal } from '@/db/schema';
@@ -15,26 +15,8 @@ export type ListDealsOptions = {
   search?: string;
 };
 
-/**
- * List deals for a tenant, joined with the linked company and contact (if
- * any). Search does a case-insensitive substring match on the deal name —
- * backed by the (tenant_id, stage) and (tenant_id) indexes from the schema
- * for the dominant filter dimensions; the name LIKE is acceptable because
- * each tenant's deal count stays small relative to the indexes already
- * narrowing the scan.
- */
-export async function listDeals(
-  tenantId: string,
-  options: ListDealsOptions = {},
-): Promise<DealRow[]> {
-  const term = options.search?.trim();
-
-  const conditions: SQL[] = [eq(deals.tenantId, tenantId)];
-  if (term) {
-    conditions.push(ilike(deals.name, `%${term}%`));
-  }
-
-  const rows = await db
+function dealsSelect() {
+  return db
     .select({
       id: deals.id,
       tenantId: deals.tenantId,
@@ -49,6 +31,8 @@ export async function listDeals(
       ownerId: deals.ownerId,
       createdAt: deals.createdAt,
       updatedAt: deals.updatedAt,
+      deletedAt: deals.deletedAt,
+      deletedBy: deals.deletedBy,
       companyName: companies.name,
       contactFirstName: contacts.firstName,
       contactLastName: contacts.lastName,
@@ -56,17 +40,60 @@ export async function listDeals(
     })
     .from(deals)
     .leftJoin(companies, eq(deals.companyId, companies.id))
-    .leftJoin(contacts, eq(deals.contactId, contacts.id))
+    .leftJoin(contacts, eq(deals.contactId, contacts.id));
+}
+
+type RawDealRow = Awaited<ReturnType<typeof dealsSelect>>[number];
+
+function shapeDealRow(r: RawDealRow): DealRow {
+  const { contactFirstName, contactLastName, contactEmail, ...rest } = r;
+  const nameParts = [contactFirstName, contactLastName].filter(Boolean) as string[];
+  return {
+    ...rest,
+    contactName: nameParts.length ? nameParts.join(' ') : null,
+    contactEmail,
+  };
+}
+
+export async function listDeals(
+  tenantId: string,
+  options: ListDealsOptions = {},
+): Promise<DealRow[]> {
+  const term = options.search?.trim();
+
+  const conditions: SQL[] = [
+    eq(deals.tenantId, tenantId),
+    isNull(deals.deletedAt),
+  ];
+  if (term) conditions.push(ilike(deals.name, `%${term}%`));
+
+  const rows = await dealsSelect()
     .where(and(...conditions))
     .orderBy(desc(deals.createdAt));
 
-  return rows.map((r) => {
-    const { contactFirstName, contactLastName, contactEmail, ...rest } = r;
-    const nameParts = [contactFirstName, contactLastName].filter(Boolean) as string[];
-    return {
-      ...rest,
-      contactName: nameParts.length ? nameParts.join(' ') : null,
-      contactEmail,
-    };
-  });
+  return rows.map(shapeDealRow);
+}
+
+export async function getDealById(
+  tenantId: string,
+  id: string,
+): Promise<DealRow | null> {
+  const rows = await dealsSelect()
+    .where(
+      and(
+        eq(deals.tenantId, tenantId),
+        eq(deals.id, id),
+        isNull(deals.deletedAt),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  return row ? shapeDealRow(row) : null;
+}
+
+export async function listDeletedDeals(tenantId: string): Promise<DealRow[]> {
+  const rows = await dealsSelect()
+    .where(and(eq(deals.tenantId, tenantId), isNotNull(deals.deletedAt)))
+    .orderBy(desc(deals.deletedAt));
+  return rows.map(shapeDealRow);
 }

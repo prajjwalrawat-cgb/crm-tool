@@ -1,0 +1,83 @@
+import { relations } from 'drizzle-orm';
+import {
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
+
+import { tenants } from './tenants';
+
+export const ACTIVITY_ENTITY_TYPES = [
+  'company',
+  'contact',
+  'deal',
+  'membership',
+  'invitation',
+] as const;
+export type ActivityEntityType = (typeof ACTIVITY_ENTITY_TYPES)[number];
+
+export const ACTIVITY_ACTIONS = [
+  'created',
+  'updated',
+  'deleted',
+  'restored',
+  'stage_changed',
+  'invited',
+  'invitation_revoked',
+  'member_removed',
+  'role_changed',
+] as const;
+export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
+
+export const activityLogs = pgTable(
+  'activity_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    /** Clerk user id of the actor. Null only for system-generated events. */
+    actorUserId: text('actor_user_id'),
+    /** Discriminator: company | contact | deal | membership | invitation. */
+    entityType: text('entity_type').notNull(),
+    /**
+     * Mixed-id column. UUID strings for our entities (companies/contacts/deals);
+     * Clerk-prefixed strings (`user_…`, `orginv_…`) for memberships/invitations.
+     */
+    entityId: text('entity_id').notNull(),
+    /** Verb. See ACTIVITY_ACTIONS for the canonical set. */
+    action: text('action').notNull(),
+    /**
+     * Free-form context for the UI: prior values for diffs, target user
+     * details, reason strings, etc. Always shape-validated by the caller.
+     */
+    metadata: jsonb('metadata').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Tenant-wide feed, newest first.
+    index('activity_logs_tenant_created_idx').on(t.tenantId, t.createdAt),
+    // Per-record timeline.
+    index('activity_logs_entity_idx').on(
+      t.tenantId,
+      t.entityType,
+      t.entityId,
+      t.createdAt,
+    ),
+  ],
+);
+
+export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [activityLogs.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export type ActivityLog = typeof activityLogs.$inferSelect;
+export type NewActivityLog = typeof activityLogs.$inferInsert;

@@ -19,3 +19,13 @@ export const createCompanySchema = z.object({
 });
 
 export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
+
+export const updateCompanySchema = createCompanySchema.extend({
+  id: z.uuid({ message: 'Invalid company id' }),
+});
+
+export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
+
+export const companyIdSchema = z.object({
+  id: z.uuid({ message: 'Invalid company id' }),
+});

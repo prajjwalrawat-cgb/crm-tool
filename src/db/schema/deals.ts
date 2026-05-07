@@ -42,6 +42,8 @@ export const deals = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: text('deleted_by'),
   },
   (t) => [
     index('deals_tenant_id_idx').on(t.tenantId),
@@ -50,6 +52,7 @@ export const deals = pgTable(
     index('deals_tenant_company_idx').on(t.tenantId, t.companyId),
     index('deals_tenant_contact_idx').on(t.tenantId, t.contactId),
     index('deals_tenant_close_date_idx').on(t.tenantId, t.expectedCloseDate),
+    index('deals_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
   ],
 );
 

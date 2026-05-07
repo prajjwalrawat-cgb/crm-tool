@@ -45,3 +45,13 @@ export const createDealSchema = z.object({
 });
 
 export type CreateDealInput = z.infer<typeof createDealSchema>;
+
+export const updateDealSchema = createDealSchema.extend({
+  id: z.uuid({ message: 'Invalid deal id' }),
+});
+
+export type UpdateDealInput = z.infer<typeof updateDealSchema>;
+
+export const dealIdSchema = z.object({
+  id: z.uuid({ message: 'Invalid deal id' }),
+});

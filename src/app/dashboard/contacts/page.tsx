@@ -1,5 +1,6 @@
 import { listCompanyOptions } from '@/lib/companies/queries';
 import { listContacts } from '@/lib/contacts/queries';
+import { requireMembership } from '@/lib/membership';
 import { requireTenant } from '@/lib/tenant';
 
 import { ContactsView } from './_components/contacts-view';
@@ -15,7 +16,10 @@ export default async function ContactsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const tenant = await requireTenant();
+  const [tenant, membership] = await Promise.all([
+    requireTenant(),
+    requireMembership(),
+  ]);
   const { q } = await searchParams;
   const search = q?.trim() || undefined;
 
@@ -37,6 +41,7 @@ export default async function ContactsPage({
         initialItems={items}
         initialSearch={search ?? ''}
         companyOptions={companyOptions}
+        currentRole={membership.role}
       />
     </main>
   );

@@ -2,8 +2,11 @@ import { auth, currentUser } from '@clerk/nextjs/server';
 import { Building2, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 
+import { listRecentActivity } from '@/lib/activity/queries';
 import { ensureMembership } from '@/lib/membership';
 import { requireTenant } from '@/lib/tenant';
+
+import { ActivityList } from './activity/_components/activity-list';
 
 export const metadata = {
   title: 'Dashboard',
@@ -16,6 +19,8 @@ export default async function DashboardPage() {
     requireTenant(),
     ensureMembership(),
   ]);
+
+  const recentActivity = await listRecentActivity(tenant.id, { limit: 8 });
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -44,8 +49,24 @@ export default async function DashboardPage() {
         />
       </section>
 
+      <section className="mt-10">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-base font-semibold tracking-tight">Recent activity</h2>
+          <Link
+            href="/dashboard/activity"
+            className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+          >
+            View all
+          </Link>
+        </div>
+        <ActivityList
+          rows={recentActivity}
+          emptyMessage="Nothing here yet — activity will appear once you start adding records."
+        />
+      </section>
+
       <section className="mt-10 grid gap-4 text-sm sm:grid-cols-3">
-        <DebugCard label="Tenant" value={tenant.name} mono />
+        <DebugCard label="Tenant" value={tenant.name} />
         <DebugCard label="User ID" value={userId ?? '?'} mono />
         <DebugCard label="Org ID" value={orgId ?? '?'} mono />
       </section>

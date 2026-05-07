@@ -4,6 +4,8 @@ import { auth, clerkClient } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
+import { db } from '@/db';
+import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { type InviteRole } from '@/lib/team/schema';
 import {
@@ -59,14 +61,16 @@ export async function inviteMemberAction(formData: FormData): Promise<ActionResu
     };
   }
 
+  let invitationId: string | null = null;
   try {
     const client = await clerkClient();
-    await client.organizations.createOrganizationInvitation({
+    const invitation = await client.organizations.createOrganizationInvitation({
       organizationId: orgId,
       emailAddress: parsed.data.email,
       role: clerkRoleFor(parsed.data.role),
       inviterUserId: userId,
     });
+    invitationId = invitation.id;
   } catch (err) {
     return {
       ok: false,
@@ -74,7 +78,17 @@ export async function inviteMemberAction(formData: FormData): Promise<ActionResu
     };
   }
 
+  await recordActivity(db, {
+    tenantId: gate.tenant.id,
+    actorUserId: userId,
+    entityType: 'invitation',
+    entityId: invitationId ?? parsed.data.email,
+    action: 'invited',
+    metadata: { email: parsed.data.email, role: parsed.data.role },
+  });
+
   revalidatePath('/dashboard/team');
+  revalidatePath('/dashboard/activity');
   return { ok: true };
 }
 
@@ -94,13 +108,15 @@ export async function revokeInvitationAction(
     return { ok: false, message: 'Invalid invitation id.' };
   }
 
+  let revokedEmail: string | null = null;
   try {
     const client = await clerkClient();
-    await client.organizations.revokeOrganizationInvitation({
+    const invitation = await client.organizations.revokeOrganizationInvitation({
       organizationId: orgId,
       invitationId: idCheck.data,
       requestingUserId: userId,
     });
+    revokedEmail = invitation.emailAddress ?? null;
   } catch (err) {
     return {
       ok: false,
@@ -108,7 +124,17 @@ export async function revokeInvitationAction(
     };
   }
 
+  await recordActivity(db, {
+    tenantId: gate.tenant.id,
+    actorUserId: userId,
+    entityType: 'invitation',
+    entityId: idCheck.data,
+    action: 'invitation_revoked',
+    metadata: revokedEmail ? { email: revokedEmail } : {},
+  });
+
   revalidatePath('/dashboard/team');
+  revalidatePath('/dashboard/activity');
   return { ok: true };
 }
 
@@ -161,8 +187,20 @@ export async function removeMemberAction(targetUserId: string): Promise<ActionRe
     }
   }
 
+  let targetName: string | null = null;
   try {
     const client = await clerkClient();
+    // Capture target's display name before removal so the audit log carries
+    // something more useful than the bare user id.
+    try {
+      const target = await client.users.getUser(idCheck.data);
+      const parts = [target.firstName, target.lastName].filter(Boolean) as string[];
+      targetName = parts.length
+        ? parts.join(' ')
+        : target.primaryEmailAddress?.emailAddress ?? null;
+    } catch {
+      targetName = null;
+    }
     await client.organizations.deleteOrganizationMembership({
       organizationId: orgId,
       userId: idCheck.data,
@@ -174,7 +212,20 @@ export async function removeMemberAction(targetUserId: string): Promise<ActionRe
     };
   }
 
+  await recordActivity(db, {
+    tenantId: gate.tenant.id,
+    actorUserId: userId,
+    entityType: 'membership',
+    entityId: idCheck.data,
+    action: 'member_removed',
+    metadata: {
+      targetUserId: idCheck.data,
+      ...(targetName ? { targetName } : {}),
+    },
+  });
+
   revalidatePath('/dashboard/team');
+  revalidatePath('/dashboard/activity');
   return { ok: true };
 }
 
@@ -206,8 +257,18 @@ export async function changeMemberRoleAction(
     return { ok: false, message: 'You cannot change your own role.' };
   }
 
+  let targetName: string | null = null;
   try {
     const client = await clerkClient();
+    try {
+      const target = await client.users.getUser(parsed.data.userId);
+      const parts = [target.firstName, target.lastName].filter(Boolean) as string[];
+      targetName = parts.length
+        ? parts.join(' ')
+        : target.primaryEmailAddress?.emailAddress ?? null;
+    } catch {
+      targetName = null;
+    }
     await client.organizations.updateOrganizationMembership({
       organizationId: orgId,
       userId: parsed.data.userId,
@@ -220,6 +281,20 @@ export async function changeMemberRoleAction(
     };
   }
 
+  await recordActivity(db, {
+    tenantId: gate.tenant.id,
+    actorUserId: userId,
+    entityType: 'membership',
+    entityId: parsed.data.userId,
+    action: 'role_changed',
+    metadata: {
+      targetUserId: parsed.data.userId,
+      to: parsed.data.role,
+      ...(targetName ? { targetName } : {}),
+    },
+  });
+
   revalidatePath('/dashboard/team');
+  revalidatePath('/dashboard/activity');
   return { ok: true };
 }

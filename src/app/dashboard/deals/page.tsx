@@ -1,6 +1,7 @@
 import { listCompanyOptions } from '@/lib/companies/queries';
 import { listContactOptions } from '@/lib/contacts/queries';
 import { listDeals } from '@/lib/deals/queries';
+import { requireMembership } from '@/lib/membership';
 import { requireTenant } from '@/lib/tenant';
 
 import { DealsView } from './_components/deals-view';
@@ -16,7 +17,10 @@ export default async function DealsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const tenant = await requireTenant();
+  const [tenant, membership] = await Promise.all([
+    requireTenant(),
+    requireMembership(),
+  ]);
   const { q } = await searchParams;
   const search = q?.trim() || undefined;
 
@@ -40,6 +44,7 @@ export default async function DealsPage({
         initialSearch={search ?? ''}
         companyOptions={companyOptions}
         contactOptions={contactOptions}
+        currentRole={membership.role}
       />
     </main>
   );

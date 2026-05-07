@@ -4,3 +4,4 @@ export * from './memberships';
 export * from './companies';
 export * from './contacts';
 export * from './deals';
+export * from './activity-logs';

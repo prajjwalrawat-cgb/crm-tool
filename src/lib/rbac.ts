@@ -22,12 +22,15 @@ const PERMISSIONS = {
 
   manageCompanies: ['owner', 'admin', 'member'],
   deleteCompanies: ['owner', 'admin'],
+  restoreCompanies: ['owner'],
 
   manageContacts: ['owner', 'admin', 'member'],
   deleteContacts: ['owner', 'admin'],
+  restoreContacts: ['owner'],
 
   manageDeals: ['owner', 'admin', 'member'],
   deleteDeals: ['owner', 'admin'],
+  restoreDeals: ['owner'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -59,12 +62,21 @@ export const canManageRoles = (role: RoleArg) => can(role, 'manageRoles');
 
 export const canManageCompanies = (role: RoleArg) => can(role, 'manageCompanies');
 export const canDeleteCompanies = (role: RoleArg) => can(role, 'deleteCompanies');
+export const canRestoreCompanies = (role: RoleArg) => can(role, 'restoreCompanies');
 
 export const canManageContacts = (role: RoleArg) => can(role, 'manageContacts');
 export const canDeleteContacts = (role: RoleArg) => can(role, 'deleteContacts');
+export const canRestoreContacts = (role: RoleArg) => can(role, 'restoreContacts');
 
 export const canManageDeals = (role: RoleArg) => can(role, 'manageDeals');
 export const canDeleteDeals = (role: RoleArg) => can(role, 'deleteDeals');
+export const canRestoreDeals = (role: RoleArg) => can(role, 'restoreDeals');
+
+/** Composite helpers used by the recently-deleted page. */
+export const canRestoreAnything = (role: RoleArg) =>
+  canRestoreCompanies(role) ||
+  canRestoreContacts(role) ||
+  canRestoreDeals(role);
 
 /* -------- ranking helper for UI sort/compare -------- */
 

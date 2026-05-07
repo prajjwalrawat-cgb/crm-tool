@@ -34,3 +34,24 @@ export const createContactSchema = z
   });
 
 export type CreateContactInput = z.infer<typeof createContactSchema>;
+
+export const updateContactSchema = z
+  .object({
+    id: z.uuid({ message: 'Invalid contact id' }),
+    firstName: z.string().trim().max(100).nullable(),
+    lastName: z.string().trim().max(100).nullable(),
+    email: z.email({ message: 'Enter a valid email address' }).max(255).nullable(),
+    phone: z.string().trim().max(50).nullable(),
+    title: z.string().trim().max(100).nullable(),
+    companyId: z.uuid({ message: 'Pick a valid company' }).nullable(),
+  })
+  .refine((data) => Boolean(data.firstName || data.lastName || data.email), {
+    message: 'Provide a first name, last name, or email.',
+    path: ['firstName'],
+  });
+
+export type UpdateContactInput = z.infer<typeof updateContactSchema>;
+
+export const contactIdSchema = z.object({
+  id: z.uuid({ message: 'Invalid contact id' }),
+});

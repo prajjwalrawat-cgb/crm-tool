@@ -1,7 +1,9 @@
 import {
+  Activity,
   Briefcase,
   Building2,
   LayoutDashboard,
+  Trash2,
   UserCog,
   UsersRound,
   type LucideIcon,
@@ -21,6 +23,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
   { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
   { href: '/dashboard/team', label: 'Team', icon: UserCog },
+  { href: '/dashboard/activity', label: 'Activity', icon: Activity },
+  {
+    href: '/dashboard/recently-deleted',
+    label: 'Recently deleted',
+    icon: Trash2,
+  },
 ];
 
 /**

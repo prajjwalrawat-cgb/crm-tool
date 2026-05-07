@@ -20,11 +20,14 @@ export const companies = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: text('deleted_by'),
   },
   (t) => [
     index('companies_tenant_id_idx').on(t.tenantId),
     index('companies_tenant_name_idx').on(t.tenantId, t.name),
     index('companies_tenant_domain_idx').on(t.tenantId, t.domain),
+    index('companies_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
   ],
 );
 
