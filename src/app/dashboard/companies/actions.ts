@@ -5,8 +5,8 @@ import { z } from 'zod';
 
 import { db } from '@/db';
 import { companies, type Company } from '@/db/schema';
+import { checkPermission } from '@/lib/auth-guard';
 import { createCompanySchema } from '@/lib/companies/schema';
-import { requireTenant } from '@/lib/tenant';
 
 export type CreateCompanyResult =
   | { ok: true; company: Company }
@@ -15,7 +15,9 @@ export type CreateCompanyResult =
 export async function createCompanyAction(
   formData: FormData,
 ): Promise<CreateCompanyResult> {
-  const tenant = await requireTenant();
+  const gate = await checkPermission('manageCompanies');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant } = gate;
 
   const raw = {
     name: formData.get('name'),

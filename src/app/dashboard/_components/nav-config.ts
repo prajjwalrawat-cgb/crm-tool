@@ -2,6 +2,7 @@ import {
   Briefcase,
   Building2,
   LayoutDashboard,
+  UserCog,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
   { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
   { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
+  { href: '/dashboard/team', label: 'Team', icon: UserCog },
 ];
 
 /**

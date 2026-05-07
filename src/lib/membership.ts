@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { auth } from '@clerk/nextjs/server';
+import { auth, clerkClient } from '@clerk/nextjs/server';
 import { and, eq } from 'drizzle-orm';
 
 import { db } from '@/db';
@@ -31,6 +31,60 @@ export function mapClerkRole(clerkRole: string | null | undefined): MembershipRo
   return KNOWN_ROLES.has(stripped) ? stripped : 'member';
 }
 
+type UpsertMembershipInput = {
+  tenantId: string;
+  userId: string;
+  role: MembershipRole;
+};
+
+/**
+ * Insert-or-update a membership row, keyed by (tenant_id, user_id).
+ *
+ * Owner protection: Clerk has no native "owner" concept (its built-ins are
+ * org:admin and org:member). We mint owners ourselves on org.created. To
+ * stop a routine `organizationMembership.updated` webhook from silently
+ * demoting an owner to admin, we never overwrite an existing 'owner' role
+ * with 'admin' — Clerk admin == our owner OR our admin.
+ *
+ * Race-safe via the (tenant_id, user_id) unique index.
+ */
+export async function upsertMembership(
+  input: UpsertMembershipInput,
+): Promise<Membership | null> {
+  const [existing] = await db
+    .select({ role: memberships.role })
+    .from(memberships)
+    .where(
+      and(
+        eq(memberships.tenantId, input.tenantId),
+        eq(memberships.userId, input.userId),
+      ),
+    )
+    .limit(1);
+
+  const finalRole: MembershipRole =
+    existing?.role === 'owner' && input.role === 'admin' ? 'owner' : input.role;
+
+  const [row] = await db
+    .insert(memberships)
+    .values({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      role: finalRole,
+      status: 'active',
+    })
+    .onConflictDoUpdate({
+      target: [memberships.tenantId, memberships.userId],
+      set: {
+        role: finalRole,
+        status: 'active',
+      },
+    })
+    .returning();
+
+  return row ?? null;
+}
+
 type ProvisionMembershipInput = {
   clerkOrgId: string;
   clerkUserId: string;
@@ -38,10 +92,9 @@ type ProvisionMembershipInput = {
 };
 
 /**
- * Insert or update a membership row for the (tenant, user) pair, keyed by
- * the Clerk org id. Race-safe via ON CONFLICT on the (tenant_id, user_id)
- * unique index. Returns null if no tenant exists for the org yet — the
- * caller (webhook) can decide whether to retry or short-circuit.
+ * Webhook entry point. Looks up the tenant by Clerk org id, then upserts
+ * the membership with the mapped role. Returns null if the tenant doesn't
+ * exist yet — the caller is expected to provision the tenant first.
  */
 export async function upsertMembershipFromClerk(
   input: ProvisionMembershipInput,
@@ -54,30 +107,15 @@ export async function upsertMembershipFromClerk(
 
   if (!tenant) return null;
 
-  const role = mapClerkRole(input.clerkRole);
-
-  const [row] = await db
-    .insert(memberships)
-    .values({
-      tenantId: tenant.id,
-      userId: input.clerkUserId,
-      role,
-      status: 'active',
-    })
-    .onConflictDoUpdate({
-      target: [memberships.tenantId, memberships.userId],
-      set: {
-        role,
-        status: 'active',
-      },
-    })
-    .returning();
-
-  return row ?? null;
+  return await upsertMembership({
+    tenantId: tenant.id,
+    userId: input.clerkUserId,
+    role: mapClerkRole(input.clerkRole),
+  });
 }
 
 /**
- * Remove a membership row when Clerk reports it deleted. No-op if either the
+ * Webhook entry point for organizationMembership.deleted. No-op if the
  * tenant or membership row is already gone.
  */
 export async function removeMembershipFromClerk(input: {
@@ -103,8 +141,7 @@ export async function removeMembershipFromClerk(input: {
 }
 
 /**
- * Returns the active user's membership row in the active tenant, or null
- * if either is missing.
+ * Returns the active user's membership row in the active tenant.
  */
 export async function getCurrentMembership(): Promise<Membership | null> {
   const { userId } = await auth();
@@ -129,7 +166,7 @@ export async function getCurrentMembership(): Promise<Membership | null> {
 
 /**
  * Asserts an active membership exists. Use in protected routes after the
- * middleware has already gated on userId + orgId.
+ * middleware has gated on userId + orgId.
  */
 export async function requireMembership(): Promise<Membership> {
   const m = await getCurrentMembership();
@@ -142,9 +179,9 @@ export async function requireMembership(): Promise<Membership> {
 }
 
 /**
- * Read-or-lazily-provision the current membership. Mirrors ensureTenant()
- * for dev/safety: if the membership webhook hasn't fired yet, we backfill
- * from `auth().orgRole`. Race-safe.
+ * Read-or-lazily-provision the current membership. If the membership webhook
+ * hasn't fired yet, we backfill from `auth().orgRole` — and if the user is
+ * the org's creator (per Clerk), they're minted as 'owner' instead of 'admin'.
  */
 export async function ensureMembership(): Promise<Membership | null> {
   const { userId, orgId, orgRole } = await auth();
@@ -156,14 +193,21 @@ export async function ensureMembership(): Promise<Membership | null> {
   const tenant = await ensureTenant();
   if (!tenant) return null;
 
-  return await upsertMembershipFromClerk({
-    clerkOrgId: orgId,
-    clerkUserId: userId,
-    clerkRole: orgRole,
+  // Promote the org creator to 'owner'. Without this branch, the first user
+  // would always come back as 'admin' (Clerk's default for the creator) and
+  // canManageRoles would be unreachable.
+  const client = await clerkClient();
+  const org = await client.organizations.getOrganization({ organizationId: orgId });
+  const isCreator = org.createdBy === userId;
+
+  return await upsertMembership({
+    tenantId: tenant.id,
+    userId,
+    role: isCreator ? 'owner' : mapClerkRole(orgRole),
   });
 }
 
-/* -------- role helpers -------- */
+/* -------- role helpers (kept here for ergonomic import; logic in rbac.ts) -------- */
 
 type RoleBearing = Pick<Membership, 'role'>;
 
@@ -171,9 +215,6 @@ export function isOwner(m: RoleBearing | null | undefined): boolean {
   return m?.role === 'owner';
 }
 
-/**
- * Owners count as admins for permission checks — owner is strictly stronger.
- */
 export function isAdmin(m: RoleBearing | null | undefined): boolean {
   return m?.role === 'owner' || m?.role === 'admin';
 }

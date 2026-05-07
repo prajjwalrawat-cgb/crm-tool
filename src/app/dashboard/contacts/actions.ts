@@ -6,8 +6,8 @@ import { z } from 'zod';
 
 import { db } from '@/db';
 import { companies, contacts, type Contact } from '@/db/schema';
+import { checkPermission } from '@/lib/auth-guard';
 import { createContactSchema } from '@/lib/contacts/schema';
-import { requireTenant } from '@/lib/tenant';
 
 export type CreateContactResult =
   | { ok: true; contact: Contact }
@@ -20,7 +20,9 @@ export type CreateContactResult =
 export async function createContactAction(
   formData: FormData,
 ): Promise<CreateContactResult> {
-  const tenant = await requireTenant();
+  const gate = await checkPermission('manageContacts');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant } = gate;
 
   const raw: Record<string, FormDataEntryValue | null> = {
     firstName: formData.get('firstName'),

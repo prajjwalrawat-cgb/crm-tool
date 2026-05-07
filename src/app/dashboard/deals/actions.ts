@@ -6,9 +6,9 @@ import { z } from 'zod';
 
 import { db } from '@/db';
 import { companies, contacts, deals, type Deal } from '@/db/schema';
+import { checkPermission } from '@/lib/auth-guard';
 import { toMinorUnits } from '@/lib/deals/currency';
 import { createDealSchema } from '@/lib/deals/schema';
-import { requireTenant } from '@/lib/tenant';
 
 export type CreateDealResult =
   | { ok: true; deal: Deal }
@@ -21,7 +21,9 @@ export type CreateDealResult =
 export async function createDealAction(
   formData: FormData,
 ): Promise<CreateDealResult> {
-  const tenant = await requireTenant();
+  const gate = await checkPermission('manageDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant } = gate;
 
   const raw: Record<string, FormDataEntryValue | null> = {
     name: formData.get('name'),
