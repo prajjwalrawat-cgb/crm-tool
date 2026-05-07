@@ -21,3 +21,7 @@ export const dealStage = pgEnum('deal_stage', [
   'won',
   'lost',
 ]);
+
+export type MembershipRole = (typeof membershipRole.enumValues)[number];
+export type MembershipStatus = (typeof membershipStatus.enumValues)[number];
+export type DealStage = (typeof dealStage.enumValues)[number];
