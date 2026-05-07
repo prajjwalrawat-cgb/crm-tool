@@ -1,0 +1,36 @@
+import { z } from 'zod';
+
+export const createContactSchema = z
+  .object({
+    firstName: z
+      .string()
+      .trim()
+      .max(100, 'First name must be 100 characters or fewer')
+      .nullable(),
+    lastName: z
+      .string()
+      .trim()
+      .max(100, 'Last name must be 100 characters or fewer')
+      .nullable(),
+    email: z
+      .email({ message: 'Enter a valid email address' })
+      .max(255, 'Email is too long')
+      .nullable(),
+    phone: z
+      .string()
+      .trim()
+      .max(50, 'Phone must be 50 characters or fewer')
+      .nullable(),
+    title: z
+      .string()
+      .trim()
+      .max(100, 'Title must be 100 characters or fewer')
+      .nullable(),
+    companyId: z.uuid({ message: 'Pick a valid company' }).nullable(),
+  })
+  .refine((data) => Boolean(data.firstName || data.lastName || data.email), {
+    message: 'Provide a first name, last name, or email.',
+    path: ['firstName'],
+  });
+
+export type CreateContactInput = z.infer<typeof createContactSchema>;

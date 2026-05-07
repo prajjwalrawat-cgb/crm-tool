@@ -1,9 +1,26 @@
 import 'server-only';
 
-import { and, desc, eq, ilike } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { companies, type Company } from '@/db/schema';
+
+export type CompanyOption = {
+  id: string;
+  name: string;
+};
+
+/**
+ * Lightweight (id, name) projection of a tenant's companies, sorted A-Z.
+ * Use for picker UIs that don't need the full row.
+ */
+export async function listCompanyOptions(tenantId: string): Promise<CompanyOption[]> {
+  return await db
+    .select({ id: companies.id, name: companies.name })
+    .from(companies)
+    .where(eq(companies.tenantId, tenantId))
+    .orderBy(asc(companies.name));
+}
 
 export type ListCompaniesOptions = {
   search?: string;
