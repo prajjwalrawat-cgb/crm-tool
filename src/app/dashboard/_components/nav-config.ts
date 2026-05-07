@@ -18,12 +18,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
   { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
-  {
-    href: '/dashboard/deals',
-    label: 'Deals',
-    icon: Briefcase,
-    comingSoon: true,
-  },
+  { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
 ];
 
 /**

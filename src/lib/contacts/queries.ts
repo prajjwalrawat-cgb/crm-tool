@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { companies, contacts, type Contact } from '@/db/schema';
@@ -8,6 +8,38 @@ import { companies, contacts, type Contact } from '@/db/schema';
 export type ContactRow = Contact & {
   companyName: string | null;
 };
+
+export type ContactOption = {
+  id: string;
+  label: string;
+};
+
+/**
+ * Lightweight projection for picker UIs. Label falls back through name → email
+ * → '(unnamed)' so every option has something readable.
+ */
+export async function listContactOptions(tenantId: string): Promise<ContactOption[]> {
+  const rows = await db
+    .select({
+      id: contacts.id,
+      firstName: contacts.firstName,
+      lastName: contacts.lastName,
+      email: contacts.email,
+    })
+    .from(contacts)
+    .where(eq(contacts.tenantId, tenantId))
+    .orderBy(
+      asc(sql`coalesce(${contacts.lastName}, ${contacts.firstName}, ${contacts.email})`),
+    );
+
+  return rows.map((c) => {
+    const nameParts = [c.firstName, c.lastName].filter(Boolean) as string[];
+    const label = nameParts.length
+      ? nameParts.join(' ')
+      : c.email ?? '(unnamed)';
+    return { id: c.id, label };
+  });
+}
 
 export type ListContactsOptions = {
   search?: string;
