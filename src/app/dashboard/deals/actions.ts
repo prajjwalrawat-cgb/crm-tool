@@ -12,6 +12,7 @@ import { toMinorUnits } from '@/lib/deals/currency';
 import {
   createDealSchema,
   dealIdSchema,
+  DEAL_STAGES,
   updateDealSchema,
 } from '@/lib/deals/schema';
 
@@ -280,6 +281,135 @@ export async function updateDealAction(
   revalidatePath(`/dashboard/deals/${result.id}`);
   revalidatePath('/dashboard/activity');
   return { ok: true, deal: result };
+}
+
+/* -------- UPDATE STAGE (kanban) -------- */
+
+const updateStageSchema = z.object({
+  id: z.uuid({ message: 'Invalid deal id' }),
+  stage: z.enum(DEAL_STAGES, { message: 'Invalid stage' }),
+});
+
+export type UpdateDealStageInput = {
+  id: string;
+  stage: string;
+};
+
+export type UpdateDealStageResult =
+  | { ok: true; deal: Deal; changed: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Move a single deal to a new stage. Used by the kanban DnD on every drop.
+ *
+ * Idempotent: if the deal is already in the requested stage, this is a no-op
+ * (no DB write, no activity log, returns `changed: false`). Drag-and-drop
+ * tooling sometimes fires `onDragEnd` for in-place drops; we don't want to
+ * spam the audit log with redundant entries.
+ *
+ * Closed-state invariant: transitioning into won/lost sets `closedAt` if it
+ * isn't already set; transitioning *out* clears it. Mirrors the same logic
+ * in `updateDealAction` so the two paths can never disagree.
+ *
+ * Race: this is "last writer wins" — two concurrent drags by different
+ * users will both succeed and the activity log records both transitions.
+ * Stale-overwrite protection is intentionally not added here (see phase
+ * deliverables for the rationale).
+ */
+export async function updateDealStageAction(
+  input: UpdateDealStageInput,
+): Promise<UpdateDealStageResult> {
+  const gate = await checkPermission('manageDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  const parsed = updateStageSchema.safeParse(input);
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error);
+    return {
+      ok: false,
+      message: flat.formErrors[0] ?? 'Invalid stage transition.',
+    };
+  }
+
+  const isClosed =
+    parsed.data.stage === 'won' || parsed.data.stage === 'lost';
+
+  const result = await db.transaction(async (tx) => {
+    const [previous] = await tx
+      .select({
+        id: deals.id,
+        stage: deals.stage,
+        name: deals.name,
+        closedAt: deals.closedAt,
+      })
+      .from(deals)
+      .where(
+        and(
+          eq(deals.id, parsed.data.id),
+          eq(deals.tenantId, tenant.id),
+          isNull(deals.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!previous) return { row: null, changed: false };
+
+    if (previous.stage === parsed.data.stage) {
+      // Re-fetch full row so the caller's optimistic state can settle on
+      // server data without a wasteful update.
+      const [unchanged] = await tx
+        .select()
+        .from(deals)
+        .where(eq(deals.id, previous.id))
+        .limit(1);
+      return { row: unchanged ?? null, changed: false };
+    }
+
+    let nextClosedAt: Date | null = previous.closedAt;
+    if (isClosed && !previous.closedAt) nextClosedAt = new Date();
+    if (!isClosed && previous.closedAt) nextClosedAt = null;
+
+    const [updated] = await tx
+      .update(deals)
+      .set({
+        stage: parsed.data.stage,
+        closedAt: nextClosedAt,
+      })
+      .where(
+        and(
+          eq(deals.id, parsed.data.id),
+          eq(deals.tenantId, tenant.id),
+          isNull(deals.deletedAt),
+        ),
+      )
+      .returning();
+    if (!updated) return { row: null, changed: false };
+
+    await recordActivity(tx, {
+      tenantId: tenant.id,
+      actorUserId: membership.userId,
+      entityType: 'deal',
+      entityId: updated.id,
+      action: 'stage_changed',
+      metadata: {
+        name: updated.name,
+        from: previous.stage,
+        to: updated.stage,
+      },
+    });
+
+    return { row: updated, changed: true };
+  });
+
+  if (!result.row) {
+    return { ok: false, message: 'Deal not found in this tenant.' };
+  }
+
+  revalidatePath('/dashboard/deals');
+  revalidatePath('/dashboard/deals/board');
+  revalidatePath(`/dashboard/deals/${result.row.id}`);
+  if (result.changed) revalidatePath('/dashboard/activity');
+  return { ok: true, deal: result.row, changed: result.changed };
 }
 
 /* -------- SOFT DELETE -------- */
