@@ -16,11 +16,12 @@ import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
 import { formatCurrency, toMinorUnits } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
-import type { PageSize } from '@/lib/pagination/cursor';
+import type { PageSize } from '@/lib/pagination/page-size';
 import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
 import { canDeleteDeals, canManageDeals } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
+import { CreateDrawer } from '../../_components/create-drawer';
 import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createDealAction,
@@ -224,31 +225,53 @@ export function DealsView({
   const trimmedSearch = search.trim();
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+    <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-4">
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search deals by name…"
-            aria-label="Search deals"
-            className={cn(
-              'w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-9 text-sm shadow-sm transition',
-              'placeholder:text-zinc-400',
-              'focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20',
-              'dark:border-zinc-800 dark:bg-zinc-900 dark:placeholder:text-zinc-500',
-            )}
-          />
-          {searchPending ? (
-            <Loader2
-              className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-zinc-400"
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
               aria-hidden
             />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search deals by name…"
+              aria-label="Search deals"
+              className={cn(
+                'w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-9 text-sm shadow-sm transition',
+                'placeholder:text-zinc-400',
+                'focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20',
+                'dark:border-zinc-800 dark:bg-zinc-900 dark:placeholder:text-zinc-500',
+              )}
+            />
+            {searchPending ? (
+              <Loader2
+                className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-zinc-400"
+                aria-hidden
+              />
+            ) : null}
+          </div>
+          {canEdit ? (
+            <CreateDrawer
+              label="New deal"
+              drawerTitle="Create deal"
+              description="Track an opportunity through your pipeline."
+              closeOnSuccessKey={createResetKey}
+            >
+              {() => (
+                <CreateDealForm
+                  onSubmit={handleCreate}
+                  pending={createPending}
+                  error={createError}
+                  fieldErrors={createFieldErrors}
+                  resetKey={createResetKey}
+                  companyOptions={companyOptions}
+                  contactOptions={contactOptions}
+                />
+              )}
+            </CreateDrawer>
           ) : null}
         </div>
 
@@ -287,20 +310,6 @@ export function DealsView({
         )}
       </section>
 
-      <aside>
-        {canEdit ? (
-          <CreateDealForm
-            onSubmit={handleCreate}
-            pending={createPending}
-            error={createError}
-            fieldErrors={createFieldErrors}
-            resetKey={createResetKey}
-            companyOptions={companyOptions}
-            contactOptions={contactOptions}
-          />
-        ) : null}
-      </aside>
-
       <EditDealDrawer
         open={editingDeal !== null}
         onClose={() => setEditingDeal(null)}
@@ -338,37 +347,37 @@ function DealsTable({
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+        <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
             <tr>
-              <th scope="col" className="px-4 py-2.5 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left font-medium">
                 Name
               </th>
-              <th scope="col" className="px-4 py-2.5 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left font-medium">
                 Stage
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-medium">
+              <th scope="col" className="px-3 py-2 text-right font-medium">
                 Amount
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-left font-medium md:table-cell"
+                className="hidden px-3 py-2 text-left font-medium md:table-cell"
               >
                 Company
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-left font-medium lg:table-cell"
+                className="hidden px-3 py-2 text-left font-medium lg:table-cell"
               >
                 Contact
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-right font-medium sm:table-cell"
+                className="hidden px-3 py-2 text-right font-medium sm:table-cell"
               >
                 Close date
               </th>
               {showActions ? (
-                <th scope="col" className="px-4 py-2.5 text-right font-medium">
+                <th scope="col" className="px-3 py-2 text-right font-medium">
                   <span className="sr-only">Actions</span>
                 </th>
               ) : null}
@@ -382,7 +391,7 @@ function DealsTable({
                   key={d.id}
                   className={cn('transition-opacity', d.__pending && 'opacity-60')}
                 >
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2">
                     {isOptimistic ? (
                       <span className="font-medium">{d.name}</span>
                     ) : (
@@ -395,25 +404,25 @@ function DealsTable({
                       </Link>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2">
                     <StageBadge stage={d.stage} />
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right font-mono">
+                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
                     {formatCurrency(d.amountMinor, d.currency)}
                   </td>
-                  <td className="hidden px-4 py-3 text-zinc-600 md:table-cell dark:text-zinc-400">
+                  <td className="hidden px-3 py-2 text-zinc-600 md:table-cell dark:text-zinc-400">
                     {d.companyName ?? '—'}
                   </td>
-                  <td className="hidden px-4 py-3 text-zinc-600 lg:table-cell dark:text-zinc-400">
+                  <td className="hidden px-3 py-2 text-zinc-600 lg:table-cell dark:text-zinc-400">
                     {d.contactName ?? d.contactEmail ?? '—'}
                   </td>
-                  <td className="hidden whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-500 sm:table-cell">
+                  <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-zinc-500 sm:table-cell">
                     {d.expectedCloseDate
                       ? dateFormatter.format(new Date(d.expectedCloseDate))
                       : '—'}
                   </td>
                   {showActions ? (
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <td className="whitespace-nowrap px-3 py-2 text-right">
                       <RowActions
                         canEdit={canEdit}
                         canDelete={canDelete}

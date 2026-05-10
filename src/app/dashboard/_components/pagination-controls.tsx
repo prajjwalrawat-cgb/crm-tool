@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTransition } from 'react';
 
-import { PAGE_SIZES, type PageSize } from '@/lib/pagination/cursor';
+import { PAGE_SIZES, type PageSize } from '@/lib/pagination/page-size';
 import { cn } from '@/lib/utils';
 
 /**

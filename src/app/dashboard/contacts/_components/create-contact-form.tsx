@@ -33,15 +33,12 @@ export function CreateContactForm({
     <form
       ref={formRef}
       action={onSubmit}
-      className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4"
       noValidate
     >
-      <div>
-        <h2 className="text-base font-semibold">Add contact</h2>
-        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-          One name, email, or both — at least one is required.
-        </p>
-      </div>
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        One name, email, or both — at least one is required.
+      </p>
 
       <div className="grid grid-cols-2 gap-3">
         <Field

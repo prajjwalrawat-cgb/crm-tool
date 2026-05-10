@@ -9,6 +9,8 @@ import { CopilotPanel } from './copilot-panel';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
 
+const SIDEBAR_COLLAPSED_KEY = 'crm.sidebar.collapsed';
+
 export function DashboardShell({
   children,
   tenantId,
@@ -19,14 +21,39 @@ export function DashboardShell({
   aiMode: AIMode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Sidebar collapsed default is false; localStorage hydrates it after
+  // first paint to avoid SSR/CSR mismatch flicker.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pathname = usePathname();
+
+  // Hydrate sidebar collapsed preference from localStorage once on mount.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      if (raw === '1') setSidebarCollapsed(true);
+    } catch {
+      // Storage not available (private mode, sandbox); ignore.
+    }
+  }, []);
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        /* storage may be unavailable */
+      }
+      return next;
+    });
+  }
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  // Esc closes the drawer.
+  // Esc closes the mobile drawer.
   useEffect(() => {
     if (!mobileOpen) return;
     function onKey(e: KeyboardEvent) {
@@ -41,15 +68,35 @@ export function DashboardShell({
       <Sidebar
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={toggleSidebarCollapsed}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
           onMobileMenuOpen={() => setMobileOpen(true)}
           tenantId={tenantId}
         />
-        <div className="flex-1">{children}</div>
+        {/*
+          Tenant-scoped invalidation boundary. When the active tenant
+          changes (Clerk org switcher → layout re-render → this prop
+          updates), React unmounts everything inside this div and
+          remounts fresh. That's the single architectural answer to
+          "stale activity rows from the previous tenant survive a
+          switch": every client component below is keyed by the tenant
+          they were mounted under, so their `useState`/`useOptimistic`
+          state is discarded with the old subtree instead of leaking
+          across tenants.
+
+          Components that live OUTSIDE this div (Sidebar, Header,
+          CopilotPanel) keep their state across tenant switches. Anything
+          tenant-scoped at that layer is keyed individually at its render
+          site (PresenceIndicator inside Header, CopilotPanel below).
+        */}
+        <div key={tenantId} className="flex-1">
+          {children}
+        </div>
       </div>
-      <CopilotPanel aiMode={aiMode} />
+      <CopilotPanel key={tenantId} aiMode={aiMode} />
     </div>
   );
 }

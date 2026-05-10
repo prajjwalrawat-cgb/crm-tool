@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 
 import { useRealtimeEvents } from '@/hooks/use-realtime-events';
 import type { ActivityRow } from '@/lib/activity/queries';
-import type { PageSize } from '@/lib/pagination/cursor';
+import type { PageSize } from '@/lib/pagination/page-size';
 import type { RealtimeEvent, SerializedActivity } from '@/lib/realtime/events';
 
 import { PaginationControls } from '../../_components/pagination-controls';

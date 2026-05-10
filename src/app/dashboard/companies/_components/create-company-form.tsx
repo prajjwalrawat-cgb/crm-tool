@@ -31,16 +31,9 @@ export function CreateCompanyForm({
     <form
       ref={formRef}
       action={onSubmit}
-      className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4"
       noValidate
     >
-      <div>
-        <h2 className="text-base font-semibold">Add company</h2>
-        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-          Companies in this tenant.
-        </p>
-      </div>
-
       <Field
         name="name"
         label="Name"

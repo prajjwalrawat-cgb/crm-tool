@@ -1,5 +1,12 @@
 import 'server-only';
 
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  PAGE_SIZES,
+  parsePageSize,
+} from './page-size';
+
 /**
  * Cursor encoding for keyset pagination. Each cursor is the `(timestamp,
  * id)` of the last row already returned. The next page's predicate is:
@@ -15,6 +22,12 @@ import 'server-only';
  * cursor still goes through RLS + tenant filtering, so the worst a
  * caller can do is fetch their own data starting from a different
  * point. Surface area, not security.
+ *
+ * SERVER-ONLY: the encoder uses Node's `Buffer`. The page-size enum
+ * and `parsePageSize` were moved to `./page-size.ts` (no Node deps,
+ * no `server-only` marker) so Client Components can import them.
+ * Server callers can still import everything from this file because
+ * it re-exports the page-size primitives below.
  */
 
 export type Cursor = {
@@ -54,23 +67,6 @@ export function decodeCursor(raw: string | undefined | null): Cursor | null {
   }
 }
 
-/**
- * The page-size enum the UI selector exposes. Anything outside the set
- * collapses to the default. Keeping this small caps the upper bound of
- * a single fetch to 100 rows even if a caller tries `?size=10000`.
- */
-export const PAGE_SIZES = [25, 50, 100] as const;
-export type PageSize = (typeof PAGE_SIZES)[number];
-export const DEFAULT_PAGE_SIZE: PageSize = 50;
-
-export function parsePageSize(raw: string | string[] | undefined): PageSize {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const n = Number(value);
-  return (PAGE_SIZES as readonly number[]).includes(n)
-    ? (n as PageSize)
-    : DEFAULT_PAGE_SIZE;
-}
-
 export function parseCursorParam(raw: string | string[] | undefined): Cursor | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
   return decodeCursor(value);
@@ -108,3 +104,8 @@ export function buildPage<T extends { id: string }>(
     size,
   };
 }
+
+// Server-side re-exports so callers that previously imported the
+// page-size primitives from this file keep working. Client Components
+// MUST import from `./page-size` directly.
+export { DEFAULT_PAGE_SIZE, type PageSize, PAGE_SIZES, parsePageSize };

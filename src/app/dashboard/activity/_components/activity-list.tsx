@@ -1,18 +1,23 @@
+import { Activity } from 'lucide-react';
+
 import { formatActivity, formatRelativeTime } from '@/lib/activity/format';
 import type { ActivityRow } from '@/lib/activity/queries';
 import { cn } from '@/lib/utils';
 
 export function ActivityList({
   rows,
-  emptyMessage = 'No activity yet.',
+  emptyMessage = 'No activity yet — create or edit a record to populate the feed.',
 }: {
   rows: ActivityRow[];
   emptyMessage?: string;
 }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
-        {emptyMessage}
+      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
+        <Activity className="mx-auto h-8 w-8 text-zinc-400" aria-hidden />
+        <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+          {emptyMessage}
+        </p>
       </div>
     );
   }

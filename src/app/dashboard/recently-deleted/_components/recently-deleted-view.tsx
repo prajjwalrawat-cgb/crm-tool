@@ -297,7 +297,7 @@ function Section({
 }) {
   return (
     <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+      <header className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
         <h2 className="text-sm font-semibold">{title}</h2>
         <span className="text-xs text-zinc-500">{count}</span>
       </header>
@@ -319,7 +319,7 @@ function Th({
     <th
       scope="col"
       className={cn(
-        'px-4 py-2.5 font-medium',
+        'px-3 py-2 font-medium',
         align === 'right' ? 'text-right' : 'text-left',
         hidden === 'sm' && 'hidden sm:table-cell',
         hidden === 'md' && 'hidden md:table-cell',
@@ -391,7 +391,7 @@ function RestorableRow({
         <td
           key={i}
           className={cn(
-            'whitespace-nowrap px-4 py-3',
+            'whitespace-nowrap px-3 py-2',
             alignRight[i] && 'text-right',
             i === cells.length - 1 && 'text-xs text-zinc-500',
             hiddenAt[i] === 'sm' && 'hidden sm:table-cell',
@@ -403,7 +403,7 @@ function RestorableRow({
         </td>
       ))}
       {canRestore || canHardDelete ? (
-        <td className="whitespace-nowrap px-4 py-3 text-right">
+        <td className="whitespace-nowrap px-3 py-2 text-right">
           {confirmingPurge && canHardDelete ? (
             <span className="inline-flex items-center gap-1.5">
               <span className="text-[11px] text-zinc-500 dark:text-zinc-400">

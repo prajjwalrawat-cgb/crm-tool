@@ -1,3 +1,5 @@
+import { Workflow } from 'lucide-react';
+
 import type { WorkflowRun, WorkflowStatus } from '@/db/schema';
 import { formatRelativeTime } from '@/lib/activity/format';
 import { cn } from '@/lib/utils';
@@ -23,9 +25,21 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-6 py-16 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
-        No workflow runs yet. Trigger a deal stage change, invite a member,
-        or wait for the next stale-deals scan.
+      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-6 py-12 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
+        <Workflow
+          className="mx-auto h-9 w-9 text-zinc-400"
+          aria-hidden
+        />
+        <h3 className="mt-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+          No workflow runs yet
+        </h3>
+        <p className="mx-auto mt-1 max-w-md text-xs text-zinc-500 dark:text-zinc-400">
+          Workflows fire on stage changes (won, lost), member invites, and a
+          daily stale-deals cron. Move a deal to <span className="font-medium">won</span>{' '}
+          or <span className="font-medium">lost</span> to trigger the first
+          run, or check <span className="font-medium">/dashboard/ops</span> if
+          you expect events but see none.
+        </p>
       </div>
     );
   }
@@ -33,26 +47,26 @@ export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-          <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+          <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
             <tr>
-              <th scope="col" className="px-4 py-2.5 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left font-medium">
                 Workflow
               </th>
-              <th scope="col" className="px-4 py-2.5 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left font-medium">
                 Status
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-left font-medium sm:table-cell"
+                className="hidden px-3 py-2 text-left font-medium sm:table-cell"
               >
                 Trigger
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-medium">
+              <th scope="col" className="px-3 py-2 text-right font-medium">
                 Started
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-right font-medium md:table-cell"
+                className="hidden px-3 py-2 text-right font-medium md:table-cell"
               >
                 Duration
               </th>
@@ -72,7 +86,7 @@ export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
               const source = meta.source === 'local' ? 'local' : meta.source === 'inngest' ? 'inngest' : null;
               return (
                 <tr key={run.id}>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{run.workflowId}</span>
                       {source ? (
@@ -99,7 +113,7 @@ export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
                       </div>
                     ) : null}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2">
                     <span
                       className={cn(
                         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize',
@@ -109,18 +123,18 @@ export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
                       {status}
                     </span>
                   </td>
-                  <td className="hidden px-4 py-3 text-zinc-600 sm:table-cell dark:text-zinc-400">
+                  <td className="hidden px-3 py-2 text-zinc-600 sm:table-cell dark:text-zinc-400">
                     <span className="font-mono text-xs">
                       {run.eventName ?? '—'}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-500">
+                  <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-zinc-500">
                     <div>{formatRelativeTime(run.startedAt)}</div>
                     <div className="font-mono text-[10px] text-zinc-400">
                       {dateFormatter.format(run.startedAt)}
                     </div>
                   </td>
-                  <td className="hidden whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-500 md:table-cell">
+                  <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-zinc-500 md:table-cell">
                     {duration === null
                       ? '…'
                       : duration < 1000

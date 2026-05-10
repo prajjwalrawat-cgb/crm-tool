@@ -11,10 +11,11 @@ import {
 } from 'react';
 
 import type { Company, MembershipRole } from '@/db/schema';
-import type { PageSize } from '@/lib/pagination/cursor';
+import type { PageSize } from '@/lib/pagination/page-size';
 import { canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
+import { CreateDrawer } from '../../_components/create-drawer';
 import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createCompanyAction,
@@ -191,31 +192,51 @@ export function CompaniesView({
   const trimmedSearch = search.trim();
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+    <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-4">
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search companies by name…"
-            aria-label="Search companies by name"
-            className={cn(
-              'w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-9 text-sm shadow-sm transition',
-              'placeholder:text-zinc-400',
-              'focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20',
-              'dark:border-zinc-800 dark:bg-zinc-900 dark:placeholder:text-zinc-500',
-            )}
-          />
-          {searchPending ? (
-            <Loader2
-              className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-zinc-400"
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
               aria-hidden
             />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search companies by name…"
+              aria-label="Search companies by name"
+              className={cn(
+                'w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-9 text-sm shadow-sm transition',
+                'placeholder:text-zinc-400',
+                'focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20',
+                'dark:border-zinc-800 dark:bg-zinc-900 dark:placeholder:text-zinc-500',
+              )}
+            />
+            {searchPending ? (
+              <Loader2
+                className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-zinc-400"
+                aria-hidden
+              />
+            ) : null}
+          </div>
+          {canEdit ? (
+            <CreateDrawer
+              label="New company"
+              drawerTitle="Add company"
+              description="Companies in this tenant."
+              closeOnSuccessKey={createResetKey}
+            >
+              {() => (
+                <CreateCompanyForm
+                  onSubmit={handleCreate}
+                  pending={createPending}
+                  error={createError}
+                  fieldErrors={createFieldErrors}
+                  resetKey={createResetKey}
+                />
+              )}
+            </CreateDrawer>
           ) : null}
         </div>
 
@@ -254,18 +275,6 @@ export function CompaniesView({
         )}
       </section>
 
-      <aside>
-        {canEdit ? (
-          <CreateCompanyForm
-            onSubmit={handleCreate}
-            pending={createPending}
-            error={createError}
-            fieldErrors={createFieldErrors}
-            resetKey={createResetKey}
-          />
-        ) : null}
-      </aside>
-
       <EditCompanyDrawer
         open={editingCompany !== null}
         onClose={() => setEditingCompany(null)}
@@ -302,31 +311,31 @@ function CompaniesTable({
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-          <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+          <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
             <tr>
-              <th scope="col" className="px-4 py-2.5 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left font-medium">
                 Name
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-left font-medium sm:table-cell"
+                className="hidden px-3 py-2 text-left font-medium sm:table-cell"
               >
                 Domain
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-left font-medium md:table-cell"
+                className="hidden px-3 py-2 text-left font-medium md:table-cell"
               >
                 Industry
               </th>
               <th
                 scope="col"
-                className="hidden px-4 py-2.5 text-right font-medium sm:table-cell"
+                className="hidden px-3 py-2 text-right font-medium sm:table-cell"
               >
                 Created
               </th>
               {showActions ? (
-                <th scope="col" className="px-4 py-2.5 text-right font-medium">
+                <th scope="col" className="px-3 py-2 text-right font-medium">
                   <span className="sr-only">Actions</span>
                 </th>
               ) : null}
@@ -338,18 +347,18 @@ function CompaniesTable({
                 key={c.id}
                 className={cn('transition-opacity', c.__pending && 'opacity-60')}
               >
-                <td className="px-4 py-3 font-medium">{c.name}</td>
-                <td className="hidden px-4 py-3 text-zinc-600 sm:table-cell dark:text-zinc-400">
+                <td className="px-3 py-2 font-medium">{c.name}</td>
+                <td className="hidden px-3 py-2 text-zinc-600 sm:table-cell dark:text-zinc-400">
                   {c.domain ?? '—'}
                 </td>
-                <td className="hidden px-4 py-3 text-zinc-600 md:table-cell dark:text-zinc-400">
+                <td className="hidden px-3 py-2 text-zinc-600 md:table-cell dark:text-zinc-400">
                   {c.industry ?? '—'}
                 </td>
-                <td className="hidden whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-500 sm:table-cell">
+                <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-zinc-500 sm:table-cell">
                   {dateFormatter.format(new Date(c.createdAt))}
                 </td>
                 {showActions ? (
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <td className="whitespace-nowrap px-3 py-2 text-right">
                     <RowActions
                       canEdit={canEdit}
                       canDelete={canDelete}

@@ -38,15 +38,12 @@ export function CreateDealForm({
     <form
       ref={formRef}
       action={onSubmit}
-      className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4"
       noValidate
     >
-      <div>
-        <h2 className="text-base font-semibold">Create deal</h2>
-        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-          Track an opportunity through your pipeline.
-        </p>
-      </div>
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        Track an opportunity through your pipeline.
+      </p>
 
       <Field
         name="name"

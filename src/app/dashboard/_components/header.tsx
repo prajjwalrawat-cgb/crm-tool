@@ -25,7 +25,14 @@ export function Header({ onMobileMenuOpen, tenantId }: Props) {
       </div>
 
       <div className="flex items-center gap-3">
-        <PresenceIndicator tenantId={tenantId} />
+        {/*
+          Keyed by tenantId so the avatar list resets immediately when
+          the active org changes — otherwise members from the previous
+          tenant flash on screen until the next SSE `presence.snapshot`
+          arrives. This component lives in the Header (outside the
+          shell's tenant-scoped children div) so it needs its own key.
+        */}
+        <PresenceIndicator key={tenantId} tenantId={tenantId} />
         <OrganizationSwitcher
           hidePersonal
           afterCreateOrganizationUrl="/dashboard"
