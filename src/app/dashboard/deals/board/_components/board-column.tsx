@@ -28,6 +28,11 @@ const STAGE_HEADER_STYLES: Record<DealStage, string> = {
 type Props = {
   stage: DealStage;
   cards: BoardCard[];
+  /**
+   * Total deals in this stage (after RLS). When > cards.length the
+   * board has been capped and we surface "X / Y" + a "more in list" hint.
+   */
+  totalCount: number;
   canMove: boolean;
 };
 
@@ -40,6 +45,7 @@ type Props = {
 export const BoardColumn = memo(function BoardColumn({
   stage,
   cards,
+  totalCount,
   canMove,
 }: Props) {
   // Use the column's stage as its drop id. When a card is dropped on the
@@ -78,7 +84,18 @@ export const BoardColumn = memo(function BoardColumn({
         >
           {DEAL_STAGE_LABELS[stage]}
         </span>
-        <span className="text-xs text-zinc-500">{cards.length}</span>
+        <span
+          className="text-xs text-zinc-500"
+          title={
+            totalCount > cards.length
+              ? `Showing ${cards.length} of ${totalCount}`
+              : undefined
+          }
+        >
+          {totalCount > cards.length
+            ? `${cards.length} / ${totalCount}`
+            : cards.length}
+        </span>
       </header>
 
       <div

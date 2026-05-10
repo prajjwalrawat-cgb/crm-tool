@@ -1,6 +1,7 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCompanies } from '@/lib/companies/queries';
 import { requireMembership } from '@/lib/membership';
+import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 
 import { CompaniesView } from './_components/companies-view';
 
@@ -8,7 +9,11 @@ export const metadata = {
   title: 'Companies',
 };
 
-type SearchParams = Promise<{ q?: string }>;
+type SearchParams = Promise<{
+  q?: string;
+  cursor?: string;
+  size?: string;
+}>;
 
 export default async function CompaniesPage({
   searchParams,
@@ -16,12 +21,14 @@ export default async function CompaniesPage({
   searchParams: SearchParams;
 }) {
   return await withTenantSession(async ({ tenant }) => {
-    const { q } = await searchParams;
-    const search = q?.trim() || undefined;
+    const sp = await searchParams;
+    const search = sp.q?.trim() || undefined;
+    const cursor = parseCursorParam(sp.cursor);
+    const size = parsePageSize(sp.size);
 
-    const [membership, items] = await Promise.all([
+    const [membership, page] = await Promise.all([
       requireMembership(),
-      listCompanies(tenant.id, { search }),
+      listCompanies(tenant.id, { search, cursor, size }),
     ]);
 
     return (
@@ -34,9 +41,11 @@ export default async function CompaniesPage({
         </header>
 
         <CompaniesView
-          initialItems={items}
+          initialItems={page.items}
           initialSearch={search ?? ''}
           currentRole={membership.role}
+          nextCursor={page.nextCursor}
+          pageSize={page.size}
         />
       </main>
     );

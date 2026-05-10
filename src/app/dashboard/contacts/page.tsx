@@ -2,6 +2,7 @@ import { withTenantSession } from '@/lib/auth-guard';
 import { listCompanyOptions } from '@/lib/companies/queries';
 import { listContacts } from '@/lib/contacts/queries';
 import { requireMembership } from '@/lib/membership';
+import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 
 import { ContactsView } from './_components/contacts-view';
 
@@ -9,7 +10,11 @@ export const metadata = {
   title: 'Contacts',
 };
 
-type SearchParams = Promise<{ q?: string }>;
+type SearchParams = Promise<{
+  q?: string;
+  cursor?: string;
+  size?: string;
+}>;
 
 export default async function ContactsPage({
   searchParams,
@@ -17,12 +22,14 @@ export default async function ContactsPage({
   searchParams: SearchParams;
 }) {
   return await withTenantSession(async ({ tenant }) => {
-    const { q } = await searchParams;
-    const search = q?.trim() || undefined;
+    const sp = await searchParams;
+    const search = sp.q?.trim() || undefined;
+    const cursor = parseCursorParam(sp.cursor);
+    const size = parsePageSize(sp.size);
 
-    const [membership, items, companyOptions] = await Promise.all([
+    const [membership, page, companyOptions] = await Promise.all([
       requireMembership(),
-      listContacts(tenant.id, { search }),
+      listContacts(tenant.id, { search, cursor, size }),
       listCompanyOptions(tenant.id),
     ]);
 
@@ -36,10 +43,12 @@ export default async function ContactsPage({
         </header>
 
         <ContactsView
-          initialItems={items}
+          initialItems={page.items}
           initialSearch={search ?? ''}
           companyOptions={companyOptions}
           currentRole={membership.role}
+          nextCursor={page.nextCursor}
+          pageSize={page.size}
         />
       </main>
     );

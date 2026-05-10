@@ -79,19 +79,20 @@ async function main() {
     results.push({ label, rows: r.rows, ms: r.ms });
   }
 
-  // -- /dashboard/companies — listCompanies
+  // -- /dashboard/companies — listCompanies (paginated, default size 50)
   await runQuery(
-    'companies list (deleted_at IS NULL)',
+    'companies list (paginated, size=50)',
     sql`SELECT id, name, domain, industry, created_at, updated_at, deleted_at, deleted_by
         FROM companies
         WHERE tenant_id = ${tenantId}::uuid
           AND deleted_at IS NULL
-        ORDER BY created_at DESC`,
+        ORDER BY created_at DESC, id DESC
+        LIMIT 51`,
   );
 
-  // -- /dashboard/contacts — listContacts joined with company name
+  // -- /dashboard/contacts — listContacts joined (paginated)
   await runQuery(
-    'contacts list (joined with company name)',
+    'contacts list (joined, paginated, size=50)',
     sql`SELECT c.id, c.tenant_id, c.company_id, c.first_name, c.last_name,
                c.email, c.phone, c.title, c.created_at, c.updated_at,
                c.deleted_at, c.deleted_by, co.name AS company_name
@@ -99,12 +100,13 @@ async function main() {
         LEFT JOIN companies co ON co.id = c.company_id
         WHERE c.tenant_id = ${tenantId}::uuid
           AND c.deleted_at IS NULL
-        ORDER BY c.created_at DESC`,
+        ORDER BY c.created_at DESC, c.id DESC
+        LIMIT 51`,
   );
 
-  // -- /dashboard/deals — listDeals joined with company + contact
+  // -- /dashboard/deals — listDeals joined (paginated)
   await runQuery(
-    'deals list (joined with company + contact)',
+    'deals list (joined, paginated, size=50)',
     sql`SELECT d.id, d.name, d.stage, d.amount_minor, d.currency,
                d.expected_close_date, d.closed_at, d.created_at, d.updated_at,
                co.name AS company_name,
@@ -116,19 +118,31 @@ async function main() {
         LEFT JOIN contacts  ct ON ct.id = d.contact_id
         WHERE d.tenant_id = ${tenantId}::uuid
           AND d.deleted_at IS NULL
-        ORDER BY d.created_at DESC`,
+        ORDER BY d.created_at DESC, d.id DESC
+        LIMIT 51`,
   );
 
-  // -- /dashboard/deals/board — listDealsForBoard (joins, ordered by updated_at)
+  // -- /dashboard/deals/board — capped per stage. App fires six in
+  // parallel; benchmark a single stage to capture per-query cost.
   await runQuery(
-    'deals board (joined, ordered updated_at)',
+    'deals board (one stage, capped 50)',
     sql`SELECT d.id, d.name, d.stage, d.amount_minor, d.currency,
                d.updated_at, co.name AS company_name
         FROM deals d
         LEFT JOIN companies co ON co.id = d.company_id
         WHERE d.tenant_id = ${tenantId}::uuid
           AND d.deleted_at IS NULL
-        ORDER BY d.updated_at DESC`,
+          AND d.stage = 'lead'
+        ORDER BY d.updated_at DESC, d.id DESC
+        LIMIT 50`,
+  );
+
+  await runQuery(
+    'deals board (count by stage)',
+    sql`SELECT stage, COUNT(*)::int AS n
+        FROM deals
+        WHERE tenant_id = ${tenantId}::uuid AND deleted_at IS NULL
+        GROUP BY stage`,
   );
 
   // -- /dashboard/activity — listRecentActivity (limit 50)

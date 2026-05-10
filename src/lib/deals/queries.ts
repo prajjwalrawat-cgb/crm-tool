@@ -1,9 +1,26 @@
 import 'server-only';
 
-import { and, desc, eq, ilike, isNotNull, isNull, type SQL } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  ilike,
+  isNotNull,
+  isNull,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 
 import { companies, contacts, deals, type Deal } from '@/db/schema';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
+import {
+  buildPage,
+  type Cursor,
+  DEFAULT_PAGE_SIZE,
+  type Page,
+  type PageSize,
+} from '@/lib/pagination/cursor';
+import { timeQuery } from '@/lib/pagination/timing';
 import type { DealStage } from '@/lib/deals/schema';
 
 export type DealRow = Deal & {
@@ -14,6 +31,8 @@ export type DealRow = Deal & {
 
 export type ListDealsOptions = {
   search?: string;
+  cursor?: Cursor | null;
+  size?: PageSize;
 };
 
 type RawJoinedRow = {
@@ -73,26 +92,38 @@ function shapeDealRow(r: RawJoinedRow): DealRow {
 export async function listDeals(
   tenantId: string,
   options: ListDealsOptions = {},
-): Promise<DealRow[]> {
+): Promise<Page<DealRow>> {
   const term = options.search?.trim();
+  const size = options.size ?? DEFAULT_PAGE_SIZE;
 
   const conditions: SQL[] = [
     eq(deals.tenantId, tenantId),
     isNull(deals.deletedAt),
   ];
   if (term) conditions.push(ilike(deals.name, `%${term}%`));
+  if (options.cursor) {
+    conditions.push(
+      sql`(${deals.createdAt}, ${deals.id}) < (${options.cursor.ts}::timestamptz, ${options.cursor.id}::uuid)`,
+    );
+  }
 
-  const rows = await tenantTransaction(async (tx) =>
-    tx
-      .select(DEALS_PROJECTION)
-      .from(deals)
-      .leftJoin(companies, eq(deals.companyId, companies.id))
-      .leftJoin(contacts, eq(deals.contactId, contacts.id))
-      .where(and(...conditions))
-      .orderBy(desc(deals.createdAt)),
-  );
-
-  return rows.map(shapeDealRow);
+  return await timeQuery('deals.list', async () => {
+    const rows = await tenantTransaction(async (tx) =>
+      tx
+        .select(DEALS_PROJECTION)
+        .from(deals)
+        .leftJoin(companies, eq(deals.companyId, companies.id))
+        .leftJoin(contacts, eq(deals.contactId, contacts.id))
+        .where(and(...conditions))
+        .orderBy(desc(deals.createdAt), desc(deals.id))
+        .limit(size + 1),
+    );
+    const shaped = rows.map(shapeDealRow);
+    return buildPage(shaped, size, (r) => ({
+      ts: r.createdAt.toISOString(),
+      id: r.id,
+    }));
+  });
 }
 
 export async function getDealById(
@@ -117,46 +148,136 @@ export async function getDealById(
   return rows[0] ? shapeDealRow(rows[0]) : null;
 }
 
-export async function listDeletedDeals(tenantId: string): Promise<DealRow[]> {
-  const rows = await withIncludeDeleted(async () =>
-    tenantTransaction(async (tx) =>
-      tx
-        .select(DEALS_PROJECTION)
-        .from(deals)
-        .leftJoin(companies, eq(deals.companyId, companies.id))
-        .leftJoin(contacts, eq(deals.contactId, contacts.id))
-        .where(and(eq(deals.tenantId, tenantId), isNotNull(deals.deletedAt)))
-        .orderBy(desc(deals.deletedAt)),
+export async function listDeletedDeals(
+  tenantId: string,
+  options: { cursor?: Cursor | null; size?: PageSize } = {},
+): Promise<Page<DealRow>> {
+  const size = options.size ?? DEFAULT_PAGE_SIZE;
+  return await timeQuery('deals.deleted', async () =>
+    withIncludeDeleted(async () =>
+      tenantTransaction(async (tx) => {
+        const conditions: SQL[] = [
+          eq(deals.tenantId, tenantId),
+          isNotNull(deals.deletedAt),
+        ];
+        if (options.cursor) {
+          conditions.push(
+            sql`(${deals.deletedAt}, ${deals.id}) < (${options.cursor.ts}::timestamptz, ${options.cursor.id}::uuid)`,
+          );
+        }
+        const rows = await tx
+          .select(DEALS_PROJECTION)
+          .from(deals)
+          .leftJoin(companies, eq(deals.companyId, companies.id))
+          .leftJoin(contacts, eq(deals.contactId, contacts.id))
+          .where(and(...conditions))
+          .orderBy(desc(deals.deletedAt), desc(deals.id))
+          .limit(size + 1);
+        const shaped = rows.map(shapeDealRow);
+        return buildPage(shaped, size, (r) => ({
+          ts: (r.deletedAt ?? new Date(0)).toISOString(),
+          id: r.id,
+        }));
+      }),
     ),
   );
-  return rows.map(shapeDealRow);
 }
 
+/**
+ * Per-stage row cap for the kanban board. Six columns × this many ≈
+ * the upper bound of rows the board ever fetches in a single page
+ * load. The user can drill into per-stage filters later if they need
+ * more depth; the kanban itself isn't designed for hundreds of cards
+ * per column without virtualization.
+ */
+export const BOARD_PER_STAGE_LIMIT = 50;
+
 export type DealBoard = Record<DealStage, DealRow[]>;
+export type DealBoardSummary = {
+  board: DealBoard;
+  /** Per-stage total count (after RLS) — surfaces "X+ more" in the UI. */
+  counts: Record<DealStage, number>;
+  /** True if any stage was capped. */
+  capped: boolean;
+};
 
-export async function listDealsForBoard(tenantId: string): Promise<DealBoard> {
-  const rows = await tenantTransaction(async (tx) =>
-    tx
-      .select(DEALS_PROJECTION)
-      .from(deals)
-      .leftJoin(companies, eq(deals.companyId, companies.id))
-      .leftJoin(contacts, eq(deals.contactId, contacts.id))
-      .where(and(eq(deals.tenantId, tenantId), isNull(deals.deletedAt)))
-      .orderBy(desc(deals.updatedAt)),
-  );
+/**
+ * Board snapshot. Caps at BOARD_PER_STAGE_LIMIT rows per stage by
+ * issuing one query per stage with a LIMIT, in parallel. Six small
+ * queries hit the (tenant_id, stage) index cleanly and trade trivially
+ * more round trips for an order-of-magnitude smaller result set than
+ * the old "fetch everything, group in JS" pattern. A separate cheap
+ * COUNT(*) GROUP BY stage powers the "X / Y in <stage>" badges.
+ */
+export async function listDealsForBoard(
+  tenantId: string,
+): Promise<DealBoardSummary> {
+  const STAGES: DealStage[] = [
+    'lead',
+    'qualified',
+    'proposal',
+    'negotiation',
+    'won',
+    'lost',
+  ];
+  return await timeQuery('deals.board', async () => {
+    return await tenantTransaction(async (tx) => {
+      const board: DealBoard = {
+        lead: [],
+        qualified: [],
+        proposal: [],
+        negotiation: [],
+        won: [],
+        lost: [],
+      };
+      const counts: Record<DealStage, number> = {
+        lead: 0,
+        qualified: 0,
+        proposal: 0,
+        negotiation: 0,
+        won: 0,
+        lost: 0,
+      };
 
-  const grouped: DealBoard = {
-    lead: [],
-    qualified: [],
-    proposal: [],
-    negotiation: [],
-    won: [],
-    lost: [],
-  };
-  for (const raw of rows) {
-    const row = shapeDealRow(raw);
-    const bucket = grouped[row.stage];
-    if (bucket) bucket.push(row);
-  }
-  return grouped;
+      const stageResults = await Promise.all(
+        STAGES.map(async (stage) => {
+          const rows = await tx
+            .select(DEALS_PROJECTION)
+            .from(deals)
+            .leftJoin(companies, eq(deals.companyId, companies.id))
+            .leftJoin(contacts, eq(deals.contactId, contacts.id))
+            .where(
+              and(
+                eq(deals.tenantId, tenantId),
+                eq(deals.stage, stage),
+                isNull(deals.deletedAt),
+              ),
+            )
+            .orderBy(desc(deals.updatedAt), desc(deals.id))
+            .limit(BOARD_PER_STAGE_LIMIT);
+          return { stage, rows: rows.map(shapeDealRow) };
+        }),
+      );
+      for (const { stage, rows } of stageResults) {
+        board[stage] = rows;
+      }
+
+      const totals = await tx
+        .select({
+          stage: deals.stage,
+          n: sql<number>`count(*)::int`,
+        })
+        .from(deals)
+        .where(
+          and(eq(deals.tenantId, tenantId), isNull(deals.deletedAt)),
+        )
+        .groupBy(deals.stage);
+      for (const t of totals) {
+        counts[t.stage as DealStage] = t.n;
+      }
+
+      const capped = STAGES.some((s) => counts[s] > board[s].length);
+      return { board, counts, capped };
+    });
+  });
 }

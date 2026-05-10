@@ -3,6 +3,7 @@ import { listCompanyOptions } from '@/lib/companies/queries';
 import { listContactOptions } from '@/lib/contacts/queries';
 import { listDeals } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
+import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 
 import { DealsView } from './_components/deals-view';
 import { DealViewTabs } from './_components/deal-view-tabs';
@@ -11,7 +12,11 @@ export const metadata = {
   title: 'Deals',
 };
 
-type SearchParams = Promise<{ q?: string }>;
+type SearchParams = Promise<{
+  q?: string;
+  cursor?: string;
+  size?: string;
+}>;
 
 export default async function DealsPage({
   searchParams,
@@ -19,12 +24,14 @@ export default async function DealsPage({
   searchParams: SearchParams;
 }) {
   return await withTenantSession(async ({ tenant }) => {
-    const { q } = await searchParams;
-    const search = q?.trim() || undefined;
+    const sp = await searchParams;
+    const search = sp.q?.trim() || undefined;
+    const cursor = parseCursorParam(sp.cursor);
+    const size = parsePageSize(sp.size);
 
-    const [membership, items, companyOptions, contactOptions] = await Promise.all([
+    const [membership, page, companyOptions, contactOptions] = await Promise.all([
       requireMembership(),
-      listDeals(tenant.id, { search }),
+      listDeals(tenant.id, { search, cursor, size }),
       listCompanyOptions(tenant.id),
       listContactOptions(tenant.id),
     ]);
@@ -42,11 +49,13 @@ export default async function DealsPage({
         </header>
 
         <DealsView
-          initialItems={items}
+          initialItems={page.items}
           initialSearch={search ?? ''}
           companyOptions={companyOptions}
           contactOptions={contactOptions}
           currentRole={membership.role}
+          nextCursor={page.nextCursor}
+          pageSize={page.size}
         />
       </main>
     );

@@ -14,12 +14,16 @@ export const metadata = {
 
 export default async function DashboardPage() {
   return await withTenantSession(async ({ tenant }) => {
-    const [{ userId, orgId }, user, membership, recentActivity] = await Promise.all([
+    const [{ userId, orgId }, user, membership, recentPage] = await Promise.all([
       auth(),
       currentUser(),
       ensureMembership(),
-      listRecentActivity(tenant.id, { limit: 8 }),
+      // The dashboard preview shows the most-recent 25 rows. Pagination
+      // controls are intentionally omitted on this page — full feed
+      // lives at /dashboard/activity.
+      listRecentActivity(tenant.id, { size: 25 }),
     ]);
+    const recentActivity = recentPage.items;
 
     return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">

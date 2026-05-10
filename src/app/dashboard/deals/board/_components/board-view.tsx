@@ -30,6 +30,8 @@ type LocalBoard = Record<DealStage, BoardCard[]>;
 
 type Props = {
   initialBoard: DealBoard;
+  /** Total deals per stage (after RLS); the board may render fewer if capped. */
+  stageCounts: Record<DealStage, number>;
   currentRole: MembershipRole;
   tenantId: string;
 };
@@ -131,7 +133,12 @@ function removeCard(state: LocalBoard, dealId: string): LocalBoard {
   return touched ? next : state;
 }
 
-export function BoardView({ initialBoard, currentRole, tenantId }: Props) {
+export function BoardView({
+  initialBoard,
+  stageCounts,
+  currentRole,
+  tenantId,
+}: Props) {
   const canMove = canManageDeals(currentRole);
 
   const [board, setBoard] = useState<LocalBoard>(() => initialBoard);
@@ -286,10 +293,11 @@ export function BoardView({ initialBoard, currentRole, tenantId }: Props) {
           key={stage}
           stage={stage}
           cards={board[stage]}
+          totalCount={stageCounts[stage]}
           canMove={canMove}
         />
       )),
-    [board, canMove],
+    [board, canMove, stageCounts],
   );
 
   return (

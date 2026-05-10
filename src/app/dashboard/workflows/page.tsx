@@ -1,17 +1,32 @@
 import { withTenantSession } from '@/lib/auth-guard';
+import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { listWorkflowRuns } from '@/lib/workflows/queries';
 
+import { PaginationControls } from '../_components/pagination-controls';
 import { WorkflowRunsList } from './_components/workflow-runs-list';
 
 export const metadata = {
   title: 'Workflows',
 };
 
-export default async function WorkflowsPage() {
-  return await withTenantSession(async ({ tenant }) => {
-    const rows = await listWorkflowRuns(tenant.id, { limit: 100 });
+type SearchParams = Promise<{
+  cursor?: string;
+  size?: string;
+}>;
 
-    const counts = rows.reduce(
+export default async function WorkflowsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  return await withTenantSession(async ({ tenant }) => {
+    const sp = await searchParams;
+    const cursor = parseCursorParam(sp.cursor);
+    const size = parsePageSize(sp.size);
+
+    const page = await listWorkflowRuns(tenant.id, { cursor, size });
+
+    const counts = page.items.reduce(
       (acc, r) => {
         acc[r.status as keyof typeof acc] =
           (acc[r.status as keyof typeof acc] ?? 0) + 1;
@@ -25,7 +40,8 @@ export default async function WorkflowsPage() {
         <header className="mb-6">
           <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {tenant.name} — most recent 100 workflow runs.
+            {tenant.name} — paginated by start time. Counts below reflect this
+            page only.
           </p>
         </header>
 
@@ -36,7 +52,15 @@ export default async function WorkflowsPage() {
           <Stat label="Skipped" value={counts.skipped} accent="zinc" />
         </section>
 
-        <WorkflowRunsList rows={rows} />
+        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <WorkflowRunsList rows={page.items} />
+          <PaginationControls
+            basePath="/dashboard/workflows"
+            nextCursor={page.nextCursor}
+            size={page.size}
+            visibleCount={page.items.length}
+          />
+        </div>
       </main>
     );
   });

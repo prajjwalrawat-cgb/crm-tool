@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { clerkClient } from '@clerk/nextjs/server';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
 
 import {
   type ActivityEntityType,
@@ -9,6 +9,14 @@ import {
   activityLogs,
 } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
+import {
+  buildPage,
+  type Cursor,
+  DEFAULT_PAGE_SIZE,
+  type Page,
+  type PageSize,
+} from '@/lib/pagination/cursor';
+import { timeQuery } from '@/lib/pagination/timing';
 
 export type ActorSummary = {
   id: string;
@@ -20,7 +28,7 @@ export type ActivityRow = ActivityLog & {
   actor: ActorSummary | null;
 };
 
-const DEFAULT_LIMIT = 50;
+const ENTITY_DETAIL_LIMIT = 50;
 
 async function hydrateActors(rows: ActivityLog[]): Promise<ActivityRow[]> {
   const actorIds = Array.from(
@@ -64,22 +72,45 @@ async function hydrateActors(rows: ActivityLog[]): Promise<ActivityRow[]> {
   });
 }
 
+export type ListActivityOptions = {
+  cursor?: Cursor | null;
+  size?: PageSize;
+};
+
+/**
+ * Recent activity, paginated by `(created_at desc, id)`. Activity log
+ * is high-volume (a stage move adds 1 row, regenerate-embedding adds
+ * 0–2 more) so cursor pagination matters here too. Actor hydration
+ * stays after the page is built — Clerk lookup batches actor ids so
+ * the join is a single round-trip regardless of page size.
+ */
 export async function listRecentActivity(
   tenantId: string,
-  options: { limit?: number } = {},
-): Promise<ActivityRow[]> {
-  const limit = options.limit ?? DEFAULT_LIMIT;
+  options: ListActivityOptions = {},
+): Promise<Page<ActivityRow>> {
+  const size = options.size ?? DEFAULT_PAGE_SIZE;
 
-  const rows = await tenantTransaction(async (tx) =>
-    tx
-      .select()
-      .from(activityLogs)
-      .where(eq(activityLogs.tenantId, tenantId))
-      .orderBy(desc(activityLogs.createdAt))
-      .limit(limit),
-  );
-
-  return hydrateActors(rows);
+  return await timeQuery('activity.recent', async () => {
+    const conditions: SQL[] = [eq(activityLogs.tenantId, tenantId)];
+    if (options.cursor) {
+      conditions.push(
+        sql`(${activityLogs.createdAt}, ${activityLogs.id}) < (${options.cursor.ts}::timestamptz, ${options.cursor.id}::uuid)`,
+      );
+    }
+    const rows = await tenantTransaction(async (tx) =>
+      tx
+        .select()
+        .from(activityLogs)
+        .where(and(...conditions))
+        .orderBy(desc(activityLogs.createdAt), desc(activityLogs.id))
+        .limit(size + 1),
+    );
+    const hydrated = await hydrateActors(rows);
+    return buildPage(hydrated, size, (r) => ({
+      ts: r.createdAt.toISOString(),
+      id: r.id,
+    }));
+  });
 }
 
 export async function listActivityForEntity(
@@ -88,7 +119,7 @@ export async function listActivityForEntity(
   entityId: string,
   options: { limit?: number } = {},
 ): Promise<ActivityRow[]> {
-  const limit = options.limit ?? DEFAULT_LIMIT;
+  const limit = options.limit ?? ENTITY_DETAIL_LIMIT;
 
   const rows = await tenantTransaction(async (tx) =>
     tx

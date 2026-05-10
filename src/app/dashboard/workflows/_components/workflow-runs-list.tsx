@@ -31,9 +31,8 @@ export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
           <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
             <tr>
               <th scope="col" className="px-4 py-2.5 text-left font-medium">
@@ -131,9 +130,8 @@ export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
                 </tr>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+        </tbody>
+      </table>
     </div>
   );
 }

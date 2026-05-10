@@ -12,12 +12,20 @@ export const metadata = {
 
 export default async function RecentlyDeletedPage() {
   return await withTenantSession(async ({ tenant }) => {
-    const [membership, companies, contacts, deals] = await Promise.all([
+    // Recently-deleted views read up to one cursor page each (default
+    // 50 rows per entity type). At our retention windows the table
+    // rarely accumulates more than that — if it does, the user can
+    // restore in batches and re-open the page. Skipping pagination
+    // controls here to keep the screen scannable.
+    const [membership, companiesPage, contactsPage, dealsPage] = await Promise.all([
       requireMembership(),
       listDeletedCompanies(tenant.id),
       listDeletedContacts(tenant.id),
       listDeletedDeals(tenant.id),
     ]);
+    const companies = companiesPage.items;
+    const contacts = contactsPage.items;
+    const deals = dealsPage.items;
 
     return (
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">

@@ -16,10 +16,12 @@ import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
 import { formatCurrency, toMinorUnits } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
+import type { PageSize } from '@/lib/pagination/cursor';
 import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
 import { canDeleteDeals, canManageDeals } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
+import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createDealAction,
   softDeleteDealAction,
@@ -53,12 +55,16 @@ export function DealsView({
   companyOptions,
   contactOptions,
   currentRole,
+  nextCursor,
+  pageSize,
 }: {
   initialItems: DealRow[];
   initialSearch: string;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
   currentRole: MembershipRole;
+  nextCursor: string | null;
+  pageSize: PageSize;
 }) {
   const router = useRouter();
   const canEdit = canManageDeals(currentRole);
@@ -108,12 +114,13 @@ export function DealsView({
         const params = new URLSearchParams();
         const trimmed = search.trim();
         if (trimmed) params.set('q', trimmed);
+        if (pageSize !== 50) params.set('size', String(pageSize));
         const qs = params.toString();
         router.replace(`/dashboard/deals${qs ? `?${qs}` : ''}`);
       });
     }, 250);
     return () => clearTimeout(handle);
-  }, [search, router]);
+  }, [search, router, pageSize]);
 
   function buildOptimisticDraft(formData: FormData, base?: DealRow): DealItem {
     const name = String(formData.get('name') ?? '').trim();
@@ -257,18 +264,26 @@ export function DealsView({
         {showEmpty ? (
           <EmptyState searchActive={trimmedSearch.length > 0} />
         ) : (
-          <DealsTable
-            items={optimisticItems}
-            canEdit={canEdit}
-            canDelete={canDelete}
-            onEdit={(d) => {
-              setEditError(null);
-              setEditFieldErrors({});
-              setEditingDeal(d);
-            }}
-            onDelete={handleDelete}
-            deletePending={deletePending}
-          />
+          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <DealsTable
+              items={optimisticItems}
+              canEdit={canEdit}
+              canDelete={canDelete}
+              onEdit={(d) => {
+                setEditError(null);
+                setEditFieldErrors({});
+                setEditingDeal(d);
+              }}
+              onDelete={handleDelete}
+              deletePending={deletePending}
+            />
+            <PaginationControls
+              basePath="/dashboard/deals"
+              nextCursor={nextCursor}
+              size={pageSize}
+              visibleCount={optimisticItems.length}
+            />
+          </div>
         )}
       </section>
 
@@ -321,10 +336,9 @@ function DealsTable({
 }) {
   const showActions = canEdit || canDelete;
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-          <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
             <tr>
               <th scope="col" className="px-4 py-2.5 text-left font-medium">
                 Name
@@ -412,9 +426,8 @@ function DealsTable({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+        </tbody>
+      </table>
     </div>
   );
 }

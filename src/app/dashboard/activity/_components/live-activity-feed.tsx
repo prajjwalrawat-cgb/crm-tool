@@ -4,8 +4,10 @@ import { useCallback, useState } from 'react';
 
 import { useRealtimeEvents } from '@/hooks/use-realtime-events';
 import type { ActivityRow } from '@/lib/activity/queries';
+import type { PageSize } from '@/lib/pagination/cursor';
 import type { RealtimeEvent, SerializedActivity } from '@/lib/realtime/events';
 
+import { PaginationControls } from '../../_components/pagination-controls';
 import { ActivityList } from './activity-list';
 
 /**
@@ -34,10 +36,15 @@ export function LiveActivityFeed({
   tenantId,
   initialRows,
   emptyMessage,
+  nextCursor,
+  pageSize,
 }: {
   tenantId: string;
   initialRows: ActivityRow[];
   emptyMessage?: string;
+  /** When omitted (e.g. dashboard preview), pagination controls hide. */
+  nextCursor?: string | null;
+  pageSize?: PageSize;
 }) {
   const [rows, setRows] = useState<ActivityRow[]>(initialRows);
 
@@ -57,5 +64,19 @@ export function LiveActivityFeed({
 
   useRealtimeEvents(tenantId, handleEvent);
 
-  return <ActivityList rows={rows} emptyMessage={emptyMessage} />;
+  if (typeof pageSize === 'undefined') {
+    return <ActivityList rows={rows} emptyMessage={emptyMessage} />;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <ActivityList rows={rows} emptyMessage={emptyMessage} />
+      <PaginationControls
+        basePath="/dashboard/activity"
+        nextCursor={nextCursor ?? null}
+        size={pageSize}
+        visibleCount={rows.length}
+      />
+    </div>
+  );
 }

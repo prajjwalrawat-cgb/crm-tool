@@ -11,9 +11,11 @@ import {
 } from 'react';
 
 import type { Company, MembershipRole } from '@/db/schema';
+import type { PageSize } from '@/lib/pagination/cursor';
 import { canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
+import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createCompanyAction,
   softDeleteCompanyAction,
@@ -40,10 +42,14 @@ export function CompaniesView({
   initialItems,
   initialSearch,
   currentRole,
+  nextCursor,
+  pageSize,
 }: {
   initialItems: Company[];
   initialSearch: string;
   currentRole: MembershipRole;
+  nextCursor: string | null;
+  pageSize: PageSize;
 }) {
   const router = useRouter();
   const canEdit = canManageCompanies(currentRole);
@@ -93,12 +99,16 @@ export function CompaniesView({
         const params = new URLSearchParams();
         const trimmed = search.trim();
         if (trimmed) params.set('q', trimmed);
+        // Preserve page size, but reset cursor — a cursor anchored to
+        // the previous result set is meaningless after the filter
+        // changes.
+        if (pageSize !== 50) params.set('size', String(pageSize));
         const qs = params.toString();
         router.replace(`/dashboard/companies${qs ? `?${qs}` : ''}`);
       });
     }, 250);
     return () => clearTimeout(handle);
-  }, [search, router]);
+  }, [search, router, pageSize]);
 
   function handleCreate(formData: FormData) {
     setCreateError(null);
@@ -221,18 +231,26 @@ export function CompaniesView({
         {showEmpty ? (
           <EmptyState searchActive={trimmedSearch.length > 0} />
         ) : (
-          <CompaniesTable
-            items={optimisticItems}
-            canEdit={canEdit}
-            canDelete={canDelete}
-            onEdit={(c) => {
-              setEditError(null);
-              setEditFieldErrors({});
-              setEditingCompany(c);
-            }}
-            onDelete={handleDelete}
-            deletePending={deletePending}
-          />
+          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <CompaniesTable
+              items={optimisticItems}
+              canEdit={canEdit}
+              canDelete={canDelete}
+              onEdit={(c) => {
+                setEditError(null);
+                setEditFieldErrors({});
+                setEditingCompany(c);
+              }}
+              onDelete={handleDelete}
+              deletePending={deletePending}
+            />
+            <PaginationControls
+              basePath="/dashboard/companies"
+              nextCursor={nextCursor}
+              size={pageSize}
+              visibleCount={optimisticItems.length}
+            />
+          </div>
         )}
       </section>
 
@@ -282,9 +300,8 @@ function CompaniesTable({
   const showActions = canEdit || canDelete;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
           <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
             <tr>
               <th scope="col" className="px-4 py-2.5 text-left font-medium">
@@ -344,9 +361,8 @@ function CompaniesTable({
                 ) : null}
               </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
+        </tbody>
+      </table>
     </div>
   );
 }
