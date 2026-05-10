@@ -1,7 +1,6 @@
 'use client';
 
 import { Loader2, Save, Trash2 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
 
 import type { Contact } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
@@ -36,11 +35,9 @@ export function EditContactDrawer({
   fieldErrors,
   canDelete,
 }: Props) {
-  const formRef = useRef<HTMLFormElement>(null);
-
-  useEffect(() => {
-    formRef.current?.reset();
-  }, [contact?.id]);
+  // See edit-deal-drawer.tsx for the rationale: uncontrolled inputs only
+  // pick up `defaultValue` on first mount, so we remount the form when
+  // the contact id changes via a `key` prop.
 
   return (
     <Drawer
@@ -103,7 +100,7 @@ export function EditContactDrawer({
     >
       <form
         id="edit-contact-form"
-        ref={formRef}
+        key={contact?.id ?? 'empty'}
         action={onSubmit}
         className="flex flex-col gap-4"
         noValidate

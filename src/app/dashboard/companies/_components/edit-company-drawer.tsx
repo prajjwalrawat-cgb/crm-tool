@@ -1,7 +1,6 @@
 'use client';
 
 import { Loader2, Save, Trash2 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
 
 import type { Company } from '@/db/schema';
 import { cn } from '@/lib/utils';
@@ -33,13 +32,9 @@ export function EditCompanyDrawer({
   fieldErrors,
   canDelete,
 }: Props) {
-  const formRef = useRef<HTMLFormElement>(null);
-
-  // Reset the form whenever a different record is opened so stale text
-  // from the previous edit doesn't bleed across.
-  useEffect(() => {
-    formRef.current?.reset();
-  }, [company?.id]);
+  // See edit-deal-drawer.tsx — uncontrolled inputs only pick up
+  // `defaultValue` on first mount, so we remount the form whenever
+  // company.id changes via a `key` prop on <form>.
 
   return (
     <Drawer
@@ -102,7 +97,7 @@ export function EditCompanyDrawer({
     >
       <form
         id="edit-company-form"
-        ref={formRef}
+        key={company?.id ?? 'empty'}
         action={onSubmit}
         className="flex flex-col gap-4"
         noValidate

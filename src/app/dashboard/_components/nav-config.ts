@@ -2,10 +2,12 @@ import {
   Activity,
   Briefcase,
   Building2,
+  Gauge,
   LayoutDashboard,
   Trash2,
   UserCog,
   UsersRound,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -24,6 +26,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
   { href: '/dashboard/team', label: 'Team', icon: UserCog },
   { href: '/dashboard/activity', label: 'Activity', icon: Activity },
+  { href: '/dashboard/workflows', label: 'Workflows', icon: Workflow },
+  { href: '/dashboard/ops', label: 'Operations', icon: Gauge },
   {
     href: '/dashboard/recently-deleted',
     label: 'Recently deleted',

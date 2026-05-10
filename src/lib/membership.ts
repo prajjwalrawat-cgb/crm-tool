@@ -10,6 +10,11 @@ import {
   memberships,
   tenants,
 } from '@/db/schema';
+import {
+  getTenantContext,
+  runWithTenantContext,
+  tenantTransaction,
+} from '@/lib/db-context';
 
 import { ensureTenant, getCurrentTenant } from './tenant';
 
@@ -20,11 +25,6 @@ const KNOWN_ROLES: ReadonlySet<MembershipRole> = new Set([
   'viewer',
 ]);
 
-/**
- * Translate a Clerk role string (e.g. "org:admin", "org:member") into our
- * membership_role enum. Unknown / custom roles fall back to 'member' so we
- * never crash when an org adds a custom role in the Clerk dashboard.
- */
 export function mapClerkRole(clerkRole: string | null | undefined): MembershipRole {
   if (!clerkRole) return 'member';
   const stripped = clerkRole.replace(/^org:/, '') as MembershipRole;
@@ -38,51 +38,44 @@ type UpsertMembershipInput = {
 };
 
 /**
- * Insert-or-update a membership row, keyed by (tenant_id, user_id).
- *
- * Owner protection: Clerk has no native "owner" concept (its built-ins are
- * org:admin and org:member). We mint owners ourselves on org.created. To
- * stop a routine `organizationMembership.updated` webhook from silently
- * demoting an owner to admin, we never overwrite an existing 'owner' role
- * with 'admin' — Clerk admin == our owner OR our admin.
- *
- * Race-safe via the (tenant_id, user_id) unique index.
+ * Insert-or-update a membership, with the owner-protection rule from the
+ * RBAC phase intact. Must be called inside a tenant context — RLS on
+ * memberships requires `app.tenant_id` to be set.
  */
 export async function upsertMembership(
   input: UpsertMembershipInput,
 ): Promise<Membership | null> {
-  const [existing] = await db
-    .select({ role: memberships.role })
-    .from(memberships)
-    .where(
-      and(
-        eq(memberships.tenantId, input.tenantId),
-        eq(memberships.userId, input.userId),
-      ),
-    )
-    .limit(1);
+  return await tenantTransaction(async (tx) => {
+    const [existing] = await tx
+      .select({ role: memberships.role })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.tenantId, input.tenantId),
+          eq(memberships.userId, input.userId),
+        ),
+      )
+      .limit(1);
 
-  const finalRole: MembershipRole =
-    existing?.role === 'owner' && input.role === 'admin' ? 'owner' : input.role;
+    const finalRole: MembershipRole =
+      existing?.role === 'owner' && input.role === 'admin' ? 'owner' : input.role;
 
-  const [row] = await db
-    .insert(memberships)
-    .values({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      role: finalRole,
-      status: 'active',
-    })
-    .onConflictDoUpdate({
-      target: [memberships.tenantId, memberships.userId],
-      set: {
+    const [row] = await tx
+      .insert(memberships)
+      .values({
+        tenantId: input.tenantId,
+        userId: input.userId,
         role: finalRole,
         status: 'active',
-      },
-    })
-    .returning();
+      })
+      .onConflictDoUpdate({
+        target: [memberships.tenantId, memberships.userId],
+        set: { role: finalRole, status: 'active' },
+      })
+      .returning();
 
-  return row ?? null;
+    return row ?? null;
+  });
 }
 
 type ProvisionMembershipInput = {
@@ -92,9 +85,12 @@ type ProvisionMembershipInput = {
 };
 
 /**
- * Webhook entry point. Looks up the tenant by Clerk org id, then upserts
- * the membership with the mapped role. Returns null if the tenant doesn't
- * exist yet — the caller is expected to provision the tenant first.
+ * Webhook entry point. Looks up the tenant via the (non-RLS) `tenants` table
+ * directly on `db`, then performs the membership upsert inside a tenant
+ * context — caller is expected to have entered `runWithSystemContext`
+ * already, but we tolerate either by checking and self-establishing if
+ * absent. The self-establish path is needed because `upsertTenantFromOrg`
+ * (which runs before this) doesn't set context.
  */
 export async function upsertMembershipFromClerk(
   input: ProvisionMembershipInput,
@@ -104,19 +100,27 @@ export async function upsertMembershipFromClerk(
     .from(tenants)
     .where(eq(tenants.clerkOrgId, input.clerkOrgId))
     .limit(1);
-
   if (!tenant) return null;
 
-  return await upsertMembership({
-    tenantId: tenant.id,
-    userId: input.clerkUserId,
-    role: mapClerkRole(input.clerkRole),
-  });
+  const role = mapClerkRole(input.clerkRole);
+
+  const run = () =>
+    upsertMembership({
+      tenantId: tenant.id,
+      userId: input.clerkUserId,
+      role,
+    });
+
+  if (getTenantContext()) return await run();
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: input.clerkUserId },
+    run,
+  );
 }
 
 /**
- * Webhook entry point for organizationMembership.deleted. No-op if the
- * tenant or membership row is already gone.
+ * Webhook entry point for `organizationMembership.deleted`. Same context-or-
+ * self-establish dance as upsertMembershipFromClerk.
  */
 export async function removeMembershipFromClerk(input: {
   clerkOrgId: string;
@@ -127,21 +131,36 @@ export async function removeMembershipFromClerk(input: {
     .from(tenants)
     .where(eq(tenants.clerkOrgId, input.clerkOrgId))
     .limit(1);
-
   if (!tenant) return;
 
-  await db
-    .delete(memberships)
-    .where(
-      and(
-        eq(memberships.tenantId, tenant.id),
-        eq(memberships.userId, input.clerkUserId),
-      ),
-    );
+  const run = async () => {
+    await tenantTransaction(async (tx) => {
+      await tx
+        .delete(memberships)
+        .where(
+          and(
+            eq(memberships.tenantId, tenant.id),
+            eq(memberships.userId, input.clerkUserId),
+          ),
+        );
+    });
+  };
+
+  if (getTenantContext()) {
+    await run();
+    return;
+  }
+  await runWithTenantContext(
+    { tenantId: tenant.id, userId: input.clerkUserId },
+    run,
+  );
 }
 
 /**
- * Returns the active user's membership row in the active tenant.
+ * Reads the active user's membership row in the active tenant. Used by
+ * permission gates and pages. Self-establishes context if not already in
+ * one — required because callers (checkPermission, layouts) may invoke
+ * this before any wrapper has set the GUCs.
  */
 export async function getCurrentMembership(): Promise<Membership | null> {
   const { userId } = await auth();
@@ -150,24 +169,25 @@ export async function getCurrentMembership(): Promise<Membership | null> {
   const tenant = await getCurrentTenant();
   if (!tenant) return null;
 
-  const [row] = await db
-    .select()
-    .from(memberships)
-    .where(
-      and(
-        eq(memberships.tenantId, tenant.id),
-        eq(memberships.userId, userId),
-      ),
-    )
-    .limit(1);
+  const run = async () =>
+    await tenantTransaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.tenantId, tenant.id),
+            eq(memberships.userId, userId),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
 
-  return row ?? null;
+  if (getTenantContext()) return await run();
+  return await runWithTenantContext({ tenantId: tenant.id, userId }, run);
 }
 
-/**
- * Asserts an active membership exists. Use in protected routes after the
- * middleware has gated on userId + orgId.
- */
 export async function requireMembership(): Promise<Membership> {
   const m = await getCurrentMembership();
   if (!m) {
@@ -178,11 +198,6 @@ export async function requireMembership(): Promise<Membership> {
   return m;
 }
 
-/**
- * Read-or-lazily-provision the current membership. If the membership webhook
- * hasn't fired yet, we backfill from `auth().orgRole` — and if the user is
- * the org's creator (per Clerk), they're minted as 'owner' instead of 'admin'.
- */
 export async function ensureMembership(): Promise<Membership | null> {
   const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) return null;
@@ -193,21 +208,17 @@ export async function ensureMembership(): Promise<Membership | null> {
   const tenant = await ensureTenant();
   if (!tenant) return null;
 
-  // Promote the org creator to 'owner'. Without this branch, the first user
-  // would always come back as 'admin' (Clerk's default for the creator) and
-  // canManageRoles would be unreachable.
   const client = await clerkClient();
   const org = await client.organizations.getOrganization({ organizationId: orgId });
   const isCreator = org.createdBy === userId;
 
-  return await upsertMembership({
-    tenantId: tenant.id,
-    userId,
-    role: isCreator ? 'owner' : mapClerkRole(orgRole),
-  });
-}
+  const role: MembershipRole = isCreator ? 'owner' : mapClerkRole(orgRole);
 
-/* -------- role helpers (kept here for ergonomic import; logic in rbac.ts) -------- */
+  const run = () => upsertMembership({ tenantId: tenant.id, userId, role });
+
+  if (getTenantContext()) return await run();
+  return await runWithTenantContext({ tenantId: tenant.id, userId }, run);
+}
 
 type RoleBearing = Pick<Membership, 'role'>;
 

@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "inngest:dev": "npx inngest-cli@latest dev -u http://localhost:3001/api/inngest --no-discovery",
+    "selftest": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-lifecycle.ts && tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-ai-and-observability.ts && tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-workflows.ts",
+    "seed:stress": "tsx scripts/seed-stress-data.ts",
+    "bench": "tsx scripts/benchmark-queries.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
@@ -30,6 +34,7 @@
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
     "next-themes": "^0.4.6",
+    "openai": "^6.37.0",
     "pgvector": "^0.2.1",
     "postgres": "^3.4.9",
     "react": "19.2.4",

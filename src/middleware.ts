@@ -5,6 +5,9 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/api/webhooks/(.*)',
+  // Inngest verifies its requests via signed headers (svix-style). Auth
+  // here is the wrong layer.
+  '/api/inngest(.*)',
 ]);
 
 const isOrgFreeRoute = createRouteMatcher(['/select-org(.*)']);

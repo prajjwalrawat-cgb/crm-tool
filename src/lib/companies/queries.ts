@@ -2,23 +2,22 @@ import 'server-only';
 
 import { and, asc, desc, eq, ilike, isNotNull, isNull } from 'drizzle-orm';
 
-import { db } from '@/db';
 import { companies, type Company } from '@/db/schema';
+import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
 
 export type CompanyOption = {
   id: string;
   name: string;
 };
 
-/**
- * Lightweight (id, name) projection of a tenant's *active* companies, A-Z.
- */
 export async function listCompanyOptions(tenantId: string): Promise<CompanyOption[]> {
-  return await db
-    .select({ id: companies.id, name: companies.name })
-    .from(companies)
-    .where(and(eq(companies.tenantId, tenantId), isNull(companies.deletedAt)))
-    .orderBy(asc(companies.name));
+  return await tenantTransaction(async (tx) =>
+    tx
+      .select({ id: companies.id, name: companies.name })
+      .from(companies)
+      .where(and(eq(companies.tenantId, tenantId), isNull(companies.deletedAt)))
+      .orderBy(asc(companies.name)),
+  );
 }
 
 export type ListCompaniesOptions = {
@@ -26,8 +25,11 @@ export type ListCompaniesOptions = {
 };
 
 /**
- * List active companies for a tenant, newest first. Soft-deleted rows are
- * always excluded — the recently-deleted page uses listDeletedCompanies.
+ * Active companies for a tenant. The explicit `WHERE tenant_id = ?` is
+ * defense in depth — RLS already filters cross-tenant rows — and lets the
+ * planner pick the (tenant_id, name) composite index. The `isNull(deletedAt)`
+ * predicate is similarly redundant under the default RLS policy but kept
+ * for the same reason.
  */
 export async function listCompanies(
   tenantId: string,
@@ -40,45 +42,50 @@ export async function listCompanies(
   ];
   if (term) conditions.push(ilike(companies.name, `%${term}%`));
 
-  return await db
-    .select()
-    .from(companies)
-    .where(and(...conditions))
-    .orderBy(desc(companies.createdAt));
+  return await tenantTransaction(async (tx) =>
+    tx
+      .select()
+      .from(companies)
+      .where(and(...conditions))
+      .orderBy(desc(companies.createdAt)),
+  );
 }
 
-/**
- * Single-record fetch, soft-delete-aware. Returns null if the row is missing,
- * deleted, or belongs to a different tenant — the same shape we want for an
- * edit drawer that's been opened with a stale id.
- */
 export async function getCompanyById(
   tenantId: string,
   id: string,
 ): Promise<Company | null> {
-  const [row] = await db
-    .select()
-    .from(companies)
-    .where(
-      and(
-        eq(companies.tenantId, tenantId),
-        eq(companies.id, id),
-        isNull(companies.deletedAt),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select()
+      .from(companies)
+      .where(
+        and(
+          eq(companies.tenantId, tenantId),
+          eq(companies.id, id),
+          isNull(companies.deletedAt),
+        ),
+      )
+      .limit(1),
+  );
+  return rows[0] ?? null;
 }
 
 /**
- * Soft-deleted companies for the recently-deleted page. Newest deletions first.
+ * Soft-deleted companies. Surfaces only inside `withIncludeDeleted(...)`,
+ * which sets the `app.include_deleted` GUC so the SELECT policy lets these
+ * rows through.
  */
 export async function listDeletedCompanies(tenantId: string): Promise<Company[]> {
-  return await db
-    .select()
-    .from(companies)
-    .where(
-      and(eq(companies.tenantId, tenantId), isNotNull(companies.deletedAt)),
-    )
-    .orderBy(desc(companies.deletedAt));
+  return await withIncludeDeleted(async () =>
+    tenantTransaction(async (tx) =>
+      tx
+        .select()
+        .from(companies)
+        .where(
+          and(eq(companies.tenantId, tenantId), isNotNull(companies.deletedAt)),
+        )
+        .orderBy(desc(companies.deletedAt)),
+    ),
+  );
 }

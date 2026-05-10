@@ -6,18 +6,15 @@ import {
   type ActivityEntityType,
   activityLogs,
 } from '@/db/schema';
+import { tenantTransaction } from '@/lib/db-context';
+import { serializeActivity } from '@/lib/realtime/payloads';
+import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
-/**
- * Drizzle's `db.transaction` callback receives a typed transaction handle.
- * We accept either the root `db` or that handle so callers can compose the
- * activity write into the same transaction as their mutation, getting
- * atomic "mutation + log" semantics for free.
- */
-export type ActivityExecutor = Pick<typeof db, 'insert'>;
+type DrizzleTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type ActivityExecutor = typeof db | DrizzleTx;
 
 export type RecordActivityInput = {
   tenantId: string;
-  /** Clerk user id of the actor. Pass `null` only for system-generated events. */
   actorUserId: string | null;
   entityType: ActivityEntityType;
   entityId: string;
@@ -26,22 +23,49 @@ export type RecordActivityInput = {
 };
 
 /**
- * Insert a single activity_logs row. Always called inside the same
- * transaction as the mutation that produced it; if you can't (e.g. the
- * mutation is a Clerk SDK call that we can't tx-wrap), call it
- * immediately after on the bare `db` and accept the small at-most-once
- * gap.
+ * Append an activity_logs row AND publish a realtime `activity.recorded`
+ * event in the same transaction. Either both ship or neither — Postgres
+ * holds NOTIFY until COMMIT and discards on ROLLBACK, so the audit trail
+ * and the live feed stay in lockstep.
  */
 export async function recordActivity(
   executor: ActivityExecutor,
   input: RecordActivityInput,
 ): Promise<void> {
-  await executor.insert(activityLogs).values({
+  if (executor === db) {
+    await tenantTransaction(async (tx) => {
+      await writeActivityAndPublish(tx, input);
+    });
+    return;
+  }
+  // The `=== db` check narrowed structurally but TS can't infer the
+  // remaining branch as DrizzleTx because the two types overlap by shape
+  // (both expose insert/select/etc.). Cast: at runtime the only other
+  // value an action ever passes is a tx handle.
+  await writeActivityAndPublish(executor as DrizzleTx, input);
+}
+
+async function writeActivityAndPublish(
+  tx: DrizzleTx,
+  input: RecordActivityInput,
+): Promise<void> {
+  const [row] = await tx
+    .insert(activityLogs)
+    .values({
+      tenantId: input.tenantId,
+      actorUserId: input.actorUserId,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      action: input.action,
+      metadata: input.metadata ?? {},
+    })
+    .returning();
+
+  if (!row) return;
+
+  await publishRealtimeEvent(tx, {
+    type: 'activity.recorded',
     tenantId: input.tenantId,
-    actorUserId: input.actorUserId,
-    entityType: input.entityType,
-    entityId: input.entityId,
-    action: input.action,
-    metadata: input.metadata ?? {},
+    entry: serializeActivity(row),
   });
 }

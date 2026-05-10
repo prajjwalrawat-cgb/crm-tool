@@ -22,15 +22,22 @@ const PERMISSIONS = {
 
   manageCompanies: ['owner', 'admin', 'member'],
   deleteCompanies: ['owner', 'admin'],
-  restoreCompanies: ['owner'],
+  // Restore mirrors delete: anyone authorized to soft-delete may
+  // recover their own (or a peer's) action. Without this, admins
+  // who deleted a row by mistake cannot recover it themselves.
+  restoreCompanies: ['owner', 'admin'],
+  // Permanent delete is destructive and irreversible — owner only.
+  hardDeleteCompanies: ['owner'],
 
   manageContacts: ['owner', 'admin', 'member'],
   deleteContacts: ['owner', 'admin'],
-  restoreContacts: ['owner'],
+  restoreContacts: ['owner', 'admin'],
+  hardDeleteContacts: ['owner'],
 
   manageDeals: ['owner', 'admin', 'member'],
   deleteDeals: ['owner', 'admin'],
-  restoreDeals: ['owner'],
+  restoreDeals: ['owner', 'admin'],
+  hardDeleteDeals: ['owner'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -72,11 +79,22 @@ export const canManageDeals = (role: RoleArg) => can(role, 'manageDeals');
 export const canDeleteDeals = (role: RoleArg) => can(role, 'deleteDeals');
 export const canRestoreDeals = (role: RoleArg) => can(role, 'restoreDeals');
 
+export const canHardDeleteCompanies = (role: RoleArg) =>
+  can(role, 'hardDeleteCompanies');
+export const canHardDeleteContacts = (role: RoleArg) =>
+  can(role, 'hardDeleteContacts');
+export const canHardDeleteDeals = (role: RoleArg) => can(role, 'hardDeleteDeals');
+
 /** Composite helpers used by the recently-deleted page. */
 export const canRestoreAnything = (role: RoleArg) =>
   canRestoreCompanies(role) ||
   canRestoreContacts(role) ||
   canRestoreDeals(role);
+
+export const canHardDeleteAnything = (role: RoleArg) =>
+  canHardDeleteCompanies(role) ||
+  canHardDeleteContacts(role) ||
+  canHardDeleteDeals(role);
 
 /* -------- ranking helper for UI sort/compare -------- */
 

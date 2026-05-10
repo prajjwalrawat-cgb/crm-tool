@@ -98,6 +98,20 @@ export function formatActivity(row: ActivityRow): FormattedActivity {
           : 'a member';
       return { sentence: `${actor} removed ${target}` };
     }
+    case 'automation_note': {
+      // Workflows write a structured payload; the message is human-ready
+      // and the actor display ("Someone") is replaced with "Automation".
+      const message =
+        typeof meta.message === 'string'
+          ? meta.message
+          : `Automation event on ${entityLabel}`;
+      const workflow =
+        typeof meta.workflow === 'string' ? meta.workflow : undefined;
+      return {
+        sentence: `Automation: ${message}`,
+        detail: workflow ? `Workflow: ${workflow}` : undefined,
+      };
+    }
     case 'role_changed': {
       const target = typeof meta.targetName === 'string'
         ? meta.targetName

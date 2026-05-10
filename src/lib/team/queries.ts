@@ -3,8 +3,8 @@ import 'server-only';
 import { clerkClient } from '@clerk/nextjs/server';
 import { asc, eq } from 'drizzle-orm';
 
-import { db } from '@/db';
 import { type Membership, memberships } from '@/db/schema';
+import { tenantTransaction } from '@/lib/db-context';
 
 export type TeamMemberRow = Membership & {
   email: string | null;
@@ -16,23 +16,18 @@ export type TeamMemberRow = Membership & {
 export type PendingInvitationRow = {
   id: string;
   emailAddress: string;
-  /** Raw Clerk role string, e.g. "org:admin" / "org:member". */
   role: string;
   createdAt: Date;
 };
 
-/**
- * Materialize the membership rows for a tenant alongside the matching
- * Clerk user records (email, name, image). One DB query + one batched
- * Clerk call regardless of N — `users.getUserList({ userId: [...] })`
- * accepts up to 500 ids per request, which comfortably covers a tenant.
- */
 export async function listTeamMembers(tenantId: string): Promise<TeamMemberRow[]> {
-  const rows = await db
-    .select()
-    .from(memberships)
-    .where(eq(memberships.tenantId, tenantId))
-    .orderBy(asc(memberships.createdAt));
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select()
+      .from(memberships)
+      .where(eq(memberships.tenantId, tenantId))
+      .orderBy(asc(memberships.createdAt)),
+  );
 
   if (rows.length === 0) return [];
 
@@ -56,11 +51,6 @@ export async function listTeamMembers(tenantId: string): Promise<TeamMemberRow[]
   });
 }
 
-/**
- * Pending invitations for an org, fetched live from Clerk. We don't mirror
- * these in our DB — invitations have no user_id until accepted, so the
- * memberships table can't represent them naturally without a side column.
- */
 export async function listPendingInvitations(
   clerkOrgId: string,
 ): Promise<PendingInvitationRow[]> {

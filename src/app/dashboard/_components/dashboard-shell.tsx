@@ -3,10 +3,21 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 
+import type { AIMode } from '@/lib/ai/config';
+
+import { CopilotPanel } from './copilot-panel';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
 
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  children,
+  tenantId,
+  aiMode,
+}: {
+  children: ReactNode;
+  tenantId: string;
+  aiMode: AIMode;
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
 
@@ -32,9 +43,13 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         onMobileClose={() => setMobileOpen(false)}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header onMobileMenuOpen={() => setMobileOpen(true)} />
+        <Header
+          onMobileMenuOpen={() => setMobileOpen(true)}
+          tenantId={tenantId}
+        />
         <div className="flex-1">{children}</div>
       </div>
+      <CopilotPanel aiMode={aiMode} />
     </div>
   );
 }

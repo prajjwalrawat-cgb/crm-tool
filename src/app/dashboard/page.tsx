@@ -3,26 +3,25 @@ import { Building2, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 
 import { listRecentActivity } from '@/lib/activity/queries';
+import { withTenantSession } from '@/lib/auth-guard';
 import { ensureMembership } from '@/lib/membership';
-import { requireTenant } from '@/lib/tenant';
 
-import { ActivityList } from './activity/_components/activity-list';
+import { LiveActivityFeed } from './activity/_components/live-activity-feed';
 
 export const metadata = {
   title: 'Dashboard',
 };
 
 export default async function DashboardPage() {
-  const [{ userId, orgId }, user, tenant, membership] = await Promise.all([
-    auth(),
-    currentUser(),
-    requireTenant(),
-    ensureMembership(),
-  ]);
+  return await withTenantSession(async ({ tenant }) => {
+    const [{ userId, orgId }, user, membership, recentActivity] = await Promise.all([
+      auth(),
+      currentUser(),
+      ensureMembership(),
+      listRecentActivity(tenant.id, { limit: 8 }),
+    ]);
 
-  const recentActivity = await listRecentActivity(tenant.id, { limit: 8 });
-
-  return (
+    return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">
@@ -59,8 +58,9 @@ export default async function DashboardPage() {
             View all
           </Link>
         </div>
-        <ActivityList
-          rows={recentActivity}
+        <LiveActivityFeed
+          tenantId={tenant.id}
+          initialRows={recentActivity}
           emptyMessage="Nothing here yet — activity will appear once you start adding records."
         />
       </section>
@@ -71,7 +71,8 @@ export default async function DashboardPage() {
         <DebugCard label="Org ID" value={orgId ?? '?'} mono />
       </section>
     </main>
-  );
+    );
+  });
 }
 
 function QuickLink({

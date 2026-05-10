@@ -29,6 +29,13 @@ export const ACTIVITY_ACTIONS = [
   'invitation_revoked',
   'member_removed',
   'role_changed',
+  /**
+   * System-driven activity entry produced by an Inngest workflow. The row's
+   * `actor_user_id` is null (sentinel `system`) and `metadata.message` carries
+   * the human-readable text. Used for things like "Deal Acme Corp marked won
+   * — schedule a follow-up reminder for May 15".
+   */
+  'automation_note',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

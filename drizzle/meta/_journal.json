@@ -22,6 +22,41 @@
       "when": 1778141399766,
       "tag": "0002_soft_delete_and_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778227200000,
+      "tag": "0003_rls_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778230800000,
+      "tag": "0004_rls_enforcement_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778234400000,
+      "tag": "0005_grant_app_user_to_postgres",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778234400001,
+      "tag": "0006_workflow_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778234400002,
+      "tag": "0007_pgvector_and_ai",
+      "breakpoints": true
     }
   ]
 }

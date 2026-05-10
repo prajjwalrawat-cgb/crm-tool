@@ -3,13 +3,16 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { listActivityForEntity } from '@/lib/activity/queries';
+import { getAIMode } from '@/lib/ai/config';
+import { getCachedSummary } from '@/lib/ai/summary-queries';
+import { withTenantSession } from '@/lib/auth-guard';
 import { formatCurrency } from '@/lib/deals/currency';
 import { getDealById } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
-import { requireTenant } from '@/lib/tenant';
 
 import { ActivityList } from '../../activity/_components/activity-list';
 import { StageBadge } from '../_components/stage-badge';
+import { SummaryCard } from './_components/summary-card';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -24,17 +27,18 @@ export const metadata = {
 type Params = Promise<{ id: string }>;
 
 export default async function DealDetailPage({ params }: { params: Params }) {
-  const tenant = await requireTenant();
-  const { id } = await params;
+  return await withTenantSession(async ({ tenant }) => {
+    const { id } = await params;
 
-  const deal = await getDealById(tenant.id, id);
-  if (!deal) notFound();
+    const deal = await getDealById(tenant.id, id);
+    if (!deal) notFound();
 
-  const activity = await listActivityForEntity(tenant.id, 'deal', deal.id, {
-    limit: 50,
-  });
+    const [activity, cachedSummary] = await Promise.all([
+      listActivityForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
+      getCachedSummary(tenant.id, 'deal', deal.id),
+    ]);
 
-  return (
+    return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
       <Link
         href="/dashboard/deals"
@@ -90,16 +94,25 @@ export default async function DealDetailPage({ params }: { params: Params }) {
           ) : null}
         </aside>
 
-        <section>
-          <h2 className="mb-3 text-base font-semibold">Timeline</h2>
-          <ActivityList
-            rows={activity}
-            emptyMessage="No activity recorded for this deal yet."
+        <section className="space-y-6">
+          <SummaryCard
+            dealId={deal.id}
+            initialSummary={cachedSummary?.summary ?? null}
+            initialGeneratedAt={cachedSummary?.generatedAt.toISOString() ?? null}
+            aiMode={getAIMode()}
           />
+          <div>
+            <h2 className="mb-3 text-base font-semibold">Timeline</h2>
+            <ActivityList
+              rows={activity}
+              emptyMessage="No activity recorded for this deal yet."
+            />
+          </div>
         </section>
       </div>
     </main>
-  );
+    );
+  });
 }
 
 function DetailCard({

@@ -1,7 +1,6 @@
 'use client';
 
 import { Loader2, Save, Trash2 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
 
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
@@ -41,11 +40,12 @@ export function EditDealDrawer({
   fieldErrors,
   canDelete,
 }: Props) {
-  const formRef = useRef<HTMLFormElement>(null);
-
-  useEffect(() => {
-    formRef.current?.reset();
-  }, [deal?.id]);
+  // Inputs use `defaultValue` (uncontrolled). React doesn't update the DOM
+  // `defaultValue` after first mount — so when this drawer first renders
+  // with `deal=null` and later gets `deal=<row>`, the inputs keep their
+  // initial empty values. We remount the entire form each time the deal
+  // id changes by passing a `key={deal?.id}` to the <form>; the new mount
+  // picks up the row's values as fresh defaults.
 
   const initialAmount = deal
     ? fromMinorUnits(deal.amountMinor, deal.currency).toString()
@@ -115,7 +115,7 @@ export function EditDealDrawer({
     >
       <form
         id="edit-deal-form"
-        ref={formRef}
+        key={deal?.id ?? 'empty'}
         action={onSubmit}
         className="flex flex-col gap-4"
         noValidate

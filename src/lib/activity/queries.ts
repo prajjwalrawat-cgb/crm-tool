@@ -3,12 +3,12 @@ import 'server-only';
 import { clerkClient } from '@clerk/nextjs/server';
 import { and, desc, eq } from 'drizzle-orm';
 
-import { db } from '@/db';
 import {
   type ActivityEntityType,
   type ActivityLog,
   activityLogs,
 } from '@/db/schema';
+import { tenantTransaction } from '@/lib/db-context';
 
 export type ActorSummary = {
   id: string;
@@ -64,30 +64,24 @@ async function hydrateActors(rows: ActivityLog[]): Promise<ActivityRow[]> {
   });
 }
 
-/**
- * Tenant-wide activity feed, newest first. Hydrates actor display names
- * and avatars in a single batched Clerk call.
- */
 export async function listRecentActivity(
   tenantId: string,
   options: { limit?: number } = {},
 ): Promise<ActivityRow[]> {
   const limit = options.limit ?? DEFAULT_LIMIT;
 
-  const rows = await db
-    .select()
-    .from(activityLogs)
-    .where(eq(activityLogs.tenantId, tenantId))
-    .orderBy(desc(activityLogs.createdAt))
-    .limit(limit);
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select()
+      .from(activityLogs)
+      .where(eq(activityLogs.tenantId, tenantId))
+      .orderBy(desc(activityLogs.createdAt))
+      .limit(limit),
+  );
 
   return hydrateActors(rows);
 }
 
-/**
- * Per-record timeline (e.g. all events on a single deal). Backed by the
- * `activity_logs_entity_idx` composite index.
- */
 export async function listActivityForEntity(
   tenantId: string,
   entityType: ActivityEntityType,
@@ -96,18 +90,20 @@ export async function listActivityForEntity(
 ): Promise<ActivityRow[]> {
   const limit = options.limit ?? DEFAULT_LIMIT;
 
-  const rows = await db
-    .select()
-    .from(activityLogs)
-    .where(
-      and(
-        eq(activityLogs.tenantId, tenantId),
-        eq(activityLogs.entityType, entityType),
-        eq(activityLogs.entityId, entityId),
-      ),
-    )
-    .orderBy(desc(activityLogs.createdAt))
-    .limit(limit);
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select()
+      .from(activityLogs)
+      .where(
+        and(
+          eq(activityLogs.tenantId, tenantId),
+          eq(activityLogs.entityType, entityType),
+          eq(activityLogs.entityId, entityId),
+        ),
+      )
+      .orderBy(desc(activityLogs.createdAt))
+      .limit(limit),
+  );
 
   return hydrateActors(rows);
 }

@@ -15,9 +15,11 @@ import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 
 import type { MembershipRole } from '@/db/schema';
+import { useRealtimeEvents } from '@/hooks/use-realtime-events';
 import type { DealBoard } from '@/lib/deals/queries';
 import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
 import { canManageDeals } from '@/lib/rbac';
+import { deserializeDeal } from '@/lib/realtime/events';
 import { cn } from '@/lib/utils';
 
 import { updateDealStageAction } from '../../actions';
@@ -29,6 +31,7 @@ type LocalBoard = Record<DealStage, BoardCard[]>;
 type Props = {
   initialBoard: DealBoard;
   currentRole: MembershipRole;
+  tenantId: string;
 };
 
 function isStage(value: string): value is DealStage {
@@ -75,7 +78,60 @@ function clearPendingForCard(board: LocalBoard, dealId: string): LocalBoard {
   return board;
 }
 
-export function BoardView({ initialBoard, currentRole }: Props) {
+/**
+ * Apply an inbound (remote) deal event to the local board. Idempotent —
+ * an event for a card already in its target stage with the same fields
+ * produces an array reference change but no visible difference. Designed
+ * to be safe under duplicate delivery.
+ */
+function reconcileCard(state: LocalBoard, next: BoardCard): LocalBoard {
+  let currentStage: DealStage | null = null;
+  for (const stage of DEAL_STAGES) {
+    if (state[stage].some((c) => c.id === next.id)) {
+      currentStage = stage;
+      break;
+    }
+  }
+
+  if (!currentStage) {
+    // Card isn't on the board yet (created or restored elsewhere). Add to
+    // its target column.
+    return {
+      ...state,
+      [next.stage]: [next, ...state[next.stage]],
+    };
+  }
+
+  if (currentStage === next.stage) {
+    return {
+      ...state,
+      [currentStage]: state[currentStage].map((c) =>
+        c.id === next.id ? next : c,
+      ),
+    };
+  }
+
+  // Cross-column move (remote drag, or stage_changed via update).
+  return {
+    ...state,
+    [currentStage]: state[currentStage].filter((c) => c.id !== next.id),
+    [next.stage]: [next, ...state[next.stage]],
+  };
+}
+
+function removeCard(state: LocalBoard, dealId: string): LocalBoard {
+  let touched = false;
+  const next: LocalBoard = { ...state };
+  for (const stage of DEAL_STAGES) {
+    if (next[stage].some((c) => c.id === dealId)) {
+      next[stage] = next[stage].filter((c) => c.id !== dealId);
+      touched = true;
+    }
+  }
+  return touched ? next : state;
+}
+
+export function BoardView({ initialBoard, currentRole, tenantId }: Props) {
   const canMove = canManageDeals(currentRole);
 
   const [board, setBoard] = useState<LocalBoard>(() => initialBoard);
@@ -112,6 +168,48 @@ export function BoardView({ initialBoard, currentRole }: Props) {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
+
+  /**
+   * Realtime subscription. Inbound deal events from this tenant's channel
+   * are reconciled into the local board. Idempotent reducers mean our own
+   * actions' echoes (which arrive on this same connection) don't duplicate
+   * — they no-op against the optimistic state we already hold.
+   */
+  const handleRealtime = useCallback(
+    (event: import('@/lib/realtime/events').RealtimeEvent) => {
+      switch (event.type) {
+        case 'deal.created':
+        case 'deal.updated':
+        case 'deal.stage_changed':
+        case 'deal.restored': {
+          const card: BoardCard = {
+            ...deserializeDeal(event.deal),
+            __pending: false,
+          };
+          setBoard((s) => reconcileCard(s, card));
+          lastKnownGoodRef.current = reconcileCard(
+            lastKnownGoodRef.current,
+            card,
+          );
+          break;
+        }
+        case 'deal.deleted': {
+          setBoard((s) => removeCard(s, event.dealId));
+          lastKnownGoodRef.current = removeCard(
+            lastKnownGoodRef.current,
+            event.dealId,
+          );
+          break;
+        }
+        default:
+          // Ignore non-deal events on the board view.
+          break;
+      }
+    },
+    [],
+  );
+
+  useRealtimeEvents(tenantId, handleRealtime);
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {

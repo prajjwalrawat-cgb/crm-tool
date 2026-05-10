@@ -1,7 +1,10 @@
 import 'server-only';
 
+import { auth } from '@clerk/nextjs/server';
+
 import type { Membership, Tenant } from '@/db/schema';
 
+import { runWithTenantContext } from './db-context';
 import { requireMembership } from './membership';
 import { can, type Permission } from './rbac';
 import { requireTenant } from './tenant';
@@ -37,6 +40,30 @@ export async function requirePermission(permission: Permission): Promise<{
     throw new PermissionDeniedError(permission, membership.role);
   }
   return { tenant, membership };
+}
+
+/**
+ * Session-level helper for page server components. Looks up the active
+ * tenant + Clerk userId, then runs `fn` inside a tenant context so any
+ * RLS-protected query inside (listCompanies, requireMembership, etc.) sees
+ * the right `app.tenant_id` GUC.
+ *
+ * This is the recommended entry point for any page that fetches data —
+ * cleaner than the page calling `runWithTenantContext` itself, and centralizes
+ * the auth() + requireTenant() handshake.
+ */
+export async function withTenantSession<T>(
+  fn: (ctx: { tenant: Tenant; userId: string }) => Promise<T>,
+): Promise<T> {
+  const tenant = await requireTenant();
+  const { userId } = await auth();
+  if (!userId) {
+    throw new Error('No active user session.');
+  }
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId },
+    () => fn({ tenant, userId }),
+  );
 }
 
 export type AuthorizedResult =
