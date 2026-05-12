@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
+import type { Notification } from '@/db/schema';
 import type { AIMode } from '@/lib/ai/config';
 
 import { CommandPalette } from './command-palette';
@@ -15,10 +16,14 @@ const SIDEBAR_COLLAPSED_KEY = 'crm.sidebar.collapsed';
 export function DashboardShell({
   children,
   tenantId,
+  currentUserId,
+  initialNotifications,
   aiMode,
 }: {
   children: ReactNode;
   tenantId: string;
+  currentUserId: string;
+  initialNotifications: Notification[];
   aiMode: AIMode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -101,6 +106,8 @@ export function DashboardShell({
           onMobileMenuOpen={() => setMobileOpen(true)}
           onOpenPalette={() => setPaletteOpen(true)}
           tenantId={tenantId}
+          currentUserId={currentUserId}
+          initialNotifications={initialNotifications}
         />
         {/*
           Tenant-scoped invalidation boundary. When the active tenant

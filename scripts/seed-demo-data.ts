@@ -303,10 +303,10 @@ async function main() {
             AND metadata->>'demoSeed' = 'true'`,
     );
 
-    // Tasks + notes are direct rows (no creation-log indirection
-    // needed — both tables carry tenant_id we can scope to).
-    // Tasks: those created by seed actors *or* created by the
-    // demo-seed identity. Notes: same logic via author_user_id.
+    // Tasks + notes + notifications are direct rows (no creation-log
+    // indirection needed — all three tables carry tenant_id we can
+    // scope to). Notifications: scoped to recipients that are seeded
+    // actors so we never touch real users' notification streams.
     await db.execute(
       sql`DELETE FROM tasks
           WHERE tenant_id = ${tenantId}::uuid
@@ -316,6 +316,11 @@ async function main() {
       sql`DELETE FROM notes
           WHERE tenant_id = ${tenantId}::uuid
             AND (author_user_id LIKE 'seed-actor-%' OR author_user_id = 'demo-seed')`,
+    );
+    await db.execute(
+      sql`DELETE FROM notifications
+          WHERE tenant_id = ${tenantId}::uuid
+            AND recipient_user_id LIKE 'seed-actor-%'`,
     );
 
     // Entities — locate ids via creation activity_log rows we tagged.
@@ -915,6 +920,90 @@ async function main() {
     `  notes     inserted: ${notesRows.length} in ${Date.now() - phase}ms`,
   );
 
+  /* -------- NOTIFICATIONS -------- */
+
+  phase = Date.now();
+  const { notifications: notifTable } = await import('../src/db/schema');
+
+  // Sample notifications addressed to one recipient persona — Priya
+  // Sharma. In the running app, signing into Test 1 as a real Clerk
+  // user wouldn't see these because RLS scopes to your own user id.
+  // To see them light up, sign in with the matching id (or just look
+  // at the table directly during dev).
+  //
+  // We seed a small mix so the dropdown reads naturally:
+  //   - one unread task_assigned (recent)
+  //   - one unread deal_won (today)
+  //   - one read owner_changed (yesterday)
+  //   - one unread task_due_soon (a few minutes ago)
+  const RECIPIENT = 'seed-actor-priya-sharma';
+  const ACTORS = [
+    'seed-actor-rahul-mehta',
+    'seed-actor-arjun-rao',
+    'seed-actor-sarah-chen',
+    'seed-actor-michael-torres',
+  ];
+  const sampleDeals = insertedDeals.slice(0, 6);
+  const notifRows: Array<typeof notifTable.$inferInsert> = [];
+
+  if (sampleDeals.length >= 4) {
+    notifRows.push({
+      tenantId,
+      recipientUserId: RECIPIENT,
+      actorUserId: ACTORS[0]!,
+      type: 'task_assigned',
+      title: `New task: Follow up on ${sampleDeals[0]!.name}`,
+      subtitle: 'Due Friday',
+      entityType: 'deal',
+      entityId: sampleDeals[0]!.id,
+      metadata: { priority: 'high' },
+      createdAt: minutesAgo(18),
+    });
+    notifRows.push({
+      tenantId,
+      recipientUserId: RECIPIENT,
+      actorUserId: null,
+      type: 'task_due_soon',
+      title: 'Task due tomorrow: Send Q3 proposal',
+      subtitle: sampleDeals[1]!.name,
+      entityType: 'deal',
+      entityId: sampleDeals[1]!.id,
+      metadata: {},
+      createdAt: hoursAgo(2),
+    });
+    notifRows.push({
+      tenantId,
+      recipientUserId: RECIPIENT,
+      actorUserId: ACTORS[1]!,
+      type: 'deal_won',
+      title: `Deal won: ${sampleDeals[2]!.name}`,
+      subtitle: null,
+      entityType: 'deal',
+      entityId: sampleDeals[2]!.id,
+      metadata: {},
+      createdAt: hoursAgo(5),
+    });
+    notifRows.push({
+      tenantId,
+      recipientUserId: RECIPIENT,
+      actorUserId: ACTORS[2]!,
+      type: 'owner_changed',
+      title: `You now own ${sampleDeals[3]!.name}`,
+      subtitle: null,
+      entityType: 'deal',
+      entityId: sampleDeals[3]!.id,
+      metadata: {},
+      readAt: hoursAgo(22),
+      createdAt: daysAgo(1),
+    });
+  }
+  if (notifRows.length > 0) {
+    await db.insert(notifTable).values(notifRows);
+  }
+  console.log(
+    `  notifs    inserted: ${notifRows.length} in ${Date.now() - phase}ms`,
+  );
+
   /* -------- SUMMARY -------- */
 
   console.log('\n  summary');
@@ -928,6 +1017,7 @@ async function main() {
   console.log(`    workflow runs:     ${wfRows.length}`);
   console.log(`    tasks:             ${taskRows.length}`);
   console.log(`    notes:             ${notesRows.length}`);
+  console.log(`    notifications:     ${notifRows.length}`);
   console.log('\n  done.\n');
 
   await client.end({ timeout: 5 });

@@ -43,6 +43,8 @@ export type ListDealsOptions = {
   cursor?: Cursor | null;
   size?: PageSize;
   filters?: DealFilters;
+  /** Required for `filters.mine` to resolve "owner == me". */
+  currentUserId?: string;
 };
 
 type RawJoinedRow = {
@@ -143,6 +145,12 @@ export async function listDeals(
   }
   if (f.companyId) {
     conditions.push(eq(deals.companyId, f.companyId));
+  }
+  if (f.mine && options.currentUserId) {
+    conditions.push(eq(deals.ownerId, options.currentUserId));
+  }
+  if (f.unassigned) {
+    conditions.push(isNull(deals.ownerId));
   }
 
   if (options.cursor) {

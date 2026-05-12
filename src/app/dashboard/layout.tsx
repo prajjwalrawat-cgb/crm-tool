@@ -1,7 +1,10 @@
+import { auth } from '@clerk/nextjs/server';
 import type { ReactNode } from 'react';
 
 import { getAIMode } from '@/lib/ai/config';
+import { runWithTenantContext } from '@/lib/db-context';
 import { ensureMembership } from '@/lib/membership';
+import { listNotificationsForUser } from '@/lib/notifications/queries';
 import { ensureTenant } from '@/lib/tenant';
 
 import { DashboardShell } from './_components/dashboard-shell';
@@ -27,8 +30,23 @@ export default async function DashboardLayout({
     );
   }
 
+  const { userId } = await auth();
+  // Pre-fetch the user's recent notifications so the bell renders with
+  // content on first paint. The dropdown stays live afterwards via the
+  // tenant SSE stream — see notification-bell.tsx.
+  const initialNotifications = userId
+    ? await runWithTenantContext({ tenantId: tenant.id, userId }, () =>
+        listNotificationsForUser(tenant.id, userId, { limit: 30 }),
+      )
+    : [];
+
   return (
-    <DashboardShell tenantId={tenant.id} aiMode={getAIMode()}>
+    <DashboardShell
+      tenantId={tenant.id}
+      currentUserId={userId ?? ''}
+      initialNotifications={initialNotifications}
+      aiMode={getAIMode()}
+    >
       {children}
     </DashboardShell>
   );

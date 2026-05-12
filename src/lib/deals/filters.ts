@@ -32,6 +32,9 @@ export type DealFilters = {
   stale?: boolean;
   staleDays?: number;
   companyId?: string;
+  /** `mine` and `unassigned` are resolved server-side using the current user. */
+  mine?: boolean;
+  unassigned?: boolean;
 };
 
 export function parseDealFilters(
@@ -73,6 +76,8 @@ export function parseDealFilters(
       typeof raw.companyId === 'string' && raw.companyId.length > 0
         ? raw.companyId
         : undefined,
+    mine: flag(raw.mine),
+    unassigned: flag(raw.unassigned),
   };
 }
 
@@ -104,6 +109,8 @@ export function dealFiltersToSearchParams(
   if (filters.companyId) {
     out.set('companyId', filters.companyId);
   }
+  if (filters.mine) out.set('mine', '1');
+  if (filters.unassigned) out.set('unassigned', '1');
   return out;
 }
 
@@ -115,6 +122,8 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.expectedCloseFrom ||
       filters.expectedCloseTo ||
       filters.stale ||
-      filters.companyId,
+      filters.companyId ||
+      filters.mine ||
+      filters.unassigned,
   );
 }

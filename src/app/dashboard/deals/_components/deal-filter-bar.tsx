@@ -93,6 +93,16 @@ export function DealFilterBar({
       pushFilters({ ...initialFilters, companyId: id }),
     [initialFilters, pushFilters],
   );
+  const setMine = useCallback(
+    (next: boolean) =>
+      pushFilters({ ...initialFilters, mine: next, unassigned: false }),
+    [initialFilters, pushFilters],
+  );
+  const setUnassigned = useCallback(
+    (next: boolean) =>
+      pushFilters({ ...initialFilters, unassigned: next, mine: false }),
+    [initialFilters, pushFilters],
+  );
 
   const clearAll = useCallback(
     () => pushFilters({}),
@@ -121,6 +131,16 @@ export function DealFilterBar({
           from={initialFilters.expectedCloseFrom}
           to={initialFilters.expectedCloseTo}
           onChange={setCloseWindow}
+        />
+        <ToggleChip
+          label="My deals"
+          active={!!initialFilters.mine}
+          onClick={() => setMine(!initialFilters.mine)}
+        />
+        <ToggleChip
+          label="Unassigned"
+          active={!!initialFilters.unassigned}
+          onClick={() => setUnassigned(!initialFilters.unassigned)}
         />
         <ToggleChip
           label="Stale only"

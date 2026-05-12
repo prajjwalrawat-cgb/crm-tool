@@ -89,6 +89,18 @@ export type RealtimeEvent =
       type: 'presence.snapshot';
       tenantId: string;
       members: PresenceMember[];
+    }
+  /* ----- notifications -----
+   *
+   * Per-recipient. Published on the tenant channel and filtered by
+   * recipientUserId on the client — simpler than per-user channels
+   * and reuses existing infra.
+   */
+  | {
+      type: 'notification.created';
+      tenantId: string;
+      recipientUserId: string;
+      notification: SerializedNotification;
     };
 
 export type EventKind = RealtimeEvent['type'];
@@ -150,6 +162,21 @@ export type SerializedActivity = {
   metadata: Record<string, unknown>;
   createdAt: string;
   actor: ActorSummary | null;
+};
+
+export type SerializedNotification = {
+  id: string;
+  tenantId: string;
+  recipientUserId: string;
+  actorUserId: string | null;
+  type: string;
+  entityType: string | null;
+  entityId: string | null;
+  title: string;
+  subtitle: string | null;
+  metadata: Record<string, unknown>;
+  readAt: string | null;
+  createdAt: string;
 };
 
 /* -------- channel + helper utilities -------- */

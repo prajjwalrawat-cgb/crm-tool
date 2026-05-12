@@ -12,8 +12,11 @@ import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { requireMembership } from '@/lib/membership';
 import { listNotesForEntity } from '@/lib/notes/queries';
 import { canManageDeals } from '@/lib/rbac';
+import { listTasksForEntity } from '@/lib/tasks/queries';
+import { listTeammates } from '@/lib/teammates/queries';
 
 import { ActivityList } from '../../activity/_components/activity-list';
+import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { StageBadge } from '../_components/stage-badge';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
@@ -84,12 +87,15 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     const deal = await getDealById(tenant.id, id);
     if (!deal) notFound();
 
-    const [membership, activity, cachedSummary, notes] = await Promise.all([
-      requireMembership(),
-      listActivityForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
-      getCachedSummary(tenant.id, 'deal', deal.id),
-      listNotesForEntity(tenant.id, 'deal', deal.id, { limit: 100 }),
-    ]);
+    const [membership, activity, cachedSummary, notes, tasks, teammates] =
+      await Promise.all([
+        requireMembership(),
+        listActivityForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
+        getCachedSummary(tenant.id, 'deal', deal.id),
+        listNotesForEntity(tenant.id, 'deal', deal.id, { limit: 100 }),
+        listTasksForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
+        listTeammates(tenant.id, tenant.name),
+      ]);
 
     const canEdit = canManageDeals(membership.role);
 
@@ -150,6 +156,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 deal.ownerId ? authorLookup[deal.ownerId] ?? null : null
               }
               currentUserId={userId}
+              teammates={teammates}
               canEdit={canEdit}
             />
             <DetailCard label="Company" value={deal.companyName ?? '—'} />
@@ -175,6 +182,15 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               initialSummary={cachedSummary?.summary ?? null}
               initialGeneratedAt={cachedSummary?.generatedAt.toISOString() ?? null}
               aiMode={getAIMode()}
+            />
+
+            <EntityTasksPanel
+              entityType="deal"
+              entityId={deal.id}
+              ownerId={deal.ownerId}
+              currentUserId={userId}
+              initialTasks={tasks}
+              canEdit={canEdit}
             />
 
             <NotesTimeline

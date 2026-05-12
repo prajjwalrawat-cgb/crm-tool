@@ -11,6 +11,7 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
+import { recordNotification } from '@/lib/notifications/recorder';
 
 const TASK_STATUSES = ['todo', 'in_progress', 'completed', 'cancelled'] as const;
 const TASK_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
@@ -128,6 +129,27 @@ export async function createTaskAction(
           },
         });
 
+        // Notify the assignee when the task is assigned to someone
+        // other than the creator. The recorder skips self-targets and
+        // dedupes empty ids, so we can write the call unconditionally.
+        if (row.assignedUserId && row.assignedUserId !== membership.userId) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: row.assignedUserId,
+            actorUserId: membership.userId,
+            type: 'task_assigned',
+            title: `New task: ${row.title}`,
+            subtitle: row.dueDate ? `Due ${row.dueDate}` : null,
+            entityType: 'task',
+            entityId: row.id,
+            metadata: {
+              priority: row.priority,
+              linkedEntityType: row.entityType,
+              linkedEntityId: row.entityId,
+            },
+          });
+        }
+
         return row;
       });
 
@@ -207,6 +229,48 @@ export async function updateTaskAction(
             linkedEntityId: row.entityId,
           },
         });
+
+        // Reassignment notification: notify the new assignee if it's
+        // a real change and not back to the actor themselves.
+        const reassigned =
+          (previous.assignedUserId ?? null) !== (row.assignedUserId ?? null);
+        if (
+          reassigned &&
+          row.assignedUserId &&
+          row.assignedUserId !== membership.userId
+        ) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: row.assignedUserId,
+            actorUserId: membership.userId,
+            type: 'task_assigned',
+            title: `Reassigned to you: ${row.title}`,
+            subtitle: row.dueDate ? `Due ${row.dueDate}` : null,
+            entityType: 'task',
+            entityId: row.id,
+            metadata: { reassign: true },
+          });
+        }
+
+        // Completion notification to the creator when someone else
+        // closes out their task.
+        if (
+          justCompleted &&
+          previous.createdBy &&
+          previous.createdBy !== membership.userId
+        ) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: previous.createdBy,
+            actorUserId: membership.userId,
+            type: 'task_completed',
+            title: `Task completed: ${row.title}`,
+            subtitle: null,
+            entityType: 'task',
+            entityId: row.id,
+            metadata: {},
+          });
+        }
 
         return row;
       });
@@ -291,6 +355,24 @@ export async function toggleTaskCompletedAction(
             linkedEntityId: row.entityId,
           },
         });
+
+        if (
+          completed &&
+          previous.createdBy &&
+          previous.createdBy !== membership.userId
+        ) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: previous.createdBy,
+            actorUserId: membership.userId,
+            type: 'task_completed',
+            title: `Task completed: ${row.title}`,
+            subtitle: null,
+            entityType: 'task',
+            entityId: row.id,
+            metadata: {},
+          });
+        }
 
         return row;
       });

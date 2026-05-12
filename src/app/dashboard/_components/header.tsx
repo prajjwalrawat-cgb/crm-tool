@@ -4,15 +4,26 @@ import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import { Menu, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import type { Notification } from '@/db/schema';
+
+import { NotificationBell } from './notification-bell';
 import { PresenceIndicator } from './presence-indicator';
 
 type Props = {
   onMobileMenuOpen: () => void;
   onOpenPalette: () => void;
   tenantId: string;
+  currentUserId: string;
+  initialNotifications: Notification[];
 };
 
-export function Header({ onMobileMenuOpen, onOpenPalette, tenantId }: Props) {
+export function Header({
+  onMobileMenuOpen,
+  onOpenPalette,
+  tenantId,
+  currentUserId,
+  initialNotifications,
+}: Props) {
   // Render the platform-correct shortcut on first mount only, so the
   // shortcut hint matches the OS the user is actually on without
   // forcing the server-rendered HTML to commit a guess.
@@ -59,6 +70,12 @@ export function Header({ onMobileMenuOpen, onOpenPalette, tenantId }: Props) {
           arrives. This component lives in the Header (outside the
           shell's tenant-scoped children div) so it needs its own key.
         */}
+        <NotificationBell
+          key={`${tenantId}:${currentUserId}`}
+          tenantId={tenantId}
+          currentUserId={currentUserId}
+          initialNotifications={initialNotifications}
+        />
         <PresenceIndicator key={tenantId} tenantId={tenantId} />
         <OrganizationSwitcher
           hidePersonal
