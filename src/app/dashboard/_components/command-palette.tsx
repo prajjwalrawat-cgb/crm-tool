@@ -3,6 +3,7 @@
 import {
   Briefcase,
   Building2,
+  CheckSquare,
   CornerDownLeft,
   History,
   LayoutDashboard,
@@ -62,6 +63,7 @@ const KIND_LABEL: Record<SearchHit['kind'], string> = {
   company: 'Companies',
   contact: 'Contacts',
   workflow: 'Workflows',
+  task: 'Tasks',
 };
 
 const KIND_ICON: Record<SearchHit['kind'], ReactNode> = {
@@ -69,6 +71,7 @@ const KIND_ICON: Record<SearchHit['kind'], ReactNode> = {
   company: <Building2 className="h-3.5 w-3.5 text-indigo-500" aria-hidden />,
   contact: <UsersRound className="h-3.5 w-3.5 text-indigo-500" aria-hidden />,
   workflow: <Workflow className="h-3.5 w-3.5 text-indigo-500" aria-hidden />,
+  task: <CheckSquare className="h-3.5 w-3.5 text-indigo-500" aria-hidden />,
 };
 
 const QUICK_ACTIONS: Action[] = [
@@ -85,6 +88,21 @@ const QUICK_ACTIONS: Action[] = [
     title: 'Go to Workflows',
     icon: <Workflow className="h-3.5 w-3.5 text-slate-500" aria-hidden />,
     href: '/dashboard/workflows',
+  },
+  {
+    kind: 'action',
+    id: 'goto-tasks',
+    title: 'Go to Tasks',
+    icon: <CheckSquare className="h-3.5 w-3.5 text-slate-500" aria-hidden />,
+    href: '/dashboard/tasks?assignedToMe=1',
+  },
+  {
+    kind: 'action',
+    id: 'create-task',
+    title: 'Create task',
+    hint: 'opens the tasks page',
+    icon: <Plus className="h-3.5 w-3.5 text-slate-500" aria-hidden />,
+    href: '/dashboard/tasks',
   },
   {
     kind: 'action',
@@ -464,6 +482,11 @@ function HitRow({ hit }: { hit: SearchHit }) {
       {hit.kind === 'workflow' ? (
         <span className="shrink-0 rounded px-1 py-0 text-[9px] font-medium uppercase tracking-wide text-slate-500">
           {hit.status}
+        </span>
+      ) : null}
+      {hit.kind === 'task' ? (
+        <span className="shrink-0 rounded px-1 py-0 text-[9px] font-medium uppercase tracking-wide text-slate-500">
+          {hit.priority}
         </span>
       ) : null}
     </>

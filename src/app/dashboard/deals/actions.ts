@@ -691,3 +691,87 @@ export async function restoreDealAction(id: string): Promise<SimpleResult> {
     },
   );
 }
+
+/* -------- ASSIGN OWNER -------- */
+
+const updateOwnerSchema = z.object({
+  id: z.uuid({ message: 'Invalid deal id' }),
+  ownerId: z.string().min(1).max(120).nullable(),
+});
+
+export type UpdateOwnerInput = { id: string; ownerId: string | null };
+
+export type UpdateOwnerResult =
+  | { ok: true; deal: Deal; changed: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Reassign (or unassign) a deal's owner. Logs an `owner_changed`
+ * activity row carrying both the previous and the new owner id so the
+ * detail-page timeline can render "Priya reassigned Razorpay to Rahul".
+ */
+export async function updateDealOwnerAction(
+  input: UpdateOwnerInput,
+): Promise<UpdateOwnerResult> {
+  const gate = await checkPermission('manageDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const parsed = updateOwnerSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, message: 'Invalid owner payload' };
+      }
+
+      const result = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select()
+          .from(deals)
+          .where(
+            and(
+              eq(deals.id, parsed.data.id),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return { changed: false, deal: null as Deal | null };
+
+        if ((previous.ownerId ?? null) === parsed.data.ownerId) {
+          return { changed: false, deal: previous };
+        }
+
+        const [updated] = await tx
+          .update(deals)
+          .set({ ownerId: parsed.data.ownerId })
+          .where(eq(deals.id, parsed.data.id))
+          .returning();
+        if (!updated) return { changed: false, deal: null as Deal | null };
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'deal',
+          entityId: updated.id,
+          action: 'owner_changed',
+          metadata: {
+            name: updated.name,
+            from: previous.ownerId ?? null,
+            to: updated.ownerId ?? null,
+          },
+        });
+
+        return { changed: true, deal: updated };
+      });
+
+      if (!result.deal) {
+        return { ok: false, message: 'Deal not found' };
+      }
+      revalidatePath('/dashboard/deals');
+      revalidatePath(`/dashboard/deals/${result.deal.id}`);
+      return { ok: true, deal: result.deal, changed: result.changed };
+    },
+  );
+}

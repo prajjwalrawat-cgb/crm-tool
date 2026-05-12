@@ -14,9 +14,11 @@ import {
 } from '@/lib/dashboard/queries';
 import { ensureMembership } from '@/lib/membership';
 import { canManageCompanies } from '@/lib/rbac';
+import { getMyTasksSummary } from '@/lib/tasks/queries';
 
 import { LiveActivityFeed } from './activity/_components/live-activity-feed';
 import {
+  MyTasksCard,
   PipelineTrendSparkline,
   RecentWinsCard,
   StaleDealsCard,
@@ -40,7 +42,7 @@ const STALE_DAYS = 14;
 const FOLLOW_UP_LOOK_AHEAD = 14;
 
 export default async function DashboardPage() {
-  return await withTenantSession(async ({ tenant }) => {
+  return await withTenantSession(async ({ tenant, userId }) => {
     const [
       user,
       membership,
@@ -52,6 +54,7 @@ export default async function DashboardPage() {
       followUps,
       recentWins,
       workflowHealth,
+      myTasks,
     ] = await Promise.all([
       currentUser(),
       ensureMembership(),
@@ -66,6 +69,7 @@ export default async function DashboardPage() {
       }),
       getRecentWins(tenant.id, 5),
       getWorkflowHealth(tenant.id, 7),
+      getMyTasksSummary(tenant.id, userId),
     ]);
 
     const canCreate = canManageCompanies(membership?.role ?? null);
@@ -107,7 +111,8 @@ export default async function DashboardPage() {
           <WorkflowHealthCard health={workflowHealth} />
         </div>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <MyTasksCard summary={myTasks} />
           <UpcomingFollowUpsCard rows={followUps} />
           <StaleDealsCard rows={staleDeals} staleDays={STALE_DAYS} />
           <RecentWinsCard rows={recentWins} />

@@ -16,6 +16,8 @@ export const ACTIVITY_ENTITY_TYPES = [
   'deal',
   'membership',
   'invitation',
+  'task',
+  'note',
 ] as const;
 export type ActivityEntityType = (typeof ACTIVITY_ENTITY_TYPES)[number];
 
@@ -36,6 +38,10 @@ export const ACTIVITY_ACTIONS = [
    * — schedule a follow-up reminder for May 15".
    */
   'automation_note',
+  /** Task lifecycle: status transitioned to completed. */
+  'task_completed',
+  /** Owner changed on an entity (currently used for deal owner). */
+  'owner_changed',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

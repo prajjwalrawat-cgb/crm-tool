@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
+  CheckSquare,
   Clock,
   Sparkles,
   TrendingDown,
@@ -19,6 +20,10 @@ import type {
   WorkflowHealth,
 } from '@/lib/dashboard/queries';
 import { type DealStage, DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import {
+  TASK_PRIORITY_LABELS,
+} from '@/lib/tasks/filters';
+import type { MyTasksSummary } from '@/lib/tasks/queries';
 import { cn } from '@/lib/utils';
 
 /**
@@ -618,6 +623,103 @@ export function RecentWinsCard({ rows }: { rows: RecentWin[] }) {
         </ul>
       )}
     </section>
+  );
+}
+
+/* ============================================================ */
+/* My tasks (operational CRM phase 1)                            */
+/* ============================================================ */
+
+const TASK_PRIORITY_TINT: Record<keyof typeof TASK_PRIORITY_LABELS, string> = {
+  low: 'bg-slate-100 text-slate-600',
+  medium: 'bg-blue-100 text-blue-700',
+  high: 'bg-amber-100 text-amber-800',
+  urgent: 'bg-rose-100 text-rose-700',
+};
+
+export function MyTasksCard({ summary }: { summary: MyTasksSummary }) {
+  const empty = summary.openCount === 0 && summary.upcoming.length === 0;
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+      <header className="mb-2 flex items-baseline justify-between">
+        <div className="flex items-center gap-1.5">
+          <CheckSquare className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
+          <h2 className="text-[13px] font-semibold text-slate-900">My tasks</h2>
+        </div>
+        <Link
+          href="/dashboard/tasks?assignedToMe=1"
+          className="text-[11px] font-medium text-indigo-600 hover:text-indigo-500"
+        >
+          All my tasks →
+        </Link>
+      </header>
+
+      <div className="mb-3 grid grid-cols-3 gap-2 text-[11px]">
+        <Stat label="Open" value={summary.openCount} tone="slate" />
+        <Stat label="Overdue" value={summary.overdueCount} tone={summary.overdueCount > 0 ? 'rose' : 'slate'} />
+        <Stat label="Done · 7d" value={summary.completedThisWeek} tone="emerald" />
+      </div>
+
+      {empty ? (
+        <EmptyHint>
+          Nothing on your plate. Create a task on a deal or directly from
+          /dashboard/tasks to track your next action.
+        </EmptyHint>
+      ) : (
+        <ul className="-mx-2 divide-y divide-slate-100">
+          {summary.upcoming.map((t) => (
+            <li key={t.id}>
+              <Link
+                href={`/dashboard/tasks?assignedToMe=1`}
+                className="flex items-center gap-2 rounded px-2 py-1.5 transition hover:bg-slate-50"
+              >
+                <span
+                  className={cn(
+                    'shrink-0 rounded px-1 py-0 text-[9px] font-medium uppercase tracking-wide',
+                    TASK_PRIORITY_TINT[t.priority],
+                  )}
+                >
+                  {TASK_PRIORITY_LABELS[t.priority]}
+                </span>
+                <span className="flex-1 truncate text-[12.5px] text-slate-700">
+                  {t.title}
+                </span>
+                {t.dueDate ? (
+                  <span
+                    className={cn(
+                      'shrink-0 text-[10px] tabular-nums',
+                      t.isOverdue ? 'text-rose-600' : 'text-slate-400',
+                    )}
+                  >
+                    {t.isOverdue ? `${dayDiff(t.dueDate)}d late` : dueShort(t.dueDate)}
+                  </span>
+                ) : null}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function dueShort(iso: string): string {
+  const d = new Date(iso + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (diff === 0) return 'today';
+  if (diff === 1) return 'tmrw';
+  if (diff > 0 && diff <= 7) return `${diff}d`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function dayDiff(iso: string): number {
+  const d = new Date(iso + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.abs(
+    Math.round((d.getTime() - today.getTime()) / 86_400_000),
   );
 }
 

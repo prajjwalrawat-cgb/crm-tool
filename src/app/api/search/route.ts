@@ -51,8 +51,13 @@ export async function GET(req: NextRequest): Promise<Response> {
     { tenantId: tenant.id, userId },
     async () =>
       tenantTransaction(async (tx) => {
-        const [dealRows, companyRows, contactRows, workflowRows] =
-          await Promise.all([
+        const [
+          dealRows,
+          companyRows,
+          contactRows,
+          workflowRows,
+          taskRows,
+        ] = await Promise.all([
             tx.execute(sql`
               SELECT d.id, d.name, d.stage::text AS stage,
                      c.name AS company_name
@@ -117,6 +122,23 @@ export async function GET(req: NextRequest): Promise<Response> {
               status: string;
               started_at: Date | string;
             }>,
+            tx.execute(sql`
+              SELECT id, title, status::text AS status, priority::text AS priority, due_date::text AS due_date
+              FROM tasks
+              WHERE tenant_id = ${tenant.id}::uuid
+                AND deleted_at IS NULL
+                AND title ILIKE ${pattern}
+              ORDER BY
+                CASE WHEN status IN ('todo','in_progress') THEN 0 ELSE 1 END,
+                updated_at DESC
+              LIMIT ${MAX_PER_BUCKET}
+            `) as unknown as Array<{
+              id: string;
+              title: string;
+              status: string;
+              priority: string;
+              due_date: string | null;
+            }>,
           ]);
 
         const out: SearchHit[] = [];
@@ -169,6 +191,17 @@ export async function GET(req: NextRequest): Promise<Response> {
             }),
             status: r.status,
             href: `/dashboard/workflows`,
+          });
+        }
+        for (const r of taskRows) {
+          out.push({
+            kind: 'task',
+            id: r.id,
+            title: r.title,
+            subtitle: r.due_date ? `due ${r.due_date}` : null,
+            status: r.status,
+            priority: r.priority,
+            href: `/dashboard/tasks?q=${encodeURIComponent(r.title)}`,
           });
         }
         return out;

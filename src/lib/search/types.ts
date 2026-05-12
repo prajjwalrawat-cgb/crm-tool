@@ -35,6 +35,15 @@ export type SearchHit =
       subtitle: string | null;
       status: string;
       href: string;
+    }
+  | {
+      kind: 'task';
+      id: string;
+      title: string;
+      subtitle: string | null;
+      status: string;
+      priority: string;
+      href: string;
     };
 
 export type SearchResponse = {

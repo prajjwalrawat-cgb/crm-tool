@@ -303,6 +303,21 @@ async function main() {
             AND metadata->>'demoSeed' = 'true'`,
     );
 
+    // Tasks + notes are direct rows (no creation-log indirection
+    // needed — both tables carry tenant_id we can scope to).
+    // Tasks: those created by seed actors *or* created by the
+    // demo-seed identity. Notes: same logic via author_user_id.
+    await db.execute(
+      sql`DELETE FROM tasks
+          WHERE tenant_id = ${tenantId}::uuid
+            AND (created_by LIKE 'seed-actor-%' OR created_by = 'demo-seed')`,
+    );
+    await db.execute(
+      sql`DELETE FROM notes
+          WHERE tenant_id = ${tenantId}::uuid
+            AND (author_user_id LIKE 'seed-actor-%' OR author_user_id = 'demo-seed')`,
+    );
+
     // Entities — locate ids via creation activity_log rows we tagged.
     await db.execute(
       sql`DELETE FROM deals
@@ -748,6 +763,158 @@ async function main() {
   await db.insert(workflowRuns).values(wfRows);
   console.log(`  workflows inserted: ${wfRows.length} in ${Date.now() - phase}ms`);
 
+  /* -------- TASKS -------- */
+
+  phase = Date.now();
+  const { tasks: tasksTable } = await import('../src/db/schema');
+  const TASK_TITLES = [
+    'Send pricing proposal',
+    'Schedule renewal kickoff call',
+    'Confirm legal review on MSA redlines',
+    'Follow up on stalled negotiation',
+    'Prepare quarterly business review deck',
+    'Walk through integration architecture',
+    'Loop in security team on SOC2 questions',
+    'Draft renewal terms for review',
+    'Coordinate proof-of-concept timeline',
+    'Set up technical demo for engineering team',
+    'Email summary after intro call',
+    'Confirm decision-maker for the next stage',
+    'Validate budget cycle and procurement steps',
+    'Request reference customer for case study',
+  ];
+  const TASK_PRIORITIES_POOL: Array<'low' | 'medium' | 'high' | 'urgent'> = [
+    'low',
+    'medium',
+    'medium',
+    'medium',
+    'high',
+    'high',
+    'urgent',
+  ];
+
+  // Seed ~40 tasks across deals and standalone. Mix of statuses.
+  const taskRows: Array<typeof tasksTable.$inferInsert> = [];
+  const dealsForTasks = insertedDeals.filter(
+    (d) => d.stage !== 'won' && d.stage !== 'lost',
+  );
+  for (let i = 0; i < 40; i++) {
+    const actor = pickActor();
+    const linkedDeal =
+      Math.random() < 0.75 && dealsForTasks.length > 0
+        ? pick(dealsForTasks)
+        : null;
+    const dueDaysOffset = Math.random() < 0.18 ? -randInt(1, 21) : randInt(0, 21);
+    // Status distribution: 55% todo, 20% in_progress, 20% completed, 5% cancelled.
+    const r = Math.random();
+    const status: 'todo' | 'in_progress' | 'completed' | 'cancelled' =
+      r < 0.55
+        ? 'todo'
+        : r < 0.75
+          ? 'in_progress'
+          : r < 0.95
+            ? 'completed'
+            : 'cancelled';
+    const completedAt =
+      status === 'completed' ? daysAgo(randInt(0, 14)) : null;
+    const dueDate =
+      status === 'completed'
+        ? null
+        : new Date(Date.now() + dueDaysOffset * 24 * 60 * 60_000)
+            .toISOString()
+            .slice(0, 10);
+    taskRows.push({
+      tenantId,
+      title: pick(TASK_TITLES),
+      description: null,
+      status,
+      priority: pick(TASK_PRIORITIES_POOL),
+      dueDate,
+      assignedUserId: actor.id,
+      createdBy: actor.id,
+      completedAt,
+      entityType: linkedDeal ? 'deal' : null,
+      entityId: linkedDeal ? linkedDeal.id : null,
+      createdAt: daysAgo(randInt(0, 30)),
+      updatedAt: daysAgo(randInt(0, 14)),
+    });
+  }
+  await db.insert(tasksTable).values(taskRows);
+  // Activity rows for task creations (caps the noise — log only ~30%).
+  const taskActivityRows: Array<typeof activityLogs.$inferInsert> = [];
+  for (let i = 0; i < taskRows.length; i++) {
+    if (Math.random() > 0.3) continue;
+    const t = taskRows[i]!;
+    taskActivityRows.push({
+      tenantId,
+      actorUserId: t.createdBy as string,
+      entityType: 'task',
+      entityId: crypto.randomUUID(), // can't reference real task id without returning(); use synthetic — feed renders fine
+      action: 'created',
+      metadata: {
+        demoSeed: true,
+        taskTitle: t.title,
+        taskPriority: t.priority,
+        actor: actorMeta(
+          SEED_ACTORS.find((a) => a.id === t.createdBy) ?? SEED_ACTORS[0]!,
+        ),
+      },
+      createdAt: t.createdAt as Date,
+    });
+  }
+  if (taskActivityRows.length > 0) {
+    await db.insert(activityLogs).values(taskActivityRows);
+  }
+  console.log(
+    `  tasks     inserted: ${taskRows.length} in ${Date.now() - phase}ms`,
+  );
+
+  /* -------- NOTES -------- */
+
+  phase = Date.now();
+  const { notes: notesTable } = await import('../src/db/schema');
+  const NOTE_BODIES = [
+    'Spoke with the buyer — they want to see a clear ROI in the first 90 days. Sending a tailored ROI deck this week.',
+    'Decision committee is forming. Champion looped in their VP of Engineering. Aim to align on technical fit by Friday.',
+    'Held discovery call. Pain points: manual reporting, slow handoffs. Our automation story landed well.',
+    'Pricing negotiation: they pushed back on the per-seat tier. Floated a flat enterprise rate; awaiting their counter.',
+    'Procurement requires SOC2 docs before signature. Sent the latest report and audit summary.',
+    'Customer concerned about migration time. Looped in solutions architect for a Tuesday walkthrough.',
+    'Renewal looks stable. Champion is leaving in two months — need to introduce the new owner before then.',
+    'Closed-won celebration on standup — kickoff scheduled for next Monday.',
+    'Marked lost: chose a competitor due to existing partnership. Worth re-engaging in Q4 when their renewal hits.',
+    'Slack thread with their security team confirmed we’re past compliance review.',
+    'Held a 30-min syncon technical scope. They want our SAML integration before going live.',
+    'CFO requested a multi-year discount. Floated a 2-year option at 12% off; awaiting board feedback.',
+  ];
+  // Distribute ~3 notes per won/lost deal + ~2 per active mid-funnel.
+  const notesRows: Array<typeof notesTable.$inferInsert> = [];
+  for (const d of insertedDeals) {
+    const noteCount =
+      d.stage === 'won' || d.stage === 'lost'
+        ? randInt(2, 4)
+        : d.stage === 'lead'
+          ? randInt(0, 1)
+          : randInt(1, 3);
+    for (let i = 0; i < noteCount; i++) {
+      const actor = pickActor();
+      notesRows.push({
+        tenantId,
+        body: pick(NOTE_BODIES),
+        authorUserId: actor.id,
+        entityType: 'deal',
+        entityId: d.id,
+        createdAt: daysAgo(randInt(0, 60)),
+      });
+    }
+  }
+  if (notesRows.length > 0) {
+    await db.insert(notesTable).values(notesRows);
+  }
+  console.log(
+    `  notes     inserted: ${notesRows.length} in ${Date.now() - phase}ms`,
+  );
+
   /* -------- SUMMARY -------- */
 
   console.log('\n  summary');
@@ -759,6 +926,8 @@ async function main() {
   }
   console.log(`    activity rows:     ${activityRows.length}`);
   console.log(`    workflow runs:     ${wfRows.length}`);
+  console.log(`    tasks:             ${taskRows.length}`);
+  console.log(`    notes:             ${notesRows.length}`);
   console.log('\n  done.\n');
 
   await client.end({ timeout: 5 });
