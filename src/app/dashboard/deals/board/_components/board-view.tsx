@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   closestCorners,
@@ -305,14 +305,14 @@ export function BoardView({
       {error ? (
         <p
           role="alert"
-          className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
+          className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
         >
           {error}
         </p>
       ) : null}
 
       {!canMove ? (
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
           Read-only — your role can&apos;t move deals between stages.
         </p>
       ) : null}

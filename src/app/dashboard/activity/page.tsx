@@ -1,4 +1,4 @@
-import { listRecentActivity } from '@/lib/activity/queries';
+﻿import { listRecentActivity } from '@/lib/activity/queries';
 import { withTenantSession } from '@/lib/auth-guard';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 
@@ -28,8 +28,8 @@ export default async function ActivityPage({
     return (
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Activity</h1>
+          <p className="mt-0.5 text-[12px] text-slate-500">
             {tenant.name} — paginated audit feed.
           </p>
         </header>

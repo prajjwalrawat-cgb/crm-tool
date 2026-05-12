@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import { Menu } from 'lucide-react';
@@ -12,15 +12,15 @@ type Props = {
 
 export function Header({ onMobileMenuOpen, tenantId }: Props) {
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-zinc-200 bg-white/80 px-4 backdrop-blur sm:px-6 dark:border-zinc-800 dark:bg-zinc-950/80">
-      <div className="flex items-center gap-2">
+    <header className="sticky top-0 z-30 flex h-12 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/85 px-3 backdrop-blur-md sm:px-5">
+      <div className="flex items-center gap-1">
         <button
           type="button"
           onClick={onMobileMenuOpen}
           aria-label="Open navigation"
-          className="rounded-md p-2 text-zinc-600 hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-900"
+          className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 md:hidden"
         >
-          <Menu className="h-5 w-5" aria-hidden />
+          <Menu className="h-4 w-4" aria-hidden />
         </button>
       </div>
 

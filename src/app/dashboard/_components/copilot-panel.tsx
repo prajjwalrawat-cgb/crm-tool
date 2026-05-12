@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertTriangle, Loader2, Send, Sparkles, X } from 'lucide-react';
 import {
@@ -244,11 +244,12 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open Copilot"
-        className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-zinc-900/20 transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:shadow-black/40 dark:hover:bg-zinc-100"
+        title="Open Copilot (⌘K)"
+        className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-3 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm backdrop-blur transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700"
       >
-        <Sparkles className="h-4 w-4" aria-hidden />
-        Copilot
-        <kbd className="ml-1 hidden rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300 sm:inline dark:border-zinc-300 dark:bg-zinc-200 dark:text-zinc-700">
+        <Sparkles className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
+        <span>Copilot</span>
+        <kbd className="ml-0.5 hidden rounded border border-slate-200 bg-slate-50 px-1 py-0 text-[9px] font-medium text-slate-500 sm:inline">
           ⌘K
         </kbd>
       </button>
@@ -266,12 +267,12 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
           />
           <div
             className={cn(
-              'relative flex h-full w-full max-w-md flex-col overflow-hidden border border-zinc-200 bg-white shadow-2xl',
+              'relative flex h-full w-full max-w-md flex-col overflow-hidden border border-slate-200 bg-white shadow-2xl',
               'sm:h-[80vh] sm:rounded-xl',
-              'dark:border-zinc-800 dark:bg-zinc-950',
+              '',
             )}
           >
-            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Sparkles className="h-4 w-4 text-amber-500" aria-hidden />
                 CRM Copilot
@@ -279,8 +280,8 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
                   <span
                     className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
                       aiMode === 'disabled'
-                        ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:bg-amber-900/40 dark:text-amber-300'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-amber-100 text-amber-800'
                     }`}
                   >
                     {aiMode}
@@ -291,7 +292,7 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close Copilot"
-                className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900"
+                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100"
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
@@ -301,8 +302,8 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
               <div
                 className={`flex items-start gap-2 border-b px-4 py-2 text-[11px] ${
                   aiMode === 'disabled'
-                    ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
-                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'
+                    ? 'border-red-200 bg-red-50 text-red-700'
+                    : 'border-amber-200 bg-amber-50 text-amber-800'
                 }`}
               >
                 <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" aria-hidden />
@@ -331,7 +332,7 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
                 e.preventDefault();
                 void sendQuestion(input);
               }}
-              className="border-t border-zinc-200 p-3 dark:border-zinc-800"
+              className="border-t border-slate-200 p-3"
             >
               <div className="flex items-end gap-2">
                 <textarea
@@ -346,14 +347,14 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
                   }}
                   rows={2}
                   placeholder="Ask about your pipeline…"
-                  className="block w-full resize-none rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400/30 dark:border-zinc-800 dark:bg-zinc-950 dark:placeholder:text-zinc-500 dark:focus:border-zinc-600"
+                  className="block w-full resize-none rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                 />
                 {streaming ? (
                   <button
                     type="button"
                     onClick={stop}
                     aria-label="Stop generating"
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
                   >
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                   </button>
@@ -362,15 +363,15 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
                     type="submit"
                     disabled={!input.trim()}
                     aria-label="Send"
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-indigo-600 text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Send className="h-4 w-4" aria-hidden />
                   </button>
                 )}
               </div>
-              <p className="mt-2 text-[11px] text-zinc-400">
+              <p className="mt-2 text-[11px] text-slate-400">
                 Grounded in your tenant&apos;s records only. Press{' '}
-                <kbd className="rounded border border-zinc-300 px-1 py-0.5 text-[10px] dark:border-zinc-700">
+                <kbd className="rounded border border-slate-300 px-1 py-0.5 text-[10px]">
                   Esc
                 </kbd>{' '}
                 to close.
@@ -386,7 +387,7 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
 function EmptyState({ onPick }: { onPick: (q: string) => void }) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-sm text-slate-600">
         Ask a question about your pipeline. The Copilot reads only your
         tenant&apos;s deals, contacts, and companies.
       </p>
@@ -396,7 +397,7 @@ function EmptyState({ onPick }: { onPick: (q: string) => void }) {
             <button
               type="button"
               onClick={() => onPick(q)}
-              className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-sm text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
             >
               {q}
             </button>
@@ -411,7 +412,7 @@ function Turn({ turn }: { turn: ChatTurn }) {
   if (turn.role === 'user') {
     return (
       <li className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-200 dark:text-zinc-900">
+        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-indigo-600 px-3 py-2 text-sm text-white shadow-sm">
           {turn.content}
         </div>
       </li>
@@ -424,10 +425,10 @@ function Turn({ turn }: { turn: ChatTurn }) {
           {turn.references.map((ref) => (
             <span
               key={`${ref.entityType}:${ref.entityId}`}
-              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600"
               title={`distance ${ref.distance.toFixed(3)}`}
             >
-              <span className="font-medium uppercase tracking-wide text-[9px] text-zinc-400">
+              <span className="font-medium uppercase tracking-wide text-[9px] text-slate-400">
                 {ref.entityType}
               </span>
               {ref.label}
@@ -435,21 +436,21 @@ function Turn({ turn }: { turn: ChatTurn }) {
           ))}
         </div>
       ) : null}
-      <div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm leading-relaxed text-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+      <div className="rounded-2xl rounded-bl-sm bg-slate-100 px-3 py-2 text-sm leading-relaxed text-slate-800">
         {turn.error ? (
-          <span className="text-red-600 dark:text-red-400">
+          <span className="text-red-600">
             Error: {turn.error}
           </span>
         ) : turn.content ? (
           <p className="whitespace-pre-wrap">{turn.content}</p>
         ) : (
-          <span className="inline-flex items-center gap-2 text-zinc-500">
+          <span className="inline-flex items-center gap-2 text-slate-500">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
             Thinking…
           </span>
         )}
         {turn.streaming && turn.content ? (
-          <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-zinc-400 align-baseline dark:bg-zinc-500" />
+          <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-slate-400 align-baseline" />
         ) : null}
       </div>
     </li>

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { ChevronsLeft, ChevronsRight, Sparkles, X } from 'lucide-react';
 import Link from 'next/link';
@@ -40,8 +40,8 @@ function DesktopSidebar({
   return (
     <aside
       className={cn(
-        'hidden shrink-0 flex-col border-r border-zinc-200 bg-white transition-[width] duration-200 ease-out md:flex dark:border-zinc-800 dark:bg-zinc-950',
-        collapsed ? 'w-14' : 'w-60',
+        'hidden shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-200 ease-out md:flex',
+        collapsed ? 'w-14' : 'w-[12.5rem]',
       )}
     >
       <Brand collapsed={collapsed} />
@@ -59,14 +59,14 @@ function CollapseToggle({
   onToggle: () => void;
 }) {
   return (
-    <div className="border-t border-zinc-200 dark:border-zinc-800">
+    <div className="border-t border-slate-200">
       <button
         type="button"
         onClick={onToggle}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         className={cn(
-          'flex w-full items-center gap-2 px-4 py-3 text-xs text-zinc-500 transition hover:bg-zinc-50 hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-zinc-100',
+          'flex w-full items-center gap-2 px-3 py-2 text-[11px] text-slate-500 transition hover:bg-slate-50 hover:text-slate-900',
           collapsed && 'justify-center px-0',
         )}
       >
@@ -112,7 +112,7 @@ function MobileSidebar({
       />
       <aside
         className={cn(
-          'absolute inset-y-0 left-0 flex w-72 flex-col border-r border-zinc-200 bg-white shadow-xl transition-transform dark:border-zinc-800 dark:bg-zinc-950',
+          'absolute inset-y-0 left-0 flex w-72 flex-col border-r border-slate-200 bg-white shadow-xl transition-transform',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
       >
@@ -122,7 +122,7 @@ function MobileSidebar({
             type="button"
             onClick={onClose}
             aria-label="Close navigation"
-            className="rounded-md p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+            className="rounded-md p-2 text-slate-500 hover:bg-slate-100"
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -146,17 +146,17 @@ function Brand({
         'flex items-center gap-2',
         inline
           ? 'pb-2'
-          : 'border-b border-zinc-200 px-4 py-4 dark:border-zinc-800',
+          : 'border-b border-slate-200 px-3 py-3',
         collapsed && !inline && 'justify-center px-0',
       )}
     >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900">
-        <Sparkles className="h-4 w-4" aria-hidden />
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-sm">
+        <Sparkles className="h-3.5 w-3.5" aria-hidden />
       </div>
       {!collapsed ? (
         <div className="leading-tight">
-          <div className="text-sm font-semibold tracking-tight">CRM</div>
-          <div className="text-xs text-zinc-500">multi-tenant</div>
+          <div className="text-[13px] font-semibold tracking-tight">CRM</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-400">multi-tenant</div>
         </div>
       ) : null}
     </div>
@@ -173,8 +173,8 @@ function NavList({
   onLinkClick?: () => void;
 }) {
   return (
-    <nav className={cn('flex-1 py-3', collapsed ? 'px-2' : 'px-3')}>
-      <ul className="flex flex-col gap-1">
+    <nav className={cn('flex-1 py-2', collapsed ? 'px-1.5' : 'px-2')}>
+      <ul className="flex flex-col gap-0.5">
         {NAV_ITEMS.map((item) => {
           const active = isNavActive(item.href, pathname);
           const Icon = item.icon;
@@ -186,7 +186,7 @@ function NavList({
                   aria-disabled
                   title={collapsed ? `${item.label} (soon)` : undefined}
                   className={cn(
-                    'flex cursor-not-allowed items-center gap-3 rounded-md px-3 py-2 text-sm text-zinc-400 dark:text-zinc-600',
+                    'flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-slate-400',
                     collapsed && 'justify-center px-2',
                   )}
                 >
@@ -194,7 +194,7 @@ function NavList({
                   {!collapsed ? (
                     <>
                       <span className="flex-1">{item.label}</span>
-                      <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:bg-zinc-900 dark:text-zinc-500">
+                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
                         Soon
                       </span>
                     </>
@@ -212,10 +212,14 @@ function NavList({
                 aria-current={active ? 'page' : undefined}
                 title={collapsed ? item.label : undefined}
                 className={cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition',
+                  // Linear/Attio-style nav: subtle tinted surface for
+                  // active, calm hover for idle. No more solid-black
+                  // pill — that read as "developer console" rather
+                  // than "SaaS product".
+                  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition',
                   active
-                    ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900'
-                    : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900',
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
                   collapsed && 'justify-center px-2',
                 )}
               >

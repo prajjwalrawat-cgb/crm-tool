@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect } from 'react';
 
@@ -15,11 +15,11 @@ export default function TeamErrorBoundary({
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-900/50 dark:bg-red-950/40">
-        <h2 className="text-lg font-semibold text-red-900 dark:text-red-200">
+      <div className="rounded-lg border border-red-200 bg-red-50 p-6">
+        <h2 className="text-lg font-semibold text-red-900">
           Something went wrong loading the team.
         </h2>
-        <p className="mt-2 text-sm text-red-800 dark:text-red-300">
+        <p className="mt-2 text-sm text-red-800">
           {error.message || 'An unexpected error occurred.'}
         </p>
         <button

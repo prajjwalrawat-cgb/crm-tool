@@ -1,4 +1,4 @@
-import { Activity } from 'lucide-react';
+﻿import { Activity } from 'lucide-react';
 
 import { formatActivity, formatRelativeTime } from '@/lib/activity/format';
 import type { ActivityRow } from '@/lib/activity/queries';
@@ -13,17 +13,15 @@ export function ActivityList({
 }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
-        <Activity className="mx-auto h-8 w-8 text-zinc-400" aria-hidden />
-        <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
-          {emptyMessage}
-        </p>
+      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+        <Activity className="mx-auto h-6 w-6 text-slate-400" aria-hidden />
+        <p className="mt-2 text-[12px] text-slate-500">{emptyMessage}</p>
       </div>
     );
   }
 
   return (
-    <ol className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+    <ol className="divide-y divide-slate-100">
       {rows.map((row) => (
         <ActivityListItem key={row.id} row={row} />
       ))}
@@ -34,20 +32,20 @@ export function ActivityList({
 function ActivityListItem({ row }: { row: ActivityRow }) {
   const formatted = formatActivity(row);
   return (
-    <li className="flex items-start gap-3 px-4 py-3 text-sm">
+    <li className="flex items-center gap-2.5 py-1.5 text-[12.5px]">
       <ActivityAvatar row={row} />
       <div className="min-w-0 flex-1">
-        <p className="break-words">{formatted.sentence}</p>
+        <p className="truncate">{formatted.sentence}</p>
         {formatted.detail ? (
-          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="truncate text-[10.5px] text-slate-500">
             {formatted.detail}
           </p>
         ) : null}
-        <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-          {formatRelativeTime(row.createdAt)}
-        </p>
       </div>
       <ActionPill action={row.action} />
+      <span className="shrink-0 text-[10px] tabular-nums text-slate-400">
+        {formatRelativeTime(row.createdAt)}
+      </span>
     </li>
   );
 }
@@ -60,30 +58,30 @@ function ActivityAvatar({ row }: { row: ActivityRow }) {
       <img
         src={row.actor.imageUrl}
         alt=""
-        className="h-7 w-7 shrink-0 rounded-full object-cover"
+        className="h-5 w-5 shrink-0 rounded-full object-cover"
       />
     );
   }
   return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-medium text-slate-600">
       {initial}
     </span>
   );
 }
 
 const ACTION_STYLES: Record<string, string> = {
-  created: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
-  updated: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
-  deleted: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
-  restored: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300',
+  created: 'bg-emerald-100 text-emerald-700',
+  updated: 'bg-blue-100 text-blue-700',
+  deleted: 'bg-red-100 text-red-700',
+  restored: 'bg-amber-100 text-amber-800',
   stage_changed:
-    'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300',
-  invited: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
+    'bg-indigo-100 text-indigo-700',
+  invited: 'bg-blue-100 text-blue-700',
   invitation_revoked:
-    'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
-  member_removed: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
+    'bg-slate-100 text-slate-700',
+  member_removed: 'bg-red-100 text-red-700',
   role_changed:
-    'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300',
+    'bg-indigo-100 text-indigo-700',
 };
 
 function ActionPill({ action }: { action: string }) {

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -64,12 +64,12 @@ export const DealCard = memo(function DealCard({
       {...(overlay ? {} : listeners)}
       data-pending={deal.__pending ? '' : undefined}
       className={cn(
-        'group rounded-md border bg-white p-3 text-sm shadow-sm transition dark:bg-zinc-900',
-        'border-zinc-200 dark:border-zinc-800',
+        'group rounded-md border bg-white p-3 text-sm shadow-sm transition',
+        'border-slate-200',
         deal.stage === 'won' &&
-          'border-l-4 border-l-emerald-500 dark:border-l-emerald-400',
+          'border-l-4 border-l-emerald-500',
         deal.stage === 'lost' &&
-          'border-l-4 border-l-zinc-400 dark:border-l-zinc-500',
+          'border-l-4 border-l-slate-400',
         deal.__pending && 'opacity-60',
         !overlay && draggable && 'cursor-grab active:cursor-grabbing',
         overlay && 'rotate-1 cursor-grabbing shadow-2xl',
@@ -96,14 +96,14 @@ export const DealCard = memo(function DealCard({
         )}
         {deal.__pending ? (
           <Loader2
-            className="h-3 w-3 shrink-0 animate-spin text-zinc-400"
+            className="h-3 w-3 shrink-0 animate-spin text-slate-400"
             aria-hidden
           />
         ) : null}
       </header>
 
       {(deal.companyName || deal.contactName || deal.contactEmail) ? (
-        <p className="mt-1 truncate text-xs text-zinc-600 dark:text-zinc-400">
+        <p className="mt-1 truncate text-xs text-slate-600">
           {[deal.companyName, deal.contactName ?? deal.contactEmail]
             .filter(Boolean)
             .join(' · ')}
@@ -117,9 +117,9 @@ export const DealCard = memo(function DealCard({
         {deal.expectedCloseDate ? (
           <span
             className={cn(
-              'inline-flex items-center gap-1 text-zinc-500',
+              'inline-flex items-center gap-1 text-slate-500',
               isOverdue(deal, today) &&
-                'font-medium text-red-600 dark:text-red-400',
+                'font-medium text-red-600',
             )}
           >
             {isOverdue(deal, today) ? (

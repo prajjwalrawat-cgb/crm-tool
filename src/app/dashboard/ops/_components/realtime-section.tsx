@@ -1,4 +1,4 @@
-import type { MetricsSnapshot } from '@/lib/observability';
+﻿import type { MetricsSnapshot } from '@/lib/observability';
 
 import { fmtDuration, fmtNumber, Section, StatTile } from './primitives';
 
@@ -39,7 +39,7 @@ export function RealtimeSection({ metrics }: { metrics: MetricsSnapshot }) {
       </div>
 
       {unauth > 0 ? (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300">
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {fmtNumber(unauth)} unauthenticated SSE connection attempts in this
           process. Expected during routine sign-out, but a sudden spike is
           worth investigating.
@@ -48,16 +48,16 @@ export function RealtimeSection({ metrics }: { metrics: MetricsSnapshot }) {
 
       {tenantOpens.length > 0 ? (
         <div className="mt-4">
-          <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
             Per-tenant opens
           </h3>
           <ul className="grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
             {tenantOpens.slice(0, 8).map((row) => (
               <li
                 key={row.label}
-                className="flex items-center justify-between rounded-md border border-zinc-200 px-2 py-1 font-mono text-[11px] dark:border-zinc-800"
+                className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 font-mono text-[11px]"
               >
-                <span className="truncate text-zinc-500">{row.label}</span>
+                <span className="truncate text-slate-500">{row.label}</span>
                 <span className="ml-2 tabular-nums">{fmtNumber(row.count)}</span>
               </li>
             ))}

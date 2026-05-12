@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Plus } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -61,10 +61,10 @@ export function CreateDrawer({
         onClick={() => setOpen(true)}
         disabled={disabled}
         className={cn(
-          'inline-flex items-center gap-2 rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition',
-          'hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-2',
+          'inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition',
+          'hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
           'disabled:cursor-not-allowed disabled:opacity-50',
-          'dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white dark:focus:ring-zinc-100',
+          '',
         )}
       >
         <Plus className="h-4 w-4" aria-hidden />

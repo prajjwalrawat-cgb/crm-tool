@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useState } from 'react';
 
@@ -33,7 +33,7 @@ export function PresenceIndicator({ tenantId }: { tenantId: string }) {
 
   return (
     <div
-      className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-2 py-1 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm"
       aria-label={`${members.length} active`}
       title={members.map((m) => m.displayName ?? m.userId).join(', ')}
     >
@@ -47,9 +47,9 @@ export function PresenceIndicator({ tenantId }: { tenantId: string }) {
         ))}
       </div>
       {overflow > 0 ? (
-        <span className="ml-1 text-zinc-500">+{overflow}</span>
+        <span className="ml-1 text-slate-500">+{overflow}</span>
       ) : null}
-      <span className="hidden text-zinc-500 sm:inline">
+      <span className="hidden text-slate-500 sm:inline">
         {members.length} online
       </span>
     </div>
@@ -65,14 +65,14 @@ function Avatar({ member }: { member: PresenceMember }) {
         src={member.imageUrl}
         alt=""
         className={cn(
-          'h-5 w-5 rounded-full border-2 border-white object-cover dark:border-zinc-900',
+          'h-5 w-5 rounded-full border-2 border-white object-cover',
         )}
       />
     );
   }
   return (
     <span
-      className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-zinc-200 text-[10px] font-medium text-zinc-700 dark:border-zinc-900 dark:bg-zinc-800 dark:text-zinc-200"
+      className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-medium text-slate-700"
       aria-label={member.displayName ?? member.userId}
     >
       {initial}

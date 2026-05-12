@@ -1,4 +1,4 @@
-import type { ErrorEntry } from '@/lib/observability';
+﻿import type { ErrorEntry } from '@/lib/observability';
 
 import { Section, StatusPill } from './primitives';
 
@@ -15,7 +15,7 @@ export function ErrorsSection({ errors }: { errors: ErrorEntry[] }) {
         title="Errors"
         description="In-process error capture. Cleared on restart."
       >
-        <p className="text-xs text-zinc-500">No errors captured on this Node process.</p>
+        <p className="text-xs text-slate-500">No errors captured on this Node process.</p>
       </Section>
     );
   }
@@ -28,42 +28,42 @@ export function ErrorsSection({ errors }: { errors: ErrorEntry[] }) {
         {errors.slice(0, 25).map((err, i) => {
           const tone =
             err.severity === 'fatal'
-              ? 'border-red-300 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30'
+              ? 'border-red-300 bg-red-50'
               : err.severity === 'high'
-                ? 'border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30'
-                : 'border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950';
+                ? 'border-amber-300 bg-amber-50'
+                : 'border-slate-200 bg-slate-50';
           return (
             <li
               key={`${err.capturedAt}-${i}`}
               className={`rounded-md border px-3 py-2 ${tone}`}
             >
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <span className="font-mono text-zinc-500">
+                <span className="font-mono text-slate-500">
                   {dateFormatter.format(new Date(err.capturedAt))}
                 </span>
                 <StatusPill status={err.severity} />
                 <span className="font-medium">{err.category}</span>
                 {err.retryable ? (
-                  <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                  <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-blue-700">
                     retryable
                   </span>
                 ) : null}
                 {err.traceId ? (
-                  <span className="font-mono text-[10px] text-zinc-400">
+                  <span className="font-mono text-[10px] text-slate-400">
                     trace={err.traceId.slice(0, 8)}
                   </span>
                 ) : null}
                 {err.tenantId ? (
-                  <span className="font-mono text-[10px] text-zinc-400">
+                  <span className="font-mono text-[10px] text-slate-400">
                     tenant={err.tenantId.slice(0, 8)}
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1 break-words text-zinc-700 dark:text-zinc-200">
+              <p className="mt-1 break-words text-slate-700">
                 {err.message}
               </p>
               {err.fields && Object.keys(err.fields).length > 0 ? (
-                <pre className="mt-1 overflow-x-auto font-mono text-[10px] text-zinc-500">
+                <pre className="mt-1 overflow-x-auto font-mono text-[10px] text-slate-500">
                   {JSON.stringify(err.fields, null, 2)}
                 </pre>
               ) : null}

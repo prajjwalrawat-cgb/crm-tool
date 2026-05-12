@@ -1,4 +1,4 @@
-import { redirect } from 'next/navigation';
+﻿import { redirect } from 'next/navigation';
 
 import { getAIMode } from '@/lib/ai/config';
 import { withTenantSession } from '@/lib/auth-guard';
@@ -50,10 +50,10 @@ export default async function OpsPage() {
     const aiMode = getAIMode();
 
     return (
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
         <header className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">Operations</h1>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Operations</h1>
+          <p className="mt-0.5 text-[12px] text-slate-500">
             Live platform health for this tenant. Counters, gauges, and
             histograms are read from the current Node process; recent
             workflow + AI rows come from Postgres.

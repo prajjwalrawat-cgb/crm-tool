@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { KanbanSquare, List } from 'lucide-react';
 import Link from 'next/link';
@@ -18,7 +18,7 @@ export function DealViewTabs() {
     <nav
       role="tablist"
       aria-label="Deals view"
-      className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white p-1 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-sm"
     >
       {TABS.map((tab) => {
         const Icon = tab.icon;
@@ -34,8 +34,8 @@ export function DealViewTabs() {
             className={cn(
               'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 transition',
               active
-                ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900'
-                : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800',
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-slate-600 hover:bg-slate-100',
             )}
           >
             <Icon className="h-3.5 w-3.5" aria-hidden />

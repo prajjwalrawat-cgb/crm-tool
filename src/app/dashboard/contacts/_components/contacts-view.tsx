@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Loader2, Pencil, Search, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -224,7 +224,7 @@ export function ContactsView({
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
               aria-hidden
             />
             <input
@@ -234,15 +234,15 @@ export function ContactsView({
               placeholder="Search by name, email, or title…"
               aria-label="Search contacts"
               className={cn(
-                'w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-9 text-sm shadow-sm transition',
-                'placeholder:text-zinc-400',
+                'w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-9 text-sm shadow-sm transition',
+                'placeholder:text-slate-400',
                 'focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20',
-                'dark:border-zinc-800 dark:bg-zinc-900 dark:placeholder:text-zinc-500',
+                '',
               )}
             />
             {searchPending ? (
               <Loader2
-                className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-zinc-400"
+                className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400"
                 aria-hidden
               />
             ) : null}
@@ -271,7 +271,7 @@ export function ContactsView({
         {actionError ? (
           <p
             role="alert"
-            className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
+            className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
           >
             {actionError}
           </p>
@@ -280,7 +280,7 @@ export function ContactsView({
         {showEmpty ? (
           <EmptyState searchActive={trimmedSearch.length > 0} />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
             <ContactsTable
               items={optimisticItems}
               canEdit={canEdit}
@@ -338,8 +338,8 @@ function ContactsTable({
   const showActions = canEdit || canDelete;
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-          <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+      <table className="min-w-full divide-y divide-slate-100 text-[13px]">
+          <thead className="sticky top-0 z-10 bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
             <tr>
               <th scope="col" className="px-3 py-2 text-left font-medium">
                 Name
@@ -375,7 +375,7 @@ function ContactsTable({
               ) : null}
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+          <tbody className="divide-y divide-slate-200">
             {items.map((c) => (
               <tr
                 key={c.id}
@@ -384,19 +384,19 @@ function ContactsTable({
                 <td className="px-3 py-2">
                   <div className="font-medium">{displayName(c)}</div>
                   {c.phone ? (
-                    <div className="text-xs text-zinc-500">{c.phone}</div>
+                    <div className="text-xs text-slate-500">{c.phone}</div>
                   ) : null}
                 </td>
-                <td className="hidden px-3 py-2 text-zinc-600 sm:table-cell dark:text-zinc-400">
+                <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">
                   {c.email ?? '—'}
                 </td>
-                <td className="hidden px-3 py-2 text-zinc-600 md:table-cell dark:text-zinc-400">
+                <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
                   {c.title ?? '—'}
                 </td>
-                <td className="hidden px-3 py-2 text-zinc-600 md:table-cell dark:text-zinc-400">
+                <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
                   {c.companyName ?? '—'}
                 </td>
-                <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-zinc-500 sm:table-cell">
+                <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 sm:table-cell">
                   {dateFormatter.format(new Date(c.createdAt))}
                 </td>
                 {showActions ? (
@@ -451,7 +451,7 @@ function RowActions({
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+          className="rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50"
         >
           Cancel
         </button>
@@ -466,7 +466,7 @@ function RowActions({
           type="button"
           onClick={onEdit}
           aria-label="Edit"
-          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          className="rounded-md border border-slate-200 p-1 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
         >
           <Pencil className="h-3.5 w-3.5" aria-hidden />
         </button>
@@ -476,7 +476,7 @@ function RowActions({
           type="button"
           onClick={() => setConfirming(true)}
           aria-label="Delete"
-          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-red-50 hover:text-red-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+          className="rounded-md border border-slate-200 p-1 text-slate-600 hover:bg-red-50 hover:text-red-700"
         >
           <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </button>

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Loader2, RotateCcw, Trash2, X } from 'lucide-react';
 import { useOptimistic, useState, useTransition } from 'react';
@@ -77,10 +77,10 @@ export function RecentlyDeletedView({
 
   if (total === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-6 py-16 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
-        <Trash2 className="mx-auto h-10 w-10 text-zinc-400" aria-hidden />
+      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-16 text-center">
+        <Trash2 className="mx-auto h-10 w-10 text-slate-400" aria-hidden />
         <h2 className="mt-4 text-base font-semibold">Trash is empty</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="mt-0.5 text-[12px] text-slate-500">
           Nothing has been soft-deleted in this tenant.
         </p>
       </div>
@@ -134,8 +134,8 @@ function CompaniesSection({
 
   return (
     <Section title="Deleted companies" count={optimisticRows.length}>
-      <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+      <table className="min-w-full divide-y divide-slate-100 text-[13px]">
+        <thead className="bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
           <tr>
             <Th>Name</Th>
             <Th hidden="sm">Domain</Th>
@@ -146,7 +146,7 @@ function CompaniesSection({
             ) : null}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+        <tbody className="divide-y divide-slate-200">
           {optimisticRows.map((c) => (
             <RestorableRow
               key={c.id}
@@ -158,8 +158,8 @@ function CompaniesSection({
               onOptimistic={removeOptimistic}
               cells={[
                 <span key="name" className="font-medium">{c.name}</span>,
-                <span key="domain" className="text-zinc-600 dark:text-zinc-400">{c.domain ?? '—'}</span>,
-                <span key="industry" className="text-zinc-600 dark:text-zinc-400">{c.industry ?? '—'}</span>,
+                <span key="domain" className="text-slate-600">{c.domain ?? '—'}</span>,
+                <span key="industry" className="text-slate-600">{c.industry ?? '—'}</span>,
                 c.deletedAt ? dateFormatter.format(new Date(c.deletedAt)) : '—',
               ]}
               hiddenAt={['', 'sm', 'md', '']}
@@ -190,8 +190,8 @@ function ContactsSection({
 
   return (
     <Section title="Deleted contacts" count={optimisticRows.length}>
-      <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+      <table className="min-w-full divide-y divide-slate-100 text-[13px]">
+        <thead className="bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
           <tr>
             <Th>Name</Th>
             <Th hidden="sm">Email</Th>
@@ -202,7 +202,7 @@ function ContactsSection({
             ) : null}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+        <tbody className="divide-y divide-slate-200">
           {optimisticRows.map((c) => (
             <RestorableRow
               key={c.id}
@@ -214,8 +214,8 @@ function ContactsSection({
               onOptimistic={removeOptimistic}
               cells={[
                 <span key="name" className="font-medium">{contactName(c)}</span>,
-                <span key="email" className="text-zinc-600 dark:text-zinc-400">{c.email ?? '—'}</span>,
-                <span key="title" className="text-zinc-600 dark:text-zinc-400">{c.title ?? '—'}</span>,
+                <span key="email" className="text-slate-600">{c.email ?? '—'}</span>,
+                <span key="title" className="text-slate-600">{c.title ?? '—'}</span>,
                 c.deletedAt ? dateFormatter.format(new Date(c.deletedAt)) : '—',
               ]}
               hiddenAt={['', 'sm', 'md', '']}
@@ -246,8 +246,8 @@ function DealsSection({
 
   return (
     <Section title="Deleted deals" count={optimisticRows.length}>
-      <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+      <table className="min-w-full divide-y divide-slate-100 text-[13px]">
+        <thead className="bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
           <tr>
             <Th>Name</Th>
             <Th hidden="sm">Stage</Th>
@@ -258,7 +258,7 @@ function DealsSection({
             ) : null}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+        <tbody className="divide-y divide-slate-200">
           {optimisticRows.map((d) => (
             <RestorableRow
               key={d.id}
@@ -270,7 +270,7 @@ function DealsSection({
               onOptimistic={removeOptimistic}
               cells={[
                 <span key="name" className="font-medium">{d.name}</span>,
-                <span key="stage" className="text-zinc-600 dark:text-zinc-400">{DEAL_STAGE_LABELS[d.stage]}</span>,
+                <span key="stage" className="text-slate-600">{DEAL_STAGE_LABELS[d.stage]}</span>,
                 <span key="amount" className="font-mono">{formatCurrency(d.amountMinor, d.currency)}</span>,
                 d.deletedAt ? dateFormatter.format(new Date(d.deletedAt)) : '—',
               ]}
@@ -296,10 +296,10 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <header className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <header className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
         <h2 className="text-sm font-semibold">{title}</h2>
-        <span className="text-xs text-zinc-500">{count}</span>
+        <span className="text-xs text-slate-500">{count}</span>
       </header>
       <div className="overflow-x-auto">{children}</div>
     </section>
@@ -393,7 +393,7 @@ function RestorableRow({
           className={cn(
             'whitespace-nowrap px-3 py-2',
             alignRight[i] && 'text-right',
-            i === cells.length - 1 && 'text-xs text-zinc-500',
+            i === cells.length - 1 && 'text-xs text-slate-500',
             hiddenAt[i] === 'sm' && 'hidden sm:table-cell',
             hiddenAt[i] === 'md' && 'hidden md:table-cell',
             hiddenAt[i] === 'lg' && 'hidden lg:table-cell',
@@ -406,7 +406,7 @@ function RestorableRow({
         <td className="whitespace-nowrap px-3 py-2 text-right">
           {confirmingPurge && canHardDelete ? (
             <span className="inline-flex items-center gap-1.5">
-              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+              <span className="text-[11px] text-slate-500">
                 Permanent — cannot be undone.
               </span>
               <button
@@ -427,7 +427,7 @@ function RestorableRow({
                 onClick={() => setConfirmingPurge(false)}
                 disabled={pending}
                 aria-label="Cancel permanent delete"
-                className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                className="rounded-md border border-slate-200 p-1 text-slate-600 hover:bg-slate-50 disabled:opacity-60"
               >
                 <X className="h-3 w-3" aria-hidden />
               </button>
@@ -440,7 +440,7 @@ function RestorableRow({
                   onClick={handleRestore}
                   disabled={pending}
                   title={`Restore ${label}`}
-                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-300"
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-60"
                 >
                   {pending ? (
                     <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
@@ -457,7 +457,7 @@ function RestorableRow({
                   disabled={pending}
                   title={`Permanently delete ${label}`}
                   aria-label={`Permanently delete ${label}`}
-                  className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                  className="rounded-md border border-slate-200 p-1 text-slate-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-60"
                 >
                   <Trash2 className="h-3 w-3" aria-hidden />
                 </button>

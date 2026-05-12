@@ -1,4 +1,4 @@
-import { withTenantSession } from '@/lib/auth-guard';
+﻿import { withTenantSession } from '@/lib/auth-guard';
 import { listDeletedCompanies } from '@/lib/companies/queries';
 import { listDeletedContacts } from '@/lib/contacts/queries';
 import { listDeletedDeals } from '@/lib/deals/queries';
@@ -28,17 +28,17 @@ export default async function RecentlyDeletedPage() {
     const deals = dealsPage.items;
 
     return (
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
         <header className="mb-6">
           <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">
               Recently deleted
             </h1>
-            <span className="rounded-full border border-zinc-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
               your role: {membership.role}
             </span>
           </div>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mt-0.5 text-[12px] text-slate-500">
             Soft-deleted records still in this tenant. Owners and admins can
             restore. Permanent delete is owner-only.
           </p>

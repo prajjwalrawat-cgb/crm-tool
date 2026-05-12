@@ -1,0 +1,614 @@
+import { config } from 'dotenv';
+import { sql } from 'drizzle-orm';
+
+config({ path: '.env.local' });
+config();
+
+/**
+ * Demo seed for development/testing — produces a CRM that feels populated
+ * but not noisy. Distinct from `seed-stress-data.ts` (which floods the DB
+ * for pagination/perf testing); this one is shaped for the dashboard's
+ * KPIs, the pipeline distribution, recent-activity, and workflow-health
+ * widgets to all look "alive" at a glance.
+ *
+ * Usage:
+ *   pnpm seed:demo                     // wipes prior demo rows, reseeds fresh
+ *   pnpm seed:reset                    // wipes prior demo rows, no reseed
+ *   TENANT_ID=<uuid> pnpm seed:demo    // target a specific tenant
+ *
+ * Tagging: every row written by this script is marked `metadata.demoSeed=true`
+ * (on activity_logs + workflow_runs) so the reset path can delete *only*
+ * demo data without touching real records. Companies/contacts/deals are
+ * located via the activity_log creation rows tagged the same way.
+ *
+ * Counts (deliberately mid-sized for "feels populated, not flooded"):
+ *   - 30 companies (Indian + international mix)
+ *   - 50 contacts (most attached to a company; a few orphan)
+ *   - 80 deals distributed across all stages, with stale + recent variety
+ *   - ~140 activity rows (creates, stage moves, automation notes)
+ *   - 14 workflow runs (mix of completed/failed/skipped/running)
+ */
+
+const RESET_ONLY =
+  process.argv.includes('--reset-only') || process.env.RESET_ONLY === '1';
+const SKIP_RESET = process.argv.includes('--no-reset');
+
+const STAGES = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost'] as const;
+type Stage = (typeof STAGES)[number];
+
+const CURRENCIES = [
+  { code: 'USD', weight: 0.6 },
+  { code: 'INR', weight: 0.25 },
+  { code: 'EUR', weight: 0.1 },
+  { code: 'GBP', weight: 0.05 },
+] as const;
+
+const COMPANIES_INDIAN = [
+  { name: 'Tata Consultancy Services', domain: 'tcs.com', industry: 'IT Services' },
+  { name: 'Infosys', domain: 'infosys.com', industry: 'IT Services' },
+  { name: 'Wipro', domain: 'wipro.com', industry: 'IT Services' },
+  { name: 'HCL Technologies', domain: 'hcltech.com', industry: 'IT Services' },
+  { name: 'Reliance Industries', domain: 'ril.com', industry: 'Conglomerate' },
+  { name: 'Flipkart', domain: 'flipkart.com', industry: 'E-commerce' },
+  { name: 'Zomato', domain: 'zomato.com', industry: 'Food Tech' },
+  { name: 'Swiggy', domain: 'swiggy.com', industry: 'Food Tech' },
+  { name: "BYJU'S", domain: 'byjus.com', industry: 'EdTech' },
+  { name: 'Razorpay', domain: 'razorpay.com', industry: 'Fintech' },
+  { name: 'Ola', domain: 'olacabs.com', industry: 'Mobility' },
+  { name: 'Paytm', domain: 'paytm.com', industry: 'Fintech' },
+  { name: 'Freshworks', domain: 'freshworks.com', industry: 'SaaS' },
+  { name: 'Zoho', domain: 'zoho.com', industry: 'SaaS' },
+  { name: 'Zerodha', domain: 'zerodha.com', industry: 'Fintech' },
+];
+
+const COMPANIES_INTL = [
+  { name: 'Stripe', domain: 'stripe.com', industry: 'Fintech' },
+  { name: 'Vercel', domain: 'vercel.com', industry: 'DevTools' },
+  { name: 'Linear', domain: 'linear.app', industry: 'SaaS' },
+  { name: 'Notion', domain: 'notion.so', industry: 'SaaS' },
+  { name: 'Figma', domain: 'figma.com', industry: 'Design' },
+  { name: 'Anthropic', domain: 'anthropic.com', industry: 'AI' },
+  { name: 'Cloudflare', domain: 'cloudflare.com', industry: 'Infrastructure' },
+  { name: 'Supabase', domain: 'supabase.com', industry: 'Infrastructure' },
+  { name: 'Datadog', domain: 'datadoghq.com', industry: 'Observability' },
+  { name: 'MongoDB', domain: 'mongodb.com', industry: 'Database' },
+  { name: 'Atlassian', domain: 'atlassian.com', industry: 'SaaS' },
+  { name: 'Shopify', domain: 'shopify.com', industry: 'E-commerce' },
+  { name: 'Airtable', domain: 'airtable.com', industry: 'SaaS' },
+  { name: 'Snowflake', domain: 'snowflake.com', industry: 'Data Platform' },
+  { name: 'Twilio', domain: 'twilio.com', industry: 'Communications' },
+];
+
+const FIRST_NAMES = [
+  // Indian
+  'Arjun', 'Priya', 'Rahul', 'Ananya', 'Vikram', 'Shreya', 'Karthik', 'Neha',
+  'Aditya', 'Pooja', 'Rohan', 'Divya', 'Sandeep', 'Kavya', 'Manish', 'Riya',
+  'Anand', 'Tanvi', 'Ravi', 'Meera',
+  // International
+  'Sarah', 'James', 'Olivia', 'Michael', 'Emma', 'David', 'Sophia', 'Daniel',
+  'Isabella', 'Ethan', 'Mia', 'Alexander', 'Charlotte', 'William', 'Amelia',
+  'Lucas', 'Harper', 'Benjamin', 'Evelyn', 'Henry',
+];
+
+const LAST_NAMES = [
+  // Indian
+  'Sharma', 'Patel', 'Kumar', 'Singh', 'Reddy', 'Iyer', 'Nair', 'Mehta',
+  'Rao', 'Gupta', 'Joshi', 'Shah', 'Verma', 'Khanna', 'Bose',
+  // International
+  'Anderson', 'Thompson', 'Garcia', 'Martinez', 'Lee', 'Wilson', 'Brown',
+  'Johnson', 'Davis', 'Miller', 'Wang', 'Chen', 'Kim', 'Rossi', 'Müller',
+];
+
+const TITLES = [
+  'Founder', 'CEO', 'CTO', 'VP Sales', 'VP Engineering', 'Engineering Manager',
+  'Product Manager', 'Account Executive', 'CFO', 'Head of Operations',
+  'Director of Marketing', 'Head of Customer Success', 'Solutions Architect',
+];
+
+const DEAL_NAME_TEMPLATES = [
+  '{co} — Annual Subscription',
+  '{co} — Enterprise Rollout',
+  '{co} — Pilot Expansion',
+  '{co} — Renewal',
+  '{co} — Q{q} Upgrade',
+  '{co} — Platform Migration',
+  '{co} — Add-on Modules',
+  '{co} — Seat Expansion',
+  '{co} — Integration Project',
+  '{co} — Strategic Partnership',
+];
+
+const AUTOMATION_NOTES = [
+  'Deal moved to won — follow-up reminder scheduled for {n} days.',
+  'Auto-summary refreshed from latest activity.',
+  'Embedding regenerated after content update.',
+  'Stale-deal alert dispatched to owner.',
+  'Welcome email queued for new member.',
+];
+
+const WORKFLOW_IDS = [
+  'deal-won',
+  'deal-lost',
+  'regenerate-embedding',
+  'new-member-onboarding',
+  'workflow-runs-retention',
+] as const;
+
+function pick<T>(arr: readonly T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]!;
+}
+
+function randInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function pickCurrency(): string {
+  const r = Math.random();
+  let acc = 0;
+  for (const c of CURRENCIES) {
+    acc += c.weight;
+    if (r <= acc) return c.code;
+  }
+  return 'USD';
+}
+
+function minutesAgo(m: number): Date {
+  return new Date(Date.now() - m * 60_000);
+}
+function hoursAgo(h: number): Date {
+  return minutesAgo(h * 60);
+}
+function daysAgo(d: number): Date {
+  return hoursAgo(d * 24);
+}
+function randomPastWithin(days: number): Date {
+  return new Date(Date.now() - randInt(0, days * 24 * 60) * 60_000);
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function main() {
+  const { db, client } = await import('../src/db/index');
+  const { companies, contacts, deals, activityLogs, workflowRuns } =
+    await import('../src/db/schema');
+
+  const tenantId =
+    process.env.TENANT_ID ??
+    (
+      (await db.execute(
+        sql`SELECT id FROM tenants ORDER BY created_at LIMIT 1`,
+      )) as unknown as Array<{ id: string }>
+    )[0]?.id;
+  if (!tenantId) {
+    console.error(
+      'No tenant found. Pass TENANT_ID=<uuid> or sign in via the app first.',
+    );
+    process.exit(2);
+  }
+
+  console.log(`tenant=${tenantId}`);
+
+  /* -------- RESET (always, unless --no-reset) -------- */
+  if (!SKIP_RESET) {
+    const t0 = Date.now();
+
+    // Workflow runs tagged demoSeed.
+    await db.execute(
+      sql`DELETE FROM workflow_runs
+          WHERE tenant_id = ${tenantId}::uuid
+            AND metadata->>'demoSeed' = 'true'`,
+    );
+
+    // Entities — locate ids via creation activity_log rows we tagged.
+    await db.execute(
+      sql`DELETE FROM deals
+          WHERE id IN (
+            SELECT entity_id::uuid
+            FROM activity_logs
+            WHERE tenant_id = ${tenantId}::uuid
+              AND metadata->>'demoSeed' = 'true'
+              AND entity_type = 'deal'
+          )`,
+    );
+    await db.execute(
+      sql`DELETE FROM contacts
+          WHERE id IN (
+            SELECT entity_id::uuid
+            FROM activity_logs
+            WHERE tenant_id = ${tenantId}::uuid
+              AND metadata->>'demoSeed' = 'true'
+              AND entity_type = 'contact'
+          )`,
+    );
+    await db.execute(
+      sql`DELETE FROM companies
+          WHERE id IN (
+            SELECT entity_id::uuid
+            FROM activity_logs
+            WHERE tenant_id = ${tenantId}::uuid
+              AND metadata->>'demoSeed' = 'true'
+              AND entity_type = 'company'
+          )`,
+    );
+
+    // The activity logs themselves.
+    await db.execute(
+      sql`DELETE FROM activity_logs
+          WHERE tenant_id = ${tenantId}::uuid
+            AND metadata->>'demoSeed' = 'true'`,
+    );
+
+    console.log(`reset complete in ${Date.now() - t0}ms`);
+  }
+
+  if (RESET_ONLY) {
+    console.log('reset-only flag set; skipping seed.');
+    await client.end({ timeout: 5 });
+    return;
+  }
+
+  /* -------- COMPANIES -------- */
+
+  let phase = Date.now();
+  const companyPool = [...COMPANIES_INDIAN, ...COMPANIES_INTL];
+  const companyRows = companyPool.slice(0, 30).map((c) => ({
+    tenantId,
+    name: c.name,
+    domain: c.domain,
+    industry: c.industry,
+    // Spread creation across last 120 days so the "oldest" companies feel
+    // long-lived and "newest" feel fresh.
+    createdAt: randomPastWithin(120),
+    updatedAt: randomPastWithin(30),
+  }));
+  const insertedCompanies = (await db
+    .insert(companies)
+    .values(companyRows)
+    .returning({
+      id: companies.id,
+      name: companies.name,
+      createdAt: companies.createdAt,
+    })) as Array<{ id: string; name: string; createdAt: Date }>;
+  console.log(
+    `  companies inserted: ${insertedCompanies.length} in ${Date.now() - phase}ms`,
+  );
+
+  /* -------- CONTACTS -------- */
+
+  phase = Date.now();
+  const contactRows = Array.from({ length: 50 }, (_, i) => {
+    // 92% of contacts attach to a company; ~4 orphan contacts give the
+    // entity list a realistic edge case.
+    const attachToCompany = Math.random() < 0.92;
+    const owner = attachToCompany
+      ? insertedCompanies[i % insertedCompanies.length]!
+      : null;
+    const first = pick(FIRST_NAMES);
+    const last = pick(LAST_NAMES);
+    const domain = owner
+      ? insertedCompanies.find((c) => c.id === owner.id)?.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+      : 'example';
+    return {
+      tenantId,
+      companyId: owner?.id ?? null,
+      firstName: first,
+      lastName: last,
+      email: `${first.toLowerCase()}.${last.toLowerCase()}@${domain ?? 'example'}.com`,
+      title: pick(TITLES),
+      phone: Math.random() < 0.6 ? `+91 9${randInt(100000000, 999999999)}` : null,
+      createdAt: randomPastWithin(120),
+      updatedAt: randomPastWithin(30),
+    };
+  });
+  const insertedContacts = (await db
+    .insert(contacts)
+    .values(contactRows)
+    .returning({
+      id: contacts.id,
+      firstName: contacts.firstName,
+      lastName: contacts.lastName,
+      companyId: contacts.companyId,
+    })) as Array<{
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    companyId: string | null;
+  }>;
+  console.log(
+    `  contacts  inserted: ${insertedContacts.length} in ${Date.now() - phase}ms`,
+  );
+
+  /* -------- DEALS -------- */
+
+  phase = Date.now();
+
+  // Deliberate stage distribution: roughly funnel-shaped on the open side,
+  // tighter on closed. Add some stale deals (in early stage but inactive).
+  const STAGE_PLAN: Array<{ stage: Stage; count: number }> = [
+    { stage: 'lead', count: 20 },
+    { stage: 'qualified', count: 18 },
+    { stage: 'proposal', count: 15 },
+    { stage: 'negotiation', count: 10 },
+    { stage: 'won', count: 12 },
+    { stage: 'lost', count: 5 },
+  ];
+
+  let dealIdx = 0;
+  const dealRows: Array<typeof deals.$inferInsert & { __stage: Stage }> = [];
+  for (const plan of STAGE_PLAN) {
+    for (let i = 0; i < plan.count; i++) {
+      const company = pick(insertedCompanies);
+      const matchingContacts = insertedContacts.filter(
+        (c) => c.companyId === company.id,
+      );
+      const contact =
+        matchingContacts.length > 0
+          ? pick(matchingContacts)
+          : insertedContacts[i % insertedContacts.length] ?? null;
+      const q = randInt(1, 4);
+      const name = pick(DEAL_NAME_TEMPLATES)
+        .replace('{co}', company.name)
+        .replace('{q}', String(q));
+
+      // Closed deals: closedAt 1–60d ago for variety.
+      // Active deals: createdAt within last 90d.
+      const isClosed = plan.stage === 'won' || plan.stage === 'lost';
+      const isStaleInEarly =
+        !isClosed &&
+        (plan.stage === 'lead' || plan.stage === 'qualified') &&
+        Math.random() < 0.25; // ~25% of leads/qualified are stale
+
+      const createdAt = isStaleInEarly
+        ? daysAgo(randInt(45, 120))
+        : isClosed
+          ? daysAgo(randInt(30, 180))
+          : daysAgo(randInt(0, 60));
+      const updatedAt = isStaleInEarly
+        ? daysAgo(randInt(30, 90))
+        : isClosed
+          ? daysAgo(randInt(0, 60))
+          : daysAgo(randInt(0, 14));
+      const closedAt = isClosed
+        ? // mix of recent wins/losses + older ones
+          Math.random() < 0.5
+          ? daysAgo(randInt(0, 7))
+          : daysAgo(randInt(10, 60))
+        : null;
+
+      // Expected close date: forward-looking for active deals, with some
+      // overdue ones to surface stale-deal alerts.
+      const expectedDaysOut = isClosed
+        ? null
+        : Math.random() < 0.15
+          ? -randInt(1, 14) // overdue
+          : randInt(7, 60);
+
+      const expectedCloseDate =
+        expectedDaysOut !== null
+          ? new Date(Date.now() + expectedDaysOut * 24 * 60 * 60_000)
+              .toISOString()
+              .slice(0, 10)
+          : null;
+
+      const currency = pickCurrency();
+      // Amount realistic per currency.
+      const amountMinor =
+        currency === 'INR'
+          ? randInt(50, 5000) * 100 * 1000 // ₹50k – ₹50L
+          : randInt(2, 500) * 100 * 1000; // $2k – $500k
+
+      dealRows.push({
+        tenantId,
+        companyId: company.id,
+        contactId: contact?.id ?? null,
+        name,
+        stage: plan.stage,
+        amountMinor,
+        currency,
+        expectedCloseDate,
+        closedAt,
+        ownerId: 'demo-seed',
+        createdAt,
+        updatedAt,
+        __stage: plan.stage,
+      });
+      dealIdx++;
+    }
+  }
+
+  const insertedDeals = (await db
+    .insert(deals)
+    .values(dealRows.map(({ __stage, ...row }) => row))
+    .returning({
+      id: deals.id,
+      name: deals.name,
+      stage: deals.stage,
+    })) as Array<{ id: string; name: string; stage: Stage }>;
+  console.log(
+    `  deals     inserted: ${insertedDeals.length} in ${Date.now() - phase}ms`,
+  );
+
+  /* -------- ACTIVITY LOGS -------- */
+
+  phase = Date.now();
+  const activityRows: Array<typeof activityLogs.$inferInsert> = [];
+
+  // Creation rows (these are also our "demo tag" anchors for reset).
+  for (const c of insertedCompanies) {
+    activityRows.push({
+      tenantId,
+      actorUserId: 'demo-seed',
+      entityType: 'company',
+      entityId: c.id,
+      action: 'created',
+      metadata: { demoSeed: true, name: c.name },
+      createdAt: c.createdAt,
+    });
+  }
+  for (const c of insertedContacts) {
+    activityRows.push({
+      tenantId,
+      actorUserId: 'demo-seed',
+      entityType: 'contact',
+      entityId: c.id,
+      action: 'created',
+      metadata: {
+        demoSeed: true,
+        name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim(),
+      },
+      createdAt: randomPastWithin(90),
+    });
+  }
+  for (const d of insertedDeals) {
+    activityRows.push({
+      tenantId,
+      actorUserId: 'demo-seed',
+      entityType: 'deal',
+      entityId: d.id,
+      action: 'created',
+      metadata: { demoSeed: true, name: d.name },
+      createdAt: randomPastWithin(60),
+    });
+  }
+
+  // Stage-changed rows for closed deals — gives the recent-wins widget
+  // something to chew on.
+  for (const d of insertedDeals.filter((x) => x.stage === 'won' || x.stage === 'lost')) {
+    const fromStage = pick(['negotiation', 'proposal'] as const);
+    activityRows.push({
+      tenantId,
+      actorUserId: 'demo-seed',
+      entityType: 'deal',
+      entityId: d.id,
+      action: 'stage_changed',
+      metadata: {
+        demoSeed: true,
+        from: fromStage,
+        to: d.stage,
+        name: d.name,
+      },
+      createdAt:
+        Math.random() < 0.5 ? daysAgo(randInt(0, 7)) : daysAgo(randInt(10, 60)),
+    });
+  }
+
+  // A handful of automation notes spread across recent time so the activity
+  // feed has shape.
+  for (let i = 0; i < 10; i++) {
+    const target = pick(insertedDeals);
+    activityRows.push({
+      tenantId,
+      actorUserId: null,
+      entityType: 'deal',
+      entityId: target.id,
+      action: 'automation_note',
+      metadata: {
+        demoSeed: true,
+        message: pick(AUTOMATION_NOTES).replace('{n}', String(randInt(3, 14))),
+      },
+      createdAt: randomPastWithin(20),
+    });
+  }
+
+  // A few "minutes ago" rows so the feed has a live feel even right after seeding.
+  for (let i = 0; i < 4; i++) {
+    const target = pick(insertedDeals);
+    activityRows.push({
+      tenantId,
+      actorUserId: 'demo-seed',
+      entityType: 'deal',
+      entityId: target.id,
+      action: 'updated',
+      metadata: { demoSeed: true, name: target.name, fields: ['notes'] },
+      createdAt: minutesAgo(randInt(2, 50)),
+    });
+  }
+
+  for (const batch of chunk(activityRows, 500)) {
+    await db.insert(activityLogs).values(batch);
+  }
+  console.log(
+    `  activity  inserted: ${activityRows.length} rows in ${Date.now() - phase}ms`,
+  );
+
+  /* -------- WORKFLOW RUNS -------- */
+
+  phase = Date.now();
+  type RunStatus = 'completed' | 'failed' | 'skipped' | 'running';
+  const runPlan: Array<{
+    workflowId: string;
+    eventName: string | null;
+    status: RunStatus;
+    startedAgoMin: number;
+    durationMs?: number;
+    error?: string | null;
+  }> = [
+    // Recent successful wins → drives workflow-health "healthy" signal.
+    { workflowId: 'deal-won', eventName: 'crm/deal.stage_changed', status: 'completed', startedAgoMin: 12, durationMs: 1840 },
+    { workflowId: 'deal-won', eventName: 'crm/deal.stage_changed', status: 'completed', startedAgoMin: 90, durationMs: 1620 },
+    { workflowId: 'deal-won', eventName: 'crm/deal.stage_changed', status: 'completed', startedAgoMin: 60 * 6, durationMs: 1755 },
+    { workflowId: 'deal-won', eventName: 'crm/deal.stage_changed', status: 'completed', startedAgoMin: 60 * 26, durationMs: 1492 },
+    { workflowId: 'deal-lost', eventName: 'crm/deal.stage_changed', status: 'completed', startedAgoMin: 60 * 4, durationMs: 1320 },
+    { workflowId: 'deal-lost', eventName: 'crm/deal.stage_changed', status: 'completed', startedAgoMin: 60 * 50, durationMs: 1410 },
+    { workflowId: 'regenerate-embedding', eventName: 'crm/ai.embed_entity', status: 'completed', startedAgoMin: 35, durationMs: 5200 },
+    { workflowId: 'regenerate-embedding', eventName: 'crm/ai.embed_entity', status: 'completed', startedAgoMin: 60 * 12, durationMs: 4800 },
+    { workflowId: 'new-member-onboarding', eventName: 'crm/member.invited', status: 'completed', startedAgoMin: 60 * 36, durationMs: 980 },
+    { workflowId: 'workflow-runs-retention', eventName: 'cron/15 9 * * *', status: 'completed', startedAgoMin: 60 * 23, durationMs: 540 },
+    { workflowId: 'workflow-runs-retention', eventName: 'cron/15 9 * * *', status: 'completed', startedAgoMin: 60 * 47, durationMs: 612 },
+    // One skipped (idempotency belt) + one failed (so the failed counter > 0).
+    { workflowId: 'deal-won', eventName: 'crm/deal.stage_changed', status: 'skipped', startedAgoMin: 60 * 28 },
+    {
+      workflowId: 'regenerate-embedding',
+      eventName: 'crm/ai.embed_entity',
+      status: 'failed',
+      startedAgoMin: 60 * 8,
+      durationMs: 2300,
+      error: 'OpenAI rate limit exceeded — retried 3x, gave up',
+    },
+    // One running (orphaned) to give the ops page a recovery target.
+    { workflowId: 'regenerate-embedding', eventName: 'crm/ai.embed_entity', status: 'running', startedAgoMin: 18 },
+  ];
+
+  const wfRows: Array<typeof workflowRuns.$inferInsert> = runPlan.map((r) => ({
+    tenantId,
+    workflowId: r.workflowId,
+    eventName: r.eventName,
+    inngestRunId: `local-demo-${Math.random().toString(36).slice(2, 14)}`,
+    status: r.status,
+    startedAt: minutesAgo(r.startedAgoMin),
+    completedAt:
+      r.status === 'running' || !r.durationMs
+        ? null
+        : new Date(minutesAgo(r.startedAgoMin).getTime() + r.durationMs),
+    error: r.error ?? null,
+    metadata: { demoSeed: true, source: 'local' },
+  }));
+  await db.insert(workflowRuns).values(wfRows);
+  console.log(`  workflows inserted: ${wfRows.length} in ${Date.now() - phase}ms`);
+
+  /* -------- SUMMARY -------- */
+
+  console.log('\n  summary');
+  console.log(`    companies:         ${insertedCompanies.length}`);
+  console.log(`    contacts:          ${insertedContacts.length}`);
+  console.log(`    deals:             ${insertedDeals.length}`);
+  for (const plan of STAGE_PLAN) {
+    console.log(`      ${plan.stage.padEnd(12)} ${plan.count}`);
+  }
+  console.log(`    activity rows:     ${activityRows.length}`);
+  console.log(`    workflow runs:     ${wfRows.length}`);
+  console.log('\n  done.\n');
+
+  await client.end({ timeout: 5 });
+}
+
+main().catch((err) => {
+  console.error('seed-demo fatal:', err);
+  process.exit(1);
+});

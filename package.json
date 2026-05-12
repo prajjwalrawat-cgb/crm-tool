@@ -10,6 +10,8 @@
     "inngest:dev": "npx inngest-cli@latest dev -u http://localhost:3001/api/inngest --no-discovery",
     "selftest": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-lifecycle.ts && tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-ai-and-observability.ts && tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-workflows.ts && tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-pagination.ts",
     "seed:stress": "tsx scripts/seed-stress-data.ts",
+    "seed:demo": "tsx scripts/seed-demo-data.ts",
+    "seed:reset": "tsx scripts/seed-demo-data.ts --reset-only",
     "bench": "tsx scripts/benchmark-queries.ts"
   },
   "dependencies": {

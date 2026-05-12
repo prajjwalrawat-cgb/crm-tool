@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Loader2, ShieldX, Trash2 } from 'lucide-react';
 import { useOptimistic, useState, useTransition } from 'react';
@@ -108,7 +108,7 @@ export function TeamView({
         {actionError ? (
           <p
             role="alert"
-            className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
+            className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
           >
             {actionError}
           </p>
@@ -166,10 +166,10 @@ function MembersTable({
   onActionError: (msg: string | null) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-          <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+        <table className="min-w-full divide-y divide-slate-100 text-[13px]">
+          <thead className="bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
             <tr>
               <th scope="col" className="px-4 py-2.5 text-left font-medium">
                 Member
@@ -199,7 +199,7 @@ function MembersTable({
               ) : null}
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+          <tbody className="divide-y divide-slate-200">
             {members.map((m) => (
               <MemberRow
                 key={m.id}
@@ -277,13 +277,13 @@ function MemberRow({
             <div className="font-medium">
               {displayName(member)}
               {isSelf ? (
-                <span className="ml-2 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:bg-zinc-800">
+                <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
                   You
                 </span>
               ) : null}
             </div>
             {member.email ? (
-              <div className="text-xs text-zinc-500">{member.email}</div>
+              <div className="text-xs text-slate-500">{member.email}</div>
             ) : null}
           </div>
         </div>
@@ -296,7 +296,7 @@ function MemberRow({
             onChange={(e) => handleRoleChange(e.target.value as InviteRole)}
             aria-label={`Change role for ${displayName(member)}`}
             className={cn(
-              'rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-950',
+              'rounded-md border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20',
               rolePending && 'opacity-60',
             )}
           >
@@ -313,7 +313,7 @@ function MemberRow({
       <td className="hidden px-4 py-3 sm:table-cell">
         <StatusBadge status={member.status} />
       </td>
-      <td className="hidden whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-500 sm:table-cell">
+      <td className="hidden whitespace-nowrap px-4 py-3 text-right text-xs text-slate-500 sm:table-cell">
         {dateFormatter.format(new Date(member.createdAt))}
       </td>
       {showActionsCell ? (
@@ -336,7 +336,7 @@ function MemberRow({
                   type="button"
                   onClick={() => setConfirmingRemove(false)}
                   disabled={removePending}
-                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:hover:bg-zinc-800"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60"
                 >
                   Cancel
                 </button>
@@ -346,7 +346,7 @@ function MemberRow({
                 type="button"
                 onClick={() => setConfirmingRemove(true)}
                 aria-label={`Remove ${displayName(member)}`}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-red-50 hover:text-red-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-red-50 hover:text-red-700"
               >
                 <Trash2 className="h-3 w-3" aria-hidden />
                 Remove
@@ -373,16 +373,16 @@ function PendingInvitations({
   if (invites.length === 0) return null;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="text-sm font-semibold">Pending invitations</h2>
-        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="mt-0.5 text-xs text-slate-500">
           Sent via Clerk. They&apos;ll appear above once accepted.
         </p>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
-          <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-950">
+        <table className="min-w-full divide-y divide-slate-100 text-[13px]">
+          <thead className="bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
             <tr>
               <th scope="col" className="px-4 py-2.5 text-left font-medium">
                 Email
@@ -406,7 +406,7 @@ function PendingInvitations({
               ) : null}
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+          <tbody className="divide-y divide-slate-200">
             {invites.map((inv) => (
               <PendingInviteRow
                 key={inv.id}
@@ -447,24 +447,24 @@ function PendingInviteRow({
     <tr className={cn(isOptimistic && 'opacity-60')}>
       <td className="px-4 py-3 font-medium">{invite.emailAddress}</td>
       <td className="px-4 py-3">
-        <span className="text-xs capitalize text-zinc-600 dark:text-zinc-400">
+        <span className="text-xs capitalize text-slate-600">
           {inviteRole ?? invite.role}
         </span>
       </td>
-      <td className="hidden whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-500 sm:table-cell">
+      <td className="hidden whitespace-nowrap px-4 py-3 text-right text-xs text-slate-500 sm:table-cell">
         {dateFormatter.format(new Date(invite.createdAt))}
       </td>
       {canRevoke ? (
         <td className="whitespace-nowrap px-4 py-3 text-right">
           {isOptimistic ? (
-            <Loader2 className="ml-auto h-3 w-3 animate-spin text-zinc-400" aria-hidden />
+            <Loader2 className="ml-auto h-3 w-3 animate-spin text-slate-400" aria-hidden />
           ) : (
             <button
               type="button"
               onClick={handleRevoke}
               disabled={revokePending}
               aria-label={`Revoke invitation to ${invite.emailAddress}`}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-60"
             >
               {revokePending ? (
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
@@ -484,8 +484,8 @@ function PendingInviteRow({
 
 function ReadOnlyNotice() {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-      <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
+      <h2 className="text-base font-semibold text-slate-900">
         Read-only view
       </h2>
       <p className="mt-1 text-xs">
@@ -516,17 +516,17 @@ function Avatar({ member }: { member: TeamMemberRow }) {
     );
   }
   return (
-    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs font-medium text-slate-700">
       {initial}
     </span>
   );
 }
 
 const ROLE_STYLES: Record<MembershipRole, string> = {
-  owner: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300',
-  admin: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300',
-  member: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
-  viewer: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
+  owner: 'bg-amber-100 text-amber-800',
+  admin: 'bg-indigo-100 text-indigo-700',
+  member: 'bg-slate-100 text-slate-700',
+  viewer: 'bg-slate-100 text-slate-700',
 };
 
 function RoleBadge({ role }: { role: MembershipRole }) {
@@ -543,9 +543,9 @@ function RoleBadge({ role }: { role: MembershipRole }) {
 }
 
 const STATUS_STYLES: Record<MembershipStatus, string> = {
-  active: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
-  invited: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
-  suspended: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
+  active: 'bg-emerald-100 text-emerald-700',
+  invited: 'bg-blue-100 text-blue-700',
+  suspended: 'bg-red-100 text-red-700',
 };
 
 function StatusBadge({ status }: { status: MembershipStatus }) {

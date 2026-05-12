@@ -1,132 +1,137 @@
-import { auth, currentUser } from '@clerk/nextjs/server';
-import { Building2, UsersRound } from 'lucide-react';
+import { currentUser } from '@clerk/nextjs/server';
 import Link from 'next/link';
 
 import { listRecentActivity } from '@/lib/activity/queries';
 import { withTenantSession } from '@/lib/auth-guard';
+import {
+  getDashboardOverview,
+  getPipelineCreatedTrend,
+  getRecentWins,
+  getStaleDeals,
+  getUpcomingFollowUps,
+  getWonLostTrend,
+  getWorkflowHealth,
+} from '@/lib/dashboard/queries';
 import { ensureMembership } from '@/lib/membership';
+import { canManageCompanies } from '@/lib/rbac';
 
 import { LiveActivityFeed } from './activity/_components/live-activity-feed';
+import {
+  PipelineTrendSparkline,
+  RecentWinsCard,
+  StaleDealsCard,
+  UpcomingFollowUpsCard,
+  WonLostTrendCard,
+  WorkflowHealthCard,
+} from './_components/intel-widgets';
+import {
+  KpiStrip,
+  PipelineDistribution,
+  QuickActions,
+} from './_components/overview-widgets';
 
 export const metadata = {
   title: 'Dashboard',
 };
 
+const PIPELINE_TREND_DAYS = 14;
+const WON_LOST_TREND_DAYS = 30;
+const STALE_DAYS = 14;
+const FOLLOW_UP_LOOK_AHEAD = 14;
+
 export default async function DashboardPage() {
   return await withTenantSession(async ({ tenant }) => {
-    const [{ userId, orgId }, user, membership, recentPage] = await Promise.all([
-      auth(),
+    const [
+      user,
+      membership,
+      recentPage,
+      overview,
+      wonLostTrend,
+      pipelineCreatedTrend,
+      staleDeals,
+      followUps,
+      recentWins,
+      workflowHealth,
+    ] = await Promise.all([
       currentUser(),
       ensureMembership(),
-      // The dashboard preview shows the most-recent 25 rows. Pagination
-      // controls are intentionally omitted on this page — full feed
-      // lives at /dashboard/activity.
       listRecentActivity(tenant.id, { size: 25 }),
+      getDashboardOverview(tenant.id),
+      getWonLostTrend(tenant.id, WON_LOST_TREND_DAYS),
+      getPipelineCreatedTrend(tenant.id, PIPELINE_TREND_DAYS),
+      getStaleDeals(tenant.id, { staleDays: STALE_DAYS, limit: 5 }),
+      getUpcomingFollowUps(tenant.id, {
+        lookAheadDays: FOLLOW_UP_LOOK_AHEAD,
+        limit: 6,
+      }),
+      getRecentWins(tenant.id, 5),
+      getWorkflowHealth(tenant.id, 7),
     ]);
+
+    const canCreate = canManageCompanies(membership?.role ?? null);
     const recentActivity = recentPage.items;
 
     return (
-    <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Welcome back{user?.firstName ? `, ${user.firstName}` : ''}.
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          You&apos;re signed in to <span className="font-medium">{tenant.name}</span>
-          {membership ? ` as ${membership.role}` : ''}.
-        </p>
-      </header>
+      <main className="mx-auto w-full max-w-[88rem] px-4 py-5 sm:px-5 lg:px-6">
+        <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-[18px] font-semibold leading-tight tracking-tight text-slate-900">
+              Welcome back{user?.firstName ? `, ${user.firstName}` : ''}.
+            </h1>
+            <p className="mt-0.5 text-[12px] text-slate-500">
+              <span className="font-medium text-slate-700">{tenant.name}</span>
+              {membership ? ` · ${membership.role}` : ''}
+            </p>
+          </div>
+          <div className="w-full max-w-xs">
+            <PipelineTrendSparkline
+              trend={pipelineCreatedTrend}
+              days={PIPELINE_TREND_DAYS}
+            />
+          </div>
+        </header>
 
-      <section className="grid gap-4 sm:grid-cols-2">
-        <QuickLink
-          href="/dashboard/companies"
-          icon={<Building2 className="h-5 w-5" aria-hidden />}
-          title="Companies"
-          description="Browse, search, and add companies in this tenant."
-        />
-        <QuickLink
-          href="/dashboard/contacts"
-          icon={<UsersRound className="h-5 w-5" aria-hidden />}
-          title="Contacts"
-          description="Capture people you talk to and link them to companies."
-        />
-      </section>
+        <KpiStrip overview={overview} />
 
-      <section className="mt-10">
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-base font-semibold tracking-tight">Recent activity</h2>
-          <Link
-            href="/dashboard/activity"
-            className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
-          >
-            View all
-          </Link>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <PipelineDistribution byStage={overview.dealsByStage} />
+          </div>
+          <QuickActions canCreate={canCreate} />
         </div>
-        <LiveActivityFeed
-          tenantId={tenant.id}
-          initialRows={recentActivity}
-          emptyMessage="Nothing here yet — activity will appear once you start adding records."
-        />
-      </section>
 
-      <section className="mt-10 grid gap-4 text-sm sm:grid-cols-3">
-        <DebugCard label="Tenant" value={tenant.name} />
-        <DebugCard label="User ID" value={userId ?? '?'} mono />
-        <DebugCard label="Org ID" value={orgId ?? '?'} mono />
-      </section>
-    </main>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <WonLostTrendCard trend={wonLostTrend} />
+          </div>
+          <WorkflowHealthCard health={workflowHealth} />
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <UpcomingFollowUpsCard rows={followUps} />
+          <StaleDealsCard rows={staleDeals} staleDays={STALE_DAYS} />
+          <RecentWinsCard rows={recentWins} />
+        </div>
+
+        <section className="mt-3 rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+          <header className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-[13px] font-semibold text-slate-900">
+              Recent activity
+            </h2>
+            <Link
+              href="/dashboard/activity"
+              className="text-[11px] font-medium text-indigo-600 hover:text-indigo-500"
+            >
+              View all →
+            </Link>
+          </header>
+          <LiveActivityFeed
+            tenantId={tenant.id}
+            initialRows={recentActivity}
+            emptyMessage="Nothing here yet — activity will appear once you start adding records."
+          />
+        </section>
+      </main>
     );
   });
-}
-
-function QuickLink({
-  href,
-  icon,
-  title,
-  description,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group flex items-start gap-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm transition hover:border-zinc-300 hover:shadow dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
-    >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700 transition group-hover:bg-zinc-900 group-hover:text-white dark:bg-zinc-800 dark:text-zinc-300 dark:group-hover:bg-zinc-100 dark:group-hover:text-zinc-900">
-        {icon}
-      </div>
-      <div>
-        <div className="font-medium">{title}</div>
-        <div className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-          {description}
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-function DebugCard({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
-        {label}
-      </div>
-      <div
-        className={`mt-1 break-all text-sm ${mono ? 'font-mono' : ''}`}
-      >
-        {value}
-      </div>
-    </div>
-  );
 }

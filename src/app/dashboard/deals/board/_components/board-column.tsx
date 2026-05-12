@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useDroppable } from '@dnd-kit/core';
 import {
@@ -14,15 +14,15 @@ import { cn } from '@/lib/utils';
 import { type BoardCard, DealCard } from './deal-card';
 
 const STAGE_HEADER_STYLES: Record<DealStage, string> = {
-  lead: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-300',
+  lead: 'bg-slate-100 text-slate-700',
   qualified:
-    'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
+    'bg-blue-100 text-blue-700',
   proposal:
-    'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300',
+    'bg-indigo-100 text-indigo-700',
   negotiation:
-    'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300',
-  won: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
-  lost: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
+    'bg-amber-100 text-amber-800',
+  won: 'bg-emerald-100 text-emerald-700',
+  lost: 'bg-red-100 text-red-700',
 };
 
 type Props = {
@@ -71,11 +71,11 @@ export const BoardColumn = memo(function BoardColumn({
     <section
       aria-label={`${DEAL_STAGE_LABELS[stage]} column`}
       className={cn(
-        'flex w-72 shrink-0 flex-col rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950/40',
+        'flex w-72 shrink-0 flex-col rounded-lg border border-slate-200 bg-slate-50',
         isOver && 'ring-2 ring-indigo-500/40',
       )}
     >
-      <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+      <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
         <span
           className={cn(
             'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
@@ -85,7 +85,7 @@ export const BoardColumn = memo(function BoardColumn({
           {DEAL_STAGE_LABELS[stage]}
         </span>
         <span
-          className="text-xs text-zinc-500"
+          className="text-xs text-slate-500"
           title={
             totalCount > cards.length
               ? `Showing ${cards.length} of ${totalCount}`
@@ -111,14 +111,14 @@ export const BoardColumn = memo(function BoardColumn({
         </SortableContext>
 
         {cards.length === 0 ? (
-          <p className="rounded-md border border-dashed border-zinc-300 px-3 py-6 text-center text-xs text-zinc-400 dark:border-zinc-700 dark:text-zinc-500">
+          <p className="rounded-md border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400">
             Drop here
           </p>
         ) : null}
       </div>
 
       {cards.length > 0 ? (
-        <footer className="border-t border-zinc-200 px-3 py-1.5 text-right text-xs text-zinc-500 dark:border-zinc-800">
+        <footer className="border-t border-slate-200 px-3 py-1.5 text-right text-xs text-slate-500">
           {formatCurrency(totalMinor, totalCurrency)}
         </footer>
       ) : null}

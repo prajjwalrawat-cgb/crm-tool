@@ -1,4 +1,4 @@
-import { withTenantSession } from '@/lib/auth-guard';
+﻿import { withTenantSession } from '@/lib/auth-guard';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { listWorkflowRuns } from '@/lib/workflows/queries';
 
@@ -36,10 +36,10 @@ export default async function WorkflowsPage({
     );
 
     return (
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
         <header className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Workflows</h1>
+          <p className="mt-0.5 text-[12px] text-slate-500">
             {tenant.name} — paginated by start time. Counts below reflect this
             page only.
           </p>
@@ -52,7 +52,7 @@ export default async function WorkflowsPage({
           <Stat label="Skipped" value={counts.skipped} accent="zinc" />
         </section>
 
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <WorkflowRunsList rows={page.items} />
           <PaginationControls
             basePath="/dashboard/workflows"
@@ -76,15 +76,15 @@ function Stat({
   accent: 'blue' | 'emerald' | 'red' | 'zinc';
 }) {
   const accentClass = {
-    blue: 'text-blue-600 dark:text-blue-300',
-    emerald: 'text-emerald-600 dark:text-emerald-300',
-    red: 'text-red-600 dark:text-red-300',
-    zinc: 'text-zinc-600 dark:text-zinc-300',
+    blue: 'text-blue-600',
+    emerald: 'text-emerald-600',
+    red: 'text-red-600',
+    zinc: 'text-slate-600',
   }[accent];
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="text-xs uppercase tracking-wide text-slate-500">
         {label}
       </div>
       <div className={`mt-1 text-xl font-semibold ${accentClass}`}>{value}</div>

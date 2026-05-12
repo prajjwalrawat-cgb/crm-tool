@@ -1,4 +1,4 @@
-import { withTenantSession } from '@/lib/auth-guard';
+﻿import { withTenantSession } from '@/lib/auth-guard';
 import { listCompanies } from '@/lib/companies/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
@@ -32,10 +32,10 @@ export default async function CompaniesPage({
     ]);
 
     return (
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">Companies</h1>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+      <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
+        <header className="mb-5">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Companies</h1>
+          <p className="mt-0.5 text-[12px] text-slate-500">
             {tenant.name}
           </p>
         </header>

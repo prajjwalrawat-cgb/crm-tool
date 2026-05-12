@@ -1,8 +1,43 @@
 @import "tailwindcss";
 
+/*
+ * Tailwind v4 defaults the `dark:` variant to `@media (prefers-color-scheme: dark)`,
+ * which fires from the user's OS preference — independent of any `<html class="dark">`
+ * toggle. That's why the product was rendering with all `dark:bg-zinc-9XX` surfaces
+ * active for anyone whose OS was in dark mode, even after `forcedTheme="light"` made
+ * sure the html element had no `dark` class.
+ *
+ * This redefines `dark:` to be class-driven (the v3 default behavior). With
+ * `forcedTheme="light"` in providers.tsx, the `dark` class never lands on <html>,
+ * and `dark:*` utilities become inert. To re-enable a dark toggle later, drop
+ * `forcedTheme` and add a UI control that flips `<html class="dark">`.
+ */
+@variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens for the light SaaS surface.
+ *
+ * The product is light-first (Linear / Notion / Attio / Stripe feel):
+ *   - page background is a faint cool gray so white cards lift cleanly
+ *   - borders are soft slate (slate-200) instead of hard zinc-200 lines
+ *   - shadows are barely perceptible (one tight ring)
+ *   - text hierarchy: 900 (headings) / 700 (body) / 500 (muted)
+ *
+ * Dark mode keeps the existing `dark:*` Tailwind variants on every
+ * surface — those still apply when `<html class="dark">`. We just
+ * don't auto-set that class anymore (see providers.tsx).
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;            /* slate-50, calm cool gray */
+  --foreground: #0f172a;            /* slate-900, sharp body text */
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9;         /* slate-100, hover/strip rows */
+  --border: #e2e8f0;                /* slate-200 */
+  --border-strong: #cbd5e1;         /* slate-300, used on focus */
+  --accent: #6366f1;                /* indigo-500, primary CTA + active */
+  --accent-fg: #ffffff;
+  --accent-soft: #eef2ff;           /* indigo-50, active nav surface */
+  --accent-soft-fg: #4338ca;        /* indigo-700, active nav text */
 }
 
 @theme inline {
@@ -12,15 +47,29 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --surface: #18181b;
+  --surface-muted: #27272a;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --accent: #818cf8;
+  --accent-fg: #18181b;
+  --accent-soft: #1e1b4b;
+  --accent-soft-fg: #c7d2fe;
 }
 
+/*
+ * Body uses Geist (loaded via next/font in app/layout.tsx) — the prior
+ * `font-family: Arial, Helvetica, sans-serif` here was silently
+ * overriding the imported font. Falling through to system stack as a
+ * defensive default lets Geist take effect when present.
+ */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont,
+    'Segoe UI', sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }

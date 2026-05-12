@@ -1,4 +1,4 @@
-import { Sparkles, AlertTriangle } from 'lucide-react';
+﻿import { Sparkles, AlertTriangle } from 'lucide-react';
 
 import type { AIMode } from '@/lib/ai/config';
 import type { MetricsSnapshot } from '@/lib/observability';
@@ -52,7 +52,7 @@ export function AiSection({
       title="AI"
       description="Last 24h aggregated from ai_invocations + live in-process metrics."
       action={
-        <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
           <Sparkles className="h-3 w-3" aria-hidden /> {mode}
         </span>
       }
@@ -61,8 +61,8 @@ export function AiSection({
         <div
           className={`mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
             banner.tone === 'danger'
-              ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300'
-              : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300'
+              ? 'border-red-200 bg-red-50 text-red-700'
+              : 'border-amber-200 bg-amber-50 text-amber-800'
           }`}
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
@@ -82,17 +82,17 @@ export function AiSection({
 
       {stats.byKind.length > 0 ? (
         <div className="mt-4">
-          <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
             By kind
           </h3>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             {stats.byKind.map((row) => (
               <div
                 key={row.kind}
-                className="rounded-md border border-zinc-200 px-2 py-1.5 text-xs dark:border-zinc-800"
+                className="rounded-md border border-slate-200 px-2 py-1.5 text-xs"
               >
                 <div className="font-medium">{row.kind}</div>
-                <div className="text-zinc-500">
+                <div className="text-slate-500">
                   {fmtNumber(row.count)} calls · {fmtNumber(row.tokens)} tok
                 </div>
               </div>
@@ -121,16 +121,16 @@ export function AiSection({
       ) : null}
 
       <div className="mt-5">
-        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
           Recent invocations
         </h3>
         {recent.length === 0 ? (
-          <p className="text-xs text-zinc-500">No AI invocations recorded for this tenant yet.</p>
+          <p className="text-xs text-slate-500">No AI invocations recorded for this tenant yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-zinc-200 text-left text-[10px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+                <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wide text-slate-500">
                   <th className="py-1.5 pr-3">Time</th>
                   <th className="py-1.5 pr-3">Kind</th>
                   <th className="py-1.5 pr-3">Status</th>
@@ -144,24 +144,24 @@ export function AiSection({
                 {recent.map((row) => {
                   const meta = (row.metadata ?? {}) as { mode?: string; mock?: boolean };
                   return (
-                    <tr key={row.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
-                      <td className="py-1.5 pr-3 text-zinc-500 tabular-nums">
+                    <tr key={row.id} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-3 text-slate-500 tabular-nums">
                         {dateFormatter.format(new Date(row.createdAt))}
                       </td>
                       <td className="py-1.5 pr-3 font-medium">{row.kind}</td>
                       <td className="py-1.5 pr-3">
                         <StatusPill status={row.status} />
                       </td>
-                      <td className="py-1.5 pr-3 tabular-nums text-zinc-600 dark:text-zinc-400">
+                      <td className="py-1.5 pr-3 tabular-nums text-slate-600">
                         {fmtNumber(row.totalTokens)}
                       </td>
-                      <td className="py-1.5 pr-3 tabular-nums text-zinc-600 dark:text-zinc-400">
+                      <td className="py-1.5 pr-3 tabular-nums text-slate-600">
                         {fmtDuration(row.latencyMs)}
                       </td>
-                      <td className="py-1.5 pr-3 text-zinc-600 dark:text-zinc-400">{row.model}</td>
-                      <td className="py-1.5 pr-3 text-zinc-500">
+                      <td className="py-1.5 pr-3 text-slate-600">{row.model}</td>
+                      <td className="py-1.5 pr-3 text-slate-500">
                         {row.error
-                          ? <span className="text-red-600 dark:text-red-400">{row.error}</span>
+                          ? <span className="text-red-600">{row.error}</span>
                           : meta.mode ?? '—'}
                       </td>
                     </tr>

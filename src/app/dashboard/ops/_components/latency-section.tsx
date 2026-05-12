@@ -1,4 +1,4 @@
-import type { HistogramSummary, MetricsSnapshot } from '@/lib/observability';
+﻿import type { HistogramSummary, MetricsSnapshot } from '@/lib/observability';
 
 import { fmtDuration, fmtNumber, Section } from './primitives';
 
@@ -23,7 +23,7 @@ export function LatencySection({ metrics }: { metrics: MetricsSnapshot }) {
         title="Latency"
         description="No latency samples on this process yet."
       >
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-slate-500">
           Histograms populate as traffic flows through the AI route, SSE
           stream, and workflows.
         </p>
@@ -39,7 +39,7 @@ export function LatencySection({ metrics }: { metrics: MetricsSnapshot }) {
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-zinc-200 text-left text-[10px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+            <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wide text-slate-500">
               <th className="py-1.5 pr-3">Metric</th>
               <th className="py-1.5 pr-3">Count</th>
               <th className="py-1.5 pr-3">p50</th>
@@ -55,9 +55,9 @@ export function LatencySection({ metrics }: { metrics: MetricsSnapshot }) {
               return (
                 <tr
                   key={key}
-                  className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60"
+                  className="border-b border-slate-100 last:border-0"
                 >
-                  <td className="py-1.5 pr-3 font-mono text-[11px] text-zinc-700 dark:text-zinc-300">
+                  <td className="py-1.5 pr-3 font-mono text-[11px] text-slate-700">
                     {key}
                   </td>
                   <td className="py-1.5 pr-3 tabular-nums">{fmtNumber(h.count)}</td>

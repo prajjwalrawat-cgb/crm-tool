@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useState } from 'react';
 
@@ -69,7 +69,7 @@ export function LiveActivityFeed({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <ActivityList rows={rows} emptyMessage={emptyMessage} />
       <PaginationControls
         basePath="/dashboard/activity"

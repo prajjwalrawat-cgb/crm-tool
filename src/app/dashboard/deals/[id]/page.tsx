@@ -42,16 +42,16 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
       <Link
         href="/dashboard/deals"
-        className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900"
       >
         <ArrowLeft className="h-3 w-3" aria-hidden />
         All deals
       </Link>
 
-      <header className="mt-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-zinc-200 pb-6 dark:border-zinc-800">
+      <header className="mt-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-slate-200 pb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{deal.name}</h1>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mt-1 text-sm text-slate-500">
             {DEAL_STAGE_LABELS[deal.stage]} ·{' '}
             <span className="font-mono">
               {formatCurrency(deal.amountMinor, deal.currency)}
@@ -125,8 +125,8 @@ function DetailCard({
   mono?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-[10px] uppercase tracking-wide text-slate-500">
         {label}
       </div>
       <div className={`mt-1 text-sm ${mono ? 'font-mono' : ''}`}>{value}</div>
