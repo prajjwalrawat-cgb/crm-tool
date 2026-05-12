@@ -17,6 +17,8 @@ export type CompanyFilters = {
   createdWithinDays?: number;
   stale?: boolean;
   staleDays?: number;
+  mine?: boolean;
+  unassigned?: boolean;
 };
 
 const numFlag = (v: string | string[] | undefined): boolean =>
@@ -39,6 +41,8 @@ export function parseCompanyFilters(
     createdWithinDays: numVal(raw.createdWithinDays),
     stale: numFlag(raw.stale),
     staleDays: numVal(raw.staleDays),
+    mine: numFlag(raw.mine),
+    unassigned: numFlag(raw.unassigned),
   };
 }
 
@@ -59,6 +63,8 @@ export function companyFiltersToSearchParams(
       out.set('staleDays', String(filters.staleDays));
     }
   }
+  if (filters.mine) out.set('mine', '1');
+  if (filters.unassigned) out.set('unassigned', '1');
   return out;
 }
 
@@ -67,6 +73,8 @@ export function hasActiveCompanyFilters(filters: CompanyFilters): boolean {
     filters.hasDeals ||
       filters.recentActivityDays ||
       filters.createdWithinDays ||
-      filters.stale,
+      filters.stale ||
+      filters.mine ||
+      filters.unassigned,
   );
 }

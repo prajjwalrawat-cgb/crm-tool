@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { companies, contacts, type Contact } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
+import { recordNotification } from '@/lib/notifications/recorder';
 import {
   contactIdSchema,
   createContactSchema,
@@ -433,3 +434,103 @@ export async function restoreContactAction(id: string): Promise<SimpleResult> {
   );
 }
 
+/* -------- ASSIGN OWNER -------- */
+
+const updateContactOwnerSchema = z.object({
+  id: z.uuid({ message: 'Invalid contact id' }),
+  ownerId: z.string().min(1).max(120).nullable(),
+});
+
+export type UpdateContactOwnerInput = {
+  id: string;
+  ownerId: string | null;
+};
+
+export type UpdateContactOwnerResult =
+  | { ok: true; contact: Contact; changed: boolean }
+  | { ok: false; message: string };
+
+export async function updateContactOwnerAction(
+  input: UpdateContactOwnerInput,
+): Promise<UpdateContactOwnerResult> {
+  const gate = await checkPermission('manageContacts');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const parsed = updateContactOwnerSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, message: 'Invalid owner payload' };
+      }
+
+      const result = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select()
+          .from(contacts)
+          .where(
+            and(
+              eq(contacts.id, parsed.data.id),
+              eq(contacts.tenantId, tenant.id),
+              isNull(contacts.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return { changed: false, contact: null as Contact | null };
+
+        if ((previous.ownerId ?? null) === parsed.data.ownerId) {
+          return { changed: false, contact: previous };
+        }
+
+        const [updated] = await tx
+          .update(contacts)
+          .set({ ownerId: parsed.data.ownerId })
+          .where(eq(contacts.id, parsed.data.id))
+          .returning();
+        if (!updated) return { changed: false, contact: null as Contact | null };
+
+        const displayName =
+          [updated.firstName, updated.lastName].filter(Boolean).join(' ') ||
+          updated.email ||
+          'this contact';
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'contact',
+          entityId: updated.id,
+          action: 'owner_changed',
+          metadata: {
+            name: displayName,
+            from: previous.ownerId ?? null,
+            to: updated.ownerId ?? null,
+          },
+        });
+
+        if (updated.ownerId) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: updated.ownerId,
+            actorUserId: membership.userId,
+            type: 'owner_changed',
+            title: `You now own ${displayName}`,
+            subtitle: 'Contact',
+            entityType: 'contact',
+            entityId: updated.id,
+            metadata: { from: previous.ownerId ?? null },
+          });
+        }
+
+        return { changed: true, contact: updated };
+      });
+
+      if (!result.contact) {
+        return { ok: false, message: 'Contact not found' };
+      }
+      revalidatePath('/dashboard/contacts');
+      revalidatePath(`/dashboard/contacts/${result.contact.id}`);
+      return { ok: true, contact: result.contact, changed: result.changed };
+    },
+  );
+}

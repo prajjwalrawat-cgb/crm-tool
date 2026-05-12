@@ -36,6 +36,8 @@ export type ListCompaniesOptions = {
   cursor?: Cursor | null;
   size?: PageSize;
   filters?: CompanyFilters;
+  /** Required for `filters.mine` to resolve "owner == me". */
+  currentUserId?: string;
 };
 
 /**
@@ -94,6 +96,12 @@ export async function listCompanies(
         AND al.entity_id::uuid = ${companies.id}
         AND al.created_at >= NOW() - (${days}::int * INTERVAL '1 day')
     )`);
+  }
+  if (f.mine && options.currentUserId) {
+    conditions.push(eq(companies.ownerId, options.currentUserId));
+  }
+  if (f.unassigned) {
+    conditions.push(isNull(companies.ownerId));
   }
 
   if (options.cursor) {

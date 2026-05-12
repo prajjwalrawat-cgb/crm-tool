@@ -20,6 +20,8 @@ export const contacts = pgTable(
     email: text('email'),
     phone: text('phone'),
     title: text('title'),
+    /** Clerk user id of the contact owner. Null = unassigned. */
+    ownerId: text('owner_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
@@ -33,6 +35,7 @@ export const contacts = pgTable(
     index('contacts_tenant_email_idx').on(t.tenantId, t.email),
     index('contacts_tenant_last_name_idx').on(t.tenantId, t.lastName),
     index('contacts_tenant_company_idx').on(t.tenantId, t.companyId),
+    index('contacts_tenant_owner_idx').on(t.tenantId, t.ownerId),
     index('contacts_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
   ],
 );

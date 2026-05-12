@@ -66,6 +66,8 @@ export type ListContactsOptions = {
   cursor?: Cursor | null;
   size?: PageSize;
   filters?: ContactFilters;
+  /** Required for `filters.mine` to resolve "owner == me". */
+  currentUserId?: string;
 };
 
 export async function listContacts(
@@ -110,6 +112,12 @@ export async function listContacts(
       sql`${contacts.createdAt} >= NOW() - (${f.createdWithinDays}::int * INTERVAL '1 day')`,
     );
   }
+  if (f.mine && options.currentUserId) {
+    conditions.push(eq(contacts.ownerId, options.currentUserId));
+  }
+  if (f.unassigned) {
+    conditions.push(isNull(contacts.ownerId));
+  }
   if (options.cursor) {
     conditions.push(
       sql`(${contacts.createdAt}, ${contacts.id}) < (${options.cursor.ts}::timestamptz, ${options.cursor.id}::uuid)`,
@@ -128,6 +136,7 @@ export async function listContacts(
           email: contacts.email,
           phone: contacts.phone,
           title: contacts.title,
+          ownerId: contacts.ownerId,
           createdAt: contacts.createdAt,
           updatedAt: contacts.updatedAt,
           deletedAt: contacts.deletedAt,

@@ -14,9 +14,11 @@ import { getEntityTimeline } from '@/lib/timeline/queries';
 
 import { resolveAuthorLookup } from '../../_components/author-lookup';
 import { CommentsThread } from '../../_components/comments-thread';
+import { EntityOwnerCard } from '../../_components/entity-owner-card';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { EntityTimeline } from '../../_components/entity-timeline';
 import { NotesTimeline } from '../../_components/notes-timeline';
+import { updateContactOwnerAction } from '../actions';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -63,6 +65,7 @@ export default async function ContactDetailPage({
         authorIds.add(t.row.actorUserId);
       }
     }
+    if (contact.ownerId) authorIds.add(contact.ownerId);
     const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
 
     const displayName =
@@ -104,6 +107,17 @@ export default async function ContactDetailPage({
             <DetailCard label="Title" value={contact.title ?? '—'} />
             <DetailCard label="Email" value={contact.email ?? '—'} mono />
             <DetailCard label="Phone" value={contact.phone ?? '—'} mono />
+            <EntityOwnerCard
+              entityId={contact.id}
+              currentOwnerId={contact.ownerId}
+              currentOwnerName={
+                contact.ownerId ? authorLookup[contact.ownerId] ?? null : null
+              }
+              currentUserId={userId}
+              teammates={teammates}
+              canEdit={canEdit}
+              onSave={updateContactOwnerAction}
+            />
             <DetailCard
               label="Created"
               value={dateFormatter.format(new Date(contact.createdAt))}
@@ -114,7 +128,7 @@ export default async function ContactDetailPage({
             <EntityTasksPanel
               entityType="contact"
               entityId={contact.id}
-              ownerId={null}
+              ownerId={contact.ownerId}
               currentUserId={userId}
               initialTasks={tasks}
               canEdit={canEdit}

@@ -17,7 +17,7 @@ export default async function CompaniesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  return await withTenantSession(async ({ tenant }) => {
+  return await withTenantSession(async ({ tenant, userId }) => {
     const sp = await searchParams;
     const search =
       typeof sp.q === 'string' ? sp.q.trim() || undefined : undefined;
@@ -31,7 +31,13 @@ export default async function CompaniesPage({
 
     const [membership, page] = await Promise.all([
       requireMembership(),
-      listCompanies(tenant.id, { search, cursor, size, filters }),
+      listCompanies(tenant.id, {
+        search,
+        cursor,
+        size,
+        filters,
+        currentUserId: userId,
+      }),
     ]);
 
     return (

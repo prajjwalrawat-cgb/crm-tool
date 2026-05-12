@@ -13,6 +13,8 @@ export type ContactFilters = {
   noCompany?: boolean;
   recentActivityDays?: number;
   createdWithinDays?: number;
+  mine?: boolean;
+  unassigned?: boolean;
 };
 
 const flag = (v: string | string[] | undefined): boolean =>
@@ -36,6 +38,8 @@ export function parseContactFilters(
     noCompany: flag(raw.noCompany),
     recentActivityDays: numVal(raw.recentActivityDays),
     createdWithinDays: numVal(raw.createdWithinDays),
+    mine: flag(raw.mine),
+    unassigned: flag(raw.unassigned),
   };
 }
 
@@ -51,6 +55,8 @@ export function contactFiltersToSearchParams(
   if (filters.createdWithinDays) {
     out.set('createdWithinDays', String(filters.createdWithinDays));
   }
+  if (filters.mine) out.set('mine', '1');
+  if (filters.unassigned) out.set('unassigned', '1');
   return out;
 }
 
@@ -59,6 +65,8 @@ export function hasActiveContactFilters(filters: ContactFilters): boolean {
     filters.companyId ||
       filters.noCompany ||
       filters.recentActivityDays ||
-      filters.createdWithinDays,
+      filters.createdWithinDays ||
+      filters.mine ||
+      filters.unassigned,
   );
 }

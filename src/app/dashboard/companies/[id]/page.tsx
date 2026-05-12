@@ -13,10 +13,12 @@ import { listTeammates } from '@/lib/teammates/queries';
 import { getEntityTimeline } from '@/lib/timeline/queries';
 
 import { CommentsThread } from '../../_components/comments-thread';
+import { EntityOwnerCard } from '../../_components/entity-owner-card';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { EntityTimeline } from '../../_components/entity-timeline';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { resolveAuthorLookup } from '../../_components/author-lookup';
+import { updateCompanyOwnerAction } from '../actions';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -59,6 +61,7 @@ export default async function CompanyDetailPage({ params }: { params: Params }) 
         authorIds.add(t.row.actorUserId);
       }
     }
+    if (company.ownerId) authorIds.add(company.ownerId);
     const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
 
     return (
@@ -94,6 +97,17 @@ export default async function CompanyDetailPage({ params }: { params: Params }) 
           <aside className="flex flex-col gap-3">
             <DetailCard label="Industry" value={company.industry ?? '—'} />
             <DetailCard label="Domain" value={company.domain ?? '—'} mono />
+            <EntityOwnerCard
+              entityId={company.id}
+              currentOwnerId={company.ownerId}
+              currentOwnerName={
+                company.ownerId ? authorLookup[company.ownerId] ?? null : null
+              }
+              currentUserId={userId}
+              teammates={teammates}
+              canEdit={canEdit}
+              onSave={updateCompanyOwnerAction}
+            />
             <DetailCard
               label="Created"
               value={dateFormatter.format(new Date(company.createdAt))}
@@ -108,7 +122,7 @@ export default async function CompanyDetailPage({ params }: { params: Params }) 
             <EntityTasksPanel
               entityType="company"
               entityId={company.id}
-              ownerId={null}
+              ownerId={company.ownerId}
               currentUserId={userId}
               initialTasks={tasks}
               canEdit={canEdit}
