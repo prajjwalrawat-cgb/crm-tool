@@ -14,7 +14,7 @@ config();
  *
  *   - activity_logs.metadata->>'demoSeed' = 'true'   (seed-demo-data.ts)
  *   - activity_logs.metadata->>'seedRun' IS NOT NULL  (seed-stress-data.ts)
- *   - activity_logs.actor_user_id IN ('seed-stress-data', 'demo-seed')
+ *   - activity_logs.(actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
  *   - workflow_runs.metadata->>'demoSeed' = 'true'
  *
  * Companies / contacts / deals are identified through their creation
@@ -77,7 +77,7 @@ async function main() {
         AND (
           metadata->>'demoSeed' = 'true'
           OR (metadata->>'seedRun') IS NOT NULL
-          OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+          OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
         )
     `)) as unknown as C[])[0]?.n ?? 0;
 
@@ -100,7 +100,7 @@ async function main() {
             AND (
               metadata->>'demoSeed' = 'true'
               OR (metadata->>'seedRun') IS NOT NULL
-              OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+              OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
             )
         )
     `)) as unknown as C[])[0]?.n ?? 0;
@@ -117,7 +117,7 @@ async function main() {
             AND (
               metadata->>'demoSeed' = 'true'
               OR (metadata->>'seedRun') IS NOT NULL
-              OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+              OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
             )
         )
     `)) as unknown as C[])[0]?.n ?? 0;
@@ -134,7 +134,7 @@ async function main() {
             AND (
               metadata->>'demoSeed' = 'true'
               OR (metadata->>'seedRun') IS NOT NULL
-              OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+              OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
             )
         )
     `)) as unknown as C[])[0]?.n ?? 0;
@@ -173,7 +173,7 @@ async function main() {
             AND (
               metadata->>'demoSeed' = 'true'
               OR (metadata->>'seedRun') IS NOT NULL
-              OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+              OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
             )
         )
     `);
@@ -188,7 +188,7 @@ async function main() {
             AND (
               metadata->>'demoSeed' = 'true'
               OR (metadata->>'seedRun') IS NOT NULL
-              OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+              OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
             )
         )
     `);
@@ -203,7 +203,7 @@ async function main() {
             AND (
               metadata->>'demoSeed' = 'true'
               OR (metadata->>'seedRun') IS NOT NULL
-              OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+              OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
             )
         )
     `);
@@ -213,7 +213,7 @@ async function main() {
         AND (
           metadata->>'demoSeed' = 'true'
           OR (metadata->>'seedRun') IS NOT NULL
-          OR actor_user_id IN ('seed-stress-data', 'demo-seed')
+          OR (actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
         )
     `);
     await db.execute(sql`

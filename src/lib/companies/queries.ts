@@ -3,6 +3,7 @@ import 'server-only';
 import { and, asc, desc, eq, ilike, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import { companies, type Company } from '@/db/schema';
+import { type CompanyFilters } from '@/lib/companies/filters';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
 import {
   buildPage,
@@ -12,6 +13,8 @@ import {
   type PageSize,
 } from '@/lib/pagination/cursor';
 import { timeQuery } from '@/lib/pagination/timing';
+
+export type { CompanyFilters } from '@/lib/companies/filters';
 
 export type CompanyOption = {
   id: string;
@@ -32,6 +35,7 @@ export type ListCompaniesOptions = {
   search?: string;
   cursor?: Cursor | null;
   size?: PageSize;
+  filters?: CompanyFilters;
 };
 
 /**
@@ -49,11 +53,49 @@ export async function listCompanies(
   const term = options.search?.trim();
   const size = options.size ?? DEFAULT_PAGE_SIZE;
 
+  const f = options.filters ?? {};
   const conditions = [
     eq(companies.tenantId, tenantId),
     isNull(companies.deletedAt),
   ];
   if (term) conditions.push(ilike(companies.name, `%${term}%`));
+
+  // Filter predicates. Each subquery hits an existing index on the
+  // corresponding table.
+  if (f.hasDeals) {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM deals d
+      WHERE d.tenant_id = ${tenantId}::uuid
+        AND d.company_id = ${companies.id}
+        AND d.deleted_at IS NULL
+        AND d.stage NOT IN ('won','lost')
+    )`);
+  }
+  if (typeof f.recentActivityDays === 'number') {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM activity_logs al
+      WHERE al.tenant_id = ${tenantId}::uuid
+        AND al.entity_type = 'company'
+        AND al.entity_id::uuid = ${companies.id}
+        AND al.created_at >= NOW() - (${f.recentActivityDays}::int * INTERVAL '1 day')
+    )`);
+  }
+  if (typeof f.createdWithinDays === 'number') {
+    conditions.push(
+      sql`${companies.createdAt} >= NOW() - (${f.createdWithinDays}::int * INTERVAL '1 day')`,
+    );
+  }
+  if (f.stale) {
+    const days = f.staleDays && f.staleDays > 0 ? f.staleDays : 30;
+    conditions.push(sql`NOT EXISTS (
+      SELECT 1 FROM activity_logs al
+      WHERE al.tenant_id = ${tenantId}::uuid
+        AND al.entity_type = 'company'
+        AND al.entity_id::uuid = ${companies.id}
+        AND al.created_at >= NOW() - (${days}::int * INTERVAL '1 day')
+    )`);
+  }
+
   if (options.cursor) {
     // Postgres tuple comparison is lexicographic, so this is the
     // canonical keyset forward-page predicate for desc-sorted ORDER BY.

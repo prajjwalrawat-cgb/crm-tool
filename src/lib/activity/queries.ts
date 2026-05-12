@@ -30,44 +30,92 @@ export type ActivityRow = ActivityLog & {
 
 const ENTITY_DETAIL_LIMIT = 50;
 
+/**
+ * Resolve activity-log `actor_user_id` → `ActorSummary`. Three layers:
+ *
+ *   1. Real Clerk user → look up via Clerk API (batched per page).
+ *   2. Seeded-actor id (`seed-actor-...`) → never hits Clerk; reads the
+ *      friendly display info from `metadata.actor` written by the seed
+ *      script. Keeps Test 1 reading like "Priya Sharma created Acme"
+ *      without polluting production tenants.
+ *   3. Any other unknown id → fall back to a neutral "Teammate" label.
+ *      We intentionally never expose the raw id — defense in depth so a
+ *      transient Clerk lookup failure on a real user can't leak
+ *      `user_XYZ...` into the feed.
+ */
+function pickSeededActor(
+  row: ActivityLog,
+): { id: string; displayName: string; imageUrl: string | null } | null {
+  if (!row.actorUserId) return null;
+  const meta = (row.metadata ?? {}) as Record<string, unknown>;
+  const a = meta.actor as Record<string, unknown> | undefined;
+  if (a && typeof a.name === 'string' && a.name.length > 0) {
+    return {
+      id: row.actorUserId,
+      displayName: a.name,
+      imageUrl:
+        typeof a.imageUrl === 'string' && a.imageUrl.length > 0
+          ? a.imageUrl
+          : null,
+    };
+  }
+  return null;
+}
+
 async function hydrateActors(rows: ActivityLog[]): Promise<ActivityRow[]> {
+  // Real Clerk user ids only — seeded actors skip the API call.
   const actorIds = Array.from(
     new Set(
       rows
         .map((r) => r.actorUserId)
-        .filter((id): id is string => typeof id === 'string'),
+        .filter((id): id is string => typeof id === 'string')
+        .filter((id) => !id.startsWith('seed-actor-')),
     ),
   );
 
-  if (actorIds.length === 0) {
-    return rows.map((r) => ({ ...r, actor: null }));
+  type ClerkUser = {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    imageUrl: string;
+    primaryEmailAddress: { emailAddress: string } | null;
+  };
+  const userMap = new Map<string, ClerkUser>();
+
+  if (actorIds.length > 0) {
+    const client = await clerkClient();
+    const userList = await client.users.getUserList({
+      userId: actorIds,
+      limit: 500,
+    });
+    for (const u of userList.data) userMap.set(u.id, u as unknown as ClerkUser);
   }
-
-  const client = await clerkClient();
-  const userList = await client.users.getUserList({
-    userId: actorIds,
-    limit: 500,
-  });
-
-  const userMap = new Map(userList.data.map((u) => [u.id, u]));
 
   return rows.map((r) => {
     if (!r.actorUserId) return { ...r, actor: null };
+
+    // 1. Real Clerk user (production path).
     const u = userMap.get(r.actorUserId);
-    if (!u) {
+    if (u) {
+      const nameParts = [u.firstName, u.lastName].filter(Boolean) as string[];
+      const displayName =
+        nameParts.length > 0
+          ? nameParts.join(' ')
+          : u.primaryEmailAddress?.emailAddress ?? 'Teammate';
       return {
         ...r,
-        actor: { id: r.actorUserId, displayName: r.actorUserId, imageUrl: null },
+        actor: { id: u.id, displayName, imageUrl: u.imageUrl ?? null },
       };
     }
-    const nameParts = [u.firstName, u.lastName].filter(Boolean) as string[];
-    const displayName =
-      nameParts.length > 0
-        ? nameParts.join(' ')
-        : u.primaryEmailAddress?.emailAddress ?? r.actorUserId;
+
+    // 2. Seeded actor (Test 1) — name lives in metadata.
+    const seeded = pickSeededActor(r);
+    if (seeded) return { ...r, actor: seeded };
+
+    // 3. Unknown id — never expose it. Render as "Teammate".
     return {
       ...r,
-      actor: { id: u.id, displayName, imageUrl: u.imageUrl ?? null },
+      actor: { id: r.actorUserId, displayName: 'Teammate', imageUrl: null },
     };
   });
 }

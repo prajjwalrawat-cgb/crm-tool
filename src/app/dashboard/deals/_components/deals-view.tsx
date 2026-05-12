@@ -398,7 +398,69 @@ function DealsTable({
 }) {
   const showActions = canEdit || canDelete;
   return (
-    <div className="overflow-x-auto">
+    <>
+      {/* Mobile / narrow viewports: stacked card list. The table below
+          is hidden on small screens so we never force horizontal scroll. */}
+      <ul className="flex flex-col divide-y divide-slate-100 sm:hidden">
+        {items.map((d) => {
+          const isOptimistic = d.id.startsWith('optimistic-');
+          return (
+            <li
+              key={d.id}
+              className={cn(
+                'flex flex-col gap-1.5 px-3 py-2.5 transition-colors',
+                d.__pending && 'opacity-60',
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  {isOptimistic ? (
+                    <span className="text-[13px] font-medium">{d.name}</span>
+                  ) : (
+                    <Link
+                      href={`/dashboard/deals/${d.id}`}
+                      className="text-[13px] font-medium hover:underline"
+                    >
+                      {d.name}
+                    </Link>
+                  )}
+                  <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                    {d.companyName ?? 'No company'}
+                    {d.contactName || d.contactEmail
+                      ? ` · ${d.contactName ?? d.contactEmail}`
+                      : ''}
+                  </p>
+                </div>
+                <span className="shrink-0 font-mono text-[12px] tabular-nums text-slate-700">
+                  {formatCurrency(d.amountMinor, d.currency)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                {canEdit && !isOptimistic ? (
+                  <InlineStageSelect
+                    deal={d}
+                    onChange={(next) => onStageChange(d, next)}
+                    pending={stagePending && d.__pending === true}
+                  />
+                ) : (
+                  <StageBadge stage={d.stage} />
+                )}
+                {showActions ? (
+                  <RowActions
+                    canEdit={canEdit}
+                    canDelete={canDelete}
+                    onEdit={() => onEdit(d)}
+                    onDelete={() => onDelete(d)}
+                    busy={deletePending && d.__pending === true}
+                  />
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="hidden overflow-x-auto sm:block">
       <table className="min-w-full divide-y divide-slate-200 text-[13px]">
         <thead className="sticky top-0 z-10 bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
             <tr>
@@ -504,7 +566,8 @@ function DealsTable({
             })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }
 

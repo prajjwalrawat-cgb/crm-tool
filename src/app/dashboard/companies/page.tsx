@@ -1,4 +1,5 @@
-﻿import { withTenantSession } from '@/lib/auth-guard';
+import { withTenantSession } from '@/lib/auth-guard';
+import { parseCompanyFilters } from '@/lib/companies/filters';
 import { listCompanies } from '@/lib/companies/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
@@ -9,11 +10,7 @@ export const metadata = {
   title: 'Companies',
 };
 
-type SearchParams = Promise<{
-  q?: string;
-  cursor?: string;
-  size?: string;
-}>;
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function CompaniesPage({
   searchParams,
@@ -22,13 +19,19 @@ export default async function CompaniesPage({
 }) {
   return await withTenantSession(async ({ tenant }) => {
     const sp = await searchParams;
-    const search = sp.q?.trim() || undefined;
-    const cursor = parseCursorParam(sp.cursor);
-    const size = parsePageSize(sp.size);
+    const search =
+      typeof sp.q === 'string' ? sp.q.trim() || undefined : undefined;
+    const cursor = parseCursorParam(
+      typeof sp.cursor === 'string' ? sp.cursor : undefined,
+    );
+    const size = parsePageSize(
+      typeof sp.size === 'string' ? sp.size : undefined,
+    );
+    const filters = parseCompanyFilters(sp);
 
     const [membership, page] = await Promise.all([
       requireMembership(),
-      listCompanies(tenant.id, { search, cursor, size }),
+      listCompanies(tenant.id, { search, cursor, size, filters }),
     ]);
 
     return (

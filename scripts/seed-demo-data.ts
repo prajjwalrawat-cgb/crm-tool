@@ -131,13 +131,62 @@ const DEAL_NAME_TEMPLATES = [
   '{co} — Strategic Partnership',
 ];
 
+/**
+ * Executive-friendly automation copy. Each line should read like a CRM
+ * insight a sales operator would actually want surfaced, not debug
+ * output. Boring system events (embedding regen, retention sweeps,
+ * cache invalidations) are intentionally absent — they belong on the
+ * /workflows page, not in the activity feed.
+ */
 const AUTOMATION_NOTES = [
-  'Deal moved to won — follow-up reminder scheduled for {n} days.',
-  'Auto-summary refreshed from latest activity.',
-  'Embedding regenerated after content update.',
-  'Stale-deal alert dispatched to owner.',
-  'Welcome email queued for new member.',
+  'Follow-up reminder scheduled for {n} days from now.',
+  'Renewal opportunity flagged — close date approaches in {n} days.',
+  'Stage stalled for {n} days — pinged the owner.',
+  'Closed-won celebration sent to the channel.',
+  'Quarterly review queued for next Monday.',
+  'High-intent signal detected from the latest meeting summary.',
 ];
+
+/**
+ * Seeded "team members" — realistic-looking display names with deterministic
+ * IDs so re-seeding gives the same distribution. The `seed-actor-` prefix
+ * lets cleanup queries identify these without touching real Clerk-issued
+ * user_XXX ids. Display info is also stored in each activity_log's
+ * metadata.actor field so the renderer never has to call Clerk to resolve
+ * these — and never falls back to printing a raw id.
+ */
+type SeedActor = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+};
+
+const SEED_ACTORS: SeedActor[] = [
+  { id: 'seed-actor-priya-sharma',    firstName: 'Priya',    lastName: 'Sharma',    email: 'priya.sharma@test1.example' },
+  { id: 'seed-actor-rahul-mehta',     firstName: 'Rahul',    lastName: 'Mehta',     email: 'rahul.mehta@test1.example' },
+  { id: 'seed-actor-meera-iyer',      firstName: 'Meera',    lastName: 'Iyer',      email: 'meera.iyer@test1.example' },
+  { id: 'seed-actor-arjun-rao',       firstName: 'Arjun',    lastName: 'Rao',       email: 'arjun.rao@test1.example' },
+  { id: 'seed-actor-sarah-chen',      firstName: 'Sarah',    lastName: 'Chen',      email: 'sarah.chen@test1.example' },
+  { id: 'seed-actor-michael-torres',  firstName: 'Michael',  lastName: 'Torres',    email: 'michael.torres@test1.example' },
+  { id: 'seed-actor-emma-wilson',     firstName: 'Emma',     lastName: 'Wilson',    email: 'emma.wilson@test1.example' },
+];
+
+function pickActor(): SeedActor {
+  return SEED_ACTORS[Math.floor(Math.random() * SEED_ACTORS.length)]!;
+}
+
+function actorMeta(actor: SeedActor): {
+  name: string;
+  email: string;
+  imageUrl: null;
+} {
+  return {
+    name: `${actor.firstName} ${actor.lastName}`,
+    email: actor.email,
+    imageUrl: null,
+  };
+}
 
 const WORKFLOW_IDS = [
   'deal-won',
@@ -454,6 +503,9 @@ async function main() {
           ? randInt(50, 5000) * 100 * 1000 // ₹50k – ₹50L
           : randInt(2, 500) * 100 * 1000; // $2k – $500k
 
+      // Assign a stable owner from the seed-actor pool so the deal
+      // detail page can show "Owner: Priya Sharma" rather than a bare id.
+      const owner = pickActor();
       dealRows.push({
         tenantId,
         companyId: company.id,
@@ -464,7 +516,7 @@ async function main() {
         currency,
         expectedCloseDate,
         closedAt,
-        ownerId: 'demo-seed',
+        ownerId: owner.id,
         createdAt,
         updatedAt,
         __stage: plan.stage,
@@ -490,51 +542,61 @@ async function main() {
   phase = Date.now();
   const activityRows: Array<typeof activityLogs.$inferInsert> = [];
 
-  // Creation rows (these are also our "demo tag" anchors for reset).
+  // Creation rows (also our `demoSeed` anchors for cleanup). Each row
+  // gets a random actor from SEED_ACTORS so the activity feed reads
+  // like a small distributed sales team — not one bot.
   for (const c of insertedCompanies) {
+    const actor = pickActor();
     activityRows.push({
       tenantId,
-      actorUserId: 'demo-seed',
+      actorUserId: actor.id,
       entityType: 'company',
       entityId: c.id,
       action: 'created',
-      metadata: { demoSeed: true, name: c.name },
+      metadata: { demoSeed: true, name: c.name, actor: actorMeta(actor) },
       createdAt: c.createdAt,
     });
   }
   for (const c of insertedContacts) {
+    const actor = pickActor();
     activityRows.push({
       tenantId,
-      actorUserId: 'demo-seed',
+      actorUserId: actor.id,
       entityType: 'contact',
       entityId: c.id,
       action: 'created',
       metadata: {
         demoSeed: true,
         name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim(),
+        actor: actorMeta(actor),
       },
       createdAt: randomPastWithin(90),
     });
   }
   for (const d of insertedDeals) {
+    const actor = pickActor();
     activityRows.push({
       tenantId,
-      actorUserId: 'demo-seed',
+      actorUserId: actor.id,
       entityType: 'deal',
       entityId: d.id,
       action: 'created',
-      metadata: { demoSeed: true, name: d.name },
+      metadata: { demoSeed: true, name: d.name, actor: actorMeta(actor) },
       createdAt: randomPastWithin(60),
     });
   }
 
-  // Stage-changed rows for closed deals — gives the recent-wins widget
-  // something to chew on.
-  for (const d of insertedDeals.filter((x) => x.stage === 'won' || x.stage === 'lost')) {
+  // Stage-changed rows for closed deals — feeds the recent-wins widget.
+  // Mid-funnel stage moves (lead → qualified → proposal etc.) for
+  // ~30% of active deals so the feed reads like real pipeline motion.
+  for (const d of insertedDeals.filter(
+    (x) => x.stage === 'won' || x.stage === 'lost',
+  )) {
     const fromStage = pick(['negotiation', 'proposal'] as const);
+    const actor = pickActor();
     activityRows.push({
       tenantId,
-      actorUserId: 'demo-seed',
+      actorUserId: actor.id,
       entityType: 'deal',
       entityId: d.id,
       action: 'stage_changed',
@@ -543,15 +605,48 @@ async function main() {
         from: fromStage,
         to: d.stage,
         name: d.name,
+        actor: actorMeta(actor),
       },
       createdAt:
         Math.random() < 0.5 ? daysAgo(randInt(0, 7)) : daysAgo(randInt(10, 60)),
     });
   }
+  const midFunnel = insertedDeals.filter(
+    (x) => x.stage !== 'won' && x.stage !== 'lost' && x.stage !== 'lead',
+  );
+  for (const d of midFunnel) {
+    if (Math.random() > 0.35) continue;
+    const stageOrder: Stage[] = [
+      'lead',
+      'qualified',
+      'proposal',
+      'negotiation',
+    ];
+    const toIdx = stageOrder.indexOf(d.stage as Stage);
+    const fromStage = stageOrder[toIdx - 1];
+    if (!fromStage) continue;
+    const actor = pickActor();
+    activityRows.push({
+      tenantId,
+      actorUserId: actor.id,
+      entityType: 'deal',
+      entityId: d.id,
+      action: 'stage_changed',
+      metadata: {
+        demoSeed: true,
+        from: fromStage,
+        to: d.stage,
+        name: d.name,
+        actor: actorMeta(actor),
+      },
+      createdAt: daysAgo(randInt(1, 30)),
+    });
+  }
 
-  // A handful of automation notes spread across recent time so the activity
-  // feed has shape.
-  for (let i = 0; i < 10; i++) {
+  // Automation notes — executive-friendly only. No retention sweeps,
+  // no embedding regens. Capped at 6 across the whole tenant so the
+  // feed isn't dominated by bot voice.
+  for (let i = 0; i < 6; i++) {
     const target = pick(insertedDeals);
     activityRows.push({
       tenantId,
@@ -561,22 +656,32 @@ async function main() {
       action: 'automation_note',
       metadata: {
         demoSeed: true,
-        message: pick(AUTOMATION_NOTES).replace('{n}', String(randInt(3, 14))),
+        name: target.name,
+        message: pick(AUTOMATION_NOTES).replace(
+          '{n}',
+          String(randInt(3, 14)),
+        ),
       },
       createdAt: randomPastWithin(20),
     });
   }
 
-  // A few "minutes ago" rows so the feed has a live feel even right after seeding.
+  // A few "minutes ago" rows so the feed has a live feel right after seeding.
   for (let i = 0; i < 4; i++) {
     const target = pick(insertedDeals);
+    const actor = pickActor();
     activityRows.push({
       tenantId,
-      actorUserId: 'demo-seed',
+      actorUserId: actor.id,
       entityType: 'deal',
       entityId: target.id,
       action: 'updated',
-      metadata: { demoSeed: true, name: target.name, fields: ['notes'] },
+      metadata: {
+        demoSeed: true,
+        name: target.name,
+        fields: ['notes'],
+        actor: actorMeta(actor),
+      },
       createdAt: minutesAgo(randInt(2, 50)),
     });
   }
