@@ -1,10 +1,11 @@
 ﻿'use client';
 
 import { usePathname } from 'next/navigation';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import type { AIMode } from '@/lib/ai/config';
 
+import { CommandPalette } from './command-palette';
 import { CopilotPanel } from './copilot-panel';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
@@ -21,10 +22,34 @@ export function DashboardShell({
   aiMode: AIMode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // Sidebar collapsed default is false; localStorage hydrates it after
   // first paint to avoid SSR/CSR mismatch flicker.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pathname = usePathname();
+
+  // Global Cmd/Ctrl+K → toggle the command palette. Captured at the
+  // window level so the shortcut works regardless of focus (input,
+  // table cell, button). Skip when inside a content-editable to avoid
+  // hijacking inline editing UIs that might also use ⌘K.
+  const onPaletteShortcut = useCallback((e: KeyboardEvent) => {
+    if (e.key !== 'k' && e.key !== 'K') return;
+    if (!(e.metaKey || e.ctrlKey)) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.isContentEditable) return;
+    e.preventDefault();
+    setPaletteOpen((prev) => !prev);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('keydown', onPaletteShortcut);
+    return () => window.removeEventListener('keydown', onPaletteShortcut);
+  }, [onPaletteShortcut]);
+
+  // Close palette on route change.
+  useEffect(() => {
+    setPaletteOpen(false);
+  }, [pathname]);
 
   // Hydrate sidebar collapsed preference from localStorage once on mount.
   useEffect(() => {
@@ -74,6 +99,7 @@ export function DashboardShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
           onMobileMenuOpen={() => setMobileOpen(true)}
+          onOpenPalette={() => setPaletteOpen(true)}
           tenantId={tenantId}
         />
         {/*
@@ -97,6 +123,11 @@ export function DashboardShell({
         </div>
       </div>
       <CopilotPanel key={tenantId} aiMode={aiMode} />
+      <CommandPalette
+        tenantId={tenantId}
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+      />
     </div>
   );
 }

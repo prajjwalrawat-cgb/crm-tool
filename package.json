@@ -12,6 +12,9 @@
     "seed:stress": "tsx scripts/seed-stress-data.ts",
     "seed:demo": "tsx scripts/seed-demo-data.ts",
     "seed:reset": "tsx scripts/seed-demo-data.ts --reset-only",
+    "demo:inspect": "tsx scripts/inspect-demo-state.ts",
+    "demo:clean-others": "tsx scripts/clean-demo-from-other-tenants.ts",
+    "demo:clean-others:execute": "tsx scripts/clean-demo-from-other-tenants.ts --execute",
     "bench": "tsx scripts/benchmark-queries.ts"
   },
   "dependencies": {

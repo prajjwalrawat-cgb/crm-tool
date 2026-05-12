@@ -4,9 +4,12 @@ import {
   and,
   desc,
   eq,
+  gte,
   ilike,
+  inArray,
   isNotNull,
   isNull,
+  lte,
   sql,
   type SQL,
 } from 'drizzle-orm';
@@ -21,7 +24,13 @@ import {
   type PageSize,
 } from '@/lib/pagination/cursor';
 import { timeQuery } from '@/lib/pagination/timing';
-import type { DealStage } from '@/lib/deals/schema';
+import { type DealFilters } from '@/lib/deals/filters';
+import { type DealStage } from '@/lib/deals/schema';
+
+// Re-export so existing imports of `DealFilters` from this module keep
+// working — but the canonical home for filter helpers is
+// `@/lib/deals/filters` (client-safe; no `server-only` shackles).
+export type { DealFilters } from '@/lib/deals/filters';
 
 export type DealRow = Deal & {
   companyName: string | null;
@@ -33,6 +42,7 @@ export type ListDealsOptions = {
   search?: string;
   cursor?: Cursor | null;
   size?: PageSize;
+  filters?: DealFilters;
 };
 
 type RawJoinedRow = {
@@ -95,12 +105,46 @@ export async function listDeals(
 ): Promise<Page<DealRow>> {
   const term = options.search?.trim();
   const size = options.size ?? DEFAULT_PAGE_SIZE;
+  const f = options.filters ?? {};
 
   const conditions: SQL[] = [
     eq(deals.tenantId, tenantId),
     isNull(deals.deletedAt),
   ];
   if (term) conditions.push(ilike(deals.name, `%${term}%`));
+
+  // Apply filters. Each branch hits the matching index:
+  //   stages          → (tenant_id, stage)
+  //   amount range    → (tenant_id, ...) + amount_minor scan (cheap at our scale)
+  //   close window    → (tenant_id, expected_close_date)
+  //   stale           → updated_at predicate; covered by (tenant_id, deleted_at)
+  //   companyId       → (tenant_id, company_id)
+  if (f.stages && f.stages.length > 0) {
+    conditions.push(inArray(deals.stage, f.stages));
+  }
+  if (typeof f.amountMinorMin === 'number') {
+    conditions.push(gte(deals.amountMinor, f.amountMinorMin));
+  }
+  if (typeof f.amountMinorMax === 'number') {
+    conditions.push(lte(deals.amountMinor, f.amountMinorMax));
+  }
+  if (f.expectedCloseFrom) {
+    conditions.push(gte(deals.expectedCloseDate, f.expectedCloseFrom));
+  }
+  if (f.expectedCloseTo) {
+    conditions.push(lte(deals.expectedCloseDate, f.expectedCloseTo));
+  }
+  if (f.stale) {
+    const days = f.staleDays && f.staleDays > 0 ? f.staleDays : 14;
+    conditions.push(
+      sql`${deals.stage} NOT IN ('won','lost')`,
+      sql`${deals.updatedAt} < NOW() - (${days}::int * INTERVAL '1 day')`,
+    );
+  }
+  if (f.companyId) {
+    conditions.push(eq(deals.companyId, f.companyId));
+  }
+
   if (options.cursor) {
     conditions.push(
       sql`(${deals.createdAt}, ${deals.id}) < (${options.cursor.ts}::timestamptz, ${options.cursor.id}::uuid)`,

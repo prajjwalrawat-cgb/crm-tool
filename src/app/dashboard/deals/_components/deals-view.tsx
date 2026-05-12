@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ExternalLink, Loader2, Pencil, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, Pencil, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -10,14 +10,20 @@ import {
   useState,
   useTransition,
 } from 'react';
+import { toast } from 'sonner';
 
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
 import { formatCurrency, toMinorUnits } from '@/lib/deals/currency';
+import type { DealFilters } from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
 import type { PageSize } from '@/lib/pagination/page-size';
-import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
+import {
+  type DealStage,
+  DEAL_STAGES,
+  DEAL_STAGE_LABELS,
+} from '@/lib/deals/schema';
 import { canDeleteDeals, canManageDeals } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
@@ -27,8 +33,10 @@ import {
   createDealAction,
   softDeleteDealAction,
   updateDealAction,
+  updateDealStageAction,
 } from '../actions';
 import { CreateDealForm } from './create-deal-form';
+import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
 import { EmptyState } from './empty-state';
 import { StageBadge } from './stage-badge';
@@ -53,6 +61,7 @@ function isDealStage(value: string): value is DealStage {
 export function DealsView({
   initialItems,
   initialSearch,
+  initialFilters,
   companyOptions,
   contactOptions,
   currentRole,
@@ -61,6 +70,7 @@ export function DealsView({
 }: {
   initialItems: DealRow[];
   initialSearch: string;
+  initialFilters: DealFilters;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
   currentRole: MembershipRole;
@@ -221,6 +231,38 @@ export function DealsView({
     setEditingDeal(null);
   }
 
+  // Inline stage edit — used by the stage-cell dropdown. Reuses the
+  // existing kanban server action so the audit trail + automation
+  // workflows fire identically regardless of where the move came from.
+  const [stagePending, startStageTransition] = useTransition();
+  function handleStageChange(deal: DealRow, nextStage: DealStage) {
+    if (deal.stage === nextStage) return;
+    const optimisticDraft: DealItem = {
+      ...deal,
+      stage: nextStage,
+      closedAt:
+        nextStage === 'won' || nextStage === 'lost'
+          ? deal.closedAt ?? new Date()
+          : null,
+      updatedAt: new Date(),
+      __pending: true,
+    };
+    startStageTransition(async () => {
+      applyOptimistic({ type: 'update', draft: optimisticDraft });
+      const result = await updateDealStageAction({
+        id: deal.id,
+        stage: nextStage,
+      });
+      if (!result.ok) {
+        toast.error(`Couldn't change stage: ${result.message}`);
+      } else if (result.changed) {
+        toast.success(
+          `${deal.name} → ${DEAL_STAGE_LABELS[nextStage]}`,
+        );
+      }
+    });
+  }
+
   const showEmpty = optimisticItems.length === 0;
   const trimmedSearch = search.trim();
 
@@ -275,6 +317,11 @@ export function DealsView({
           ) : null}
         </div>
 
+        <DealFilterBar
+          initialFilters={initialFilters}
+          companyOptions={companyOptions}
+        />
+
         {actionError ? (
           <p
             role="alert"
@@ -298,6 +345,8 @@ export function DealsView({
                 setEditingDeal(d);
               }}
               onDelete={handleDelete}
+              onStageChange={handleStageChange}
+              stagePending={stagePending}
               deletePending={deletePending}
             />
             <PaginationControls
@@ -334,6 +383,8 @@ function DealsTable({
   canDelete,
   onEdit,
   onDelete,
+  onStageChange,
+  stagePending,
   deletePending,
 }: {
   items: DealItem[];
@@ -341,6 +392,8 @@ function DealsTable({
   canDelete: boolean;
   onEdit: (deal: DealRow) => void;
   onDelete: (deal: DealRow) => void;
+  onStageChange: (deal: DealRow, next: DealStage) => void;
+  stagePending: boolean;
   deletePending: boolean;
 }) {
   const showActions = canEdit || canDelete;
@@ -377,7 +430,10 @@ function DealsTable({
                 Close date
               </th>
               {showActions ? (
-                <th scope="col" className="px-3 py-1.5 text-right font-semibold">
+                <th
+                  scope="col"
+                  className="sticky right-0 z-10 bg-slate-50/95 px-3 py-1.5 text-right font-semibold backdrop-blur"
+                >
                   <span className="sr-only">Actions</span>
                 </th>
               ) : null}
@@ -390,7 +446,7 @@ function DealsTable({
                 <tr
                   key={d.id}
                   className={cn(
-                    'transition-colors hover:bg-slate-50/70',
+                    'group transition-colors hover:bg-slate-50/70',
                     d.__pending && 'opacity-60',
                   )}
                 >
@@ -408,7 +464,15 @@ function DealsTable({
                     )}
                   </td>
                   <td className="px-3 py-2">
-                    <StageBadge stage={d.stage} />
+                    {canEdit && !isOptimistic ? (
+                      <InlineStageSelect
+                        deal={d}
+                        onChange={(next) => onStageChange(d, next)}
+                        pending={stagePending && d.__pending === true}
+                      />
+                    ) : (
+                      <StageBadge stage={d.stage} />
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
                     {formatCurrency(d.amountMinor, d.currency)}
@@ -425,7 +489,7 @@ function DealsTable({
                       : '—'}
                   </td>
                   {showActions ? (
-                    <td className="whitespace-nowrap px-3 py-2 text-right">
+                    <td className="sticky right-0 z-[1] whitespace-nowrap bg-white/95 px-3 py-2 text-right backdrop-blur group-hover:bg-slate-50/95">
                       <RowActions
                         canEdit={canEdit}
                         canDelete={canDelete}
@@ -440,6 +504,99 @@ function DealsTable({
             })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function InlineStageSelect({
+  deal,
+  onChange,
+  pending,
+}: {
+  deal: DealItem;
+  onChange: (next: DealStage) => void;
+  pending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  // Close on outside-click via a window-level handler installed only
+  // while the popover is mounted.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="inline-flex items-center gap-1 rounded transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Change stage"
+      >
+        <StageBadge stage={deal.stage} />
+        {pending ? (
+          <Loader2
+            className="h-3 w-3 animate-spin text-slate-400"
+            aria-hidden
+          />
+        ) : (
+          <ChevronDown
+            className="h-3 w-3 text-slate-400 transition-transform"
+            aria-hidden
+            style={{ transform: open ? 'rotate(180deg)' : undefined }}
+          />
+        )}
+      </button>
+      {open ? (
+        <ul
+          role="listbox"
+          className="absolute left-0 top-full z-30 mt-1 min-w-[8rem] overflow-hidden rounded-md border border-slate-200 bg-white py-0.5 shadow-md"
+        >
+          {DEAL_STAGES.map((stage) => (
+            <li key={stage}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={stage === deal.stage}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(stage);
+                }}
+                className={cn(
+                  'flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-[12px] transition',
+                  stage === deal.stage
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-slate-700 hover:bg-slate-50',
+                )}
+              >
+                <span className="capitalize">{DEAL_STAGE_LABELS[stage]}</span>
+                {stage === deal.stage ? (
+                  <span className="text-[10px] text-indigo-500">current</span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

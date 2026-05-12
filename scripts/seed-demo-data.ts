@@ -1,6 +1,8 @@
 import { config } from 'dotenv';
 import { sql } from 'drizzle-orm';
 
+import { DEMO_TENANT_NAMES, isDemoTenant } from './demo-allowlist';
+
 config({ path: '.env.local' });
 config();
 
@@ -11,13 +13,24 @@ config();
  * KPIs, the pipeline distribution, recent-activity, and workflow-health
  * widgets to all look "alive" at a glance.
  *
- * Usage:
- *   pnpm seed:demo                     // wipes prior demo rows, reseeds fresh
- *   pnpm seed:reset                    // wipes prior demo rows, no reseed
- *   TENANT_ID=<uuid> pnpm seed:demo    // target a specific tenant
+ * Tenant policy
+ * -------------
+ * This script will ONLY write into a tenant whose name appears in
+ * `scripts/demo-allowlist.ts` (currently: "Test 1"). Real
+ * production-like tenants must never receive seeded data. If the
+ * allowlisted tenant doesn't exist yet, the script aborts with a
+ * useful message — *no* fallback to "oldest tenant".
  *
- * Tagging: every row written by this script is marked `metadata.demoSeed=true`
- * (on activity_logs + workflow_runs) so the reset path can delete *only*
+ * Usage:
+ *   pnpm seed:demo                            // wipes prior demo rows in the
+ *                                              // allowlisted tenant, reseeds fresh
+ *   pnpm seed:reset                           // wipes prior demo rows only
+ *   DEMO_TENANT_NAME="Test 1" pnpm seed:demo  // override the target name
+ *   TENANT_ID=<uuid> pnpm seed:demo           // explicit tenant id (must still
+ *                                              // be on the allowlist)
+ *
+ * Tagging: every row written here is marked `metadata.demoSeed=true`
+ * (on activity_logs + workflow_runs) so the reset path can delete only
  * demo data without touching real records. Companies/contacts/deals are
  * located via the activity_log creation rows tagged the same way.
  *
@@ -176,21 +189,59 @@ async function main() {
   const { companies, contacts, deals, activityLogs, workflowRuns } =
     await import('../src/db/schema');
 
-  const tenantId =
-    process.env.TENANT_ID ??
-    (
-      (await db.execute(
-        sql`SELECT id FROM tenants ORDER BY created_at LIMIT 1`,
-      )) as unknown as Array<{ id: string }>
-    )[0]?.id;
-  if (!tenantId) {
-    console.error(
-      'No tenant found. Pass TENANT_ID=<uuid> or sign in via the app first.',
-    );
-    process.exit(2);
+  // Resolve target tenant under the allowlist.
+  //   - TENANT_ID env: must match a tenant whose name is on the allowlist.
+  //   - DEMO_TENANT_NAME env: overrides the default name ("Test 1").
+  //   - Default: look up the single allowlisted demo tenant by name.
+  const explicitId = process.env.TENANT_ID;
+  const targetName = process.env.DEMO_TENANT_NAME ?? DEMO_TENANT_NAMES[0];
+
+  type TenantLookup = { id: string; name: string };
+  let resolved: TenantLookup | null = null;
+
+  if (explicitId) {
+    const rows = (await db.execute(
+      sql`SELECT id, name FROM tenants WHERE id = ${explicitId}::uuid LIMIT 1`,
+    )) as unknown as TenantLookup[];
+    resolved = rows[0] ?? null;
+    if (!resolved) {
+      console.error(`No tenant with id=${explicitId}.`);
+      process.exit(2);
+    }
+  } else {
+    if (!targetName) {
+      console.error(
+        'DEMO_TENANT_NAME is empty and the allowlist is empty too. ' +
+          'Add a name to scripts/demo-allowlist.ts.',
+      );
+      process.exit(2);
+    }
+    const rows = (await db.execute(
+      sql`SELECT id, name FROM tenants WHERE name = ${targetName} LIMIT 1`,
+    )) as unknown as TenantLookup[];
+    resolved = rows[0] ?? null;
+    if (!resolved) {
+      console.error(
+        `No tenant named "${targetName}". The seed script refuses to fall ` +
+          `back to another tenant. Create the org in Clerk first, sign in ` +
+          `once so the tenant row is provisioned, then re-run.`,
+      );
+      process.exit(2);
+    }
   }
 
-  console.log(`tenant=${tenantId}`);
+  if (!isDemoTenant(resolved.name)) {
+    console.error(
+      `Refusing to seed tenant "${resolved.name}" — it is not on the demo ` +
+        `allowlist (${DEMO_TENANT_NAMES.join(', ')}). Edit ` +
+        `scripts/demo-allowlist.ts only if this tenant is genuinely a ` +
+        `development/test fixture.`,
+    );
+    process.exit(3);
+  }
+
+  const tenantId = resolved.id;
+  console.log(`tenant="${resolved.name}" id=${tenantId}`);
 
   /* -------- RESET (always, unless --no-reset) -------- */
   if (!SKIP_RESET) {

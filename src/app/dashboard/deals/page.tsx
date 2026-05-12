@@ -1,6 +1,7 @@
-﻿import { withTenantSession } from '@/lib/auth-guard';
+import { withTenantSession } from '@/lib/auth-guard';
 import { listCompanyOptions } from '@/lib/companies/queries';
 import { listContactOptions } from '@/lib/contacts/queries';
+import { parseDealFilters } from '@/lib/deals/filters';
 import { listDeals } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
@@ -12,11 +13,7 @@ export const metadata = {
   title: 'Deals',
 };
 
-type SearchParams = Promise<{
-  q?: string;
-  cursor?: string;
-  size?: string;
-}>;
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function DealsPage({
   searchParams,
@@ -25,20 +22,21 @@ export default async function DealsPage({
 }) {
   return await withTenantSession(async ({ tenant }) => {
     const sp = await searchParams;
-    const search = sp.q?.trim() || undefined;
-    const cursor = parseCursorParam(sp.cursor);
-    const size = parsePageSize(sp.size);
+    const search = typeof sp.q === 'string' ? sp.q.trim() || undefined : undefined;
+    const cursor = parseCursorParam(typeof sp.cursor === 'string' ? sp.cursor : undefined);
+    const size = parsePageSize(typeof sp.size === 'string' ? sp.size : undefined);
+    const filters = parseDealFilters(sp);
 
     const [membership, page, companyOptions, contactOptions] = await Promise.all([
       requireMembership(),
-      listDeals(tenant.id, { search, cursor, size }),
+      listDeals(tenant.id, { search, cursor, size, filters }),
       listCompanyOptions(tenant.id),
       listContactOptions(tenant.id),
     ]);
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <header className="mb-5 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-900">Deals</h1>
             <p className="mt-0.5 text-[12px] text-slate-500">
@@ -51,6 +49,7 @@ export default async function DealsPage({
         <DealsView
           initialItems={page.items}
           initialSearch={search ?? ''}
+          initialFilters={filters}
           companyOptions={companyOptions}
           contactOptions={contactOptions}
           currentRole={membership.role}
