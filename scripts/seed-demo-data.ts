@@ -322,6 +322,11 @@ async function main() {
           WHERE tenant_id = ${tenantId}::uuid
             AND recipient_user_id LIKE 'seed-actor-%'`,
     );
+    await db.execute(
+      sql`DELETE FROM comments
+          WHERE tenant_id = ${tenantId}::uuid
+            AND author_user_id LIKE 'seed-actor-%'`,
+    );
 
     // Entities — locate ids via creation activity_log rows we tagged.
     await db.execute(
@@ -1004,6 +1009,90 @@ async function main() {
     `  notifs    inserted: ${notifRows.length} in ${Date.now() - phase}ms`,
   );
 
+  /* -------- COMMENTS -------- */
+
+  phase = Date.now();
+  const { comments: commentsTable } = await import('../src/db/schema');
+
+  // Build a small thread per closed deal — a top-level observation
+  // plus 1-2 replies, often with a mention to make the bell light up.
+  const COMMENT_BODIES = [
+    'Champion confirmed the budget — going to legal now.',
+    'They pushed back on per-seat pricing; floating the enterprise tier.',
+    'Need infosec sign-off before the kickoff. Looped in security.',
+    'Owner intro went well. Schedule the next-step call this week.',
+    'Procurement signed; expect PO by Friday.',
+    'Lost on competitor partnership. Worth a revisit in Q4.',
+  ];
+  const REPLY_BODIES = [
+    'Got it. {mention} can you join the call?',
+    'Same here — let me know if you want a second pair of eyes.',
+    'Already sent the security doc. Following up.',
+    'Looped in {mention} on the doc.',
+    'Same here. Going to close it out.',
+  ];
+
+  function buildMentionToken(actor: SeedActor): string {
+    return `@[${actor.firstName} ${actor.lastName}](${actor.id})`;
+  }
+
+  const commentRows: Array<typeof commentsTable.$inferInsert> = [];
+  // Maps optimistic top-level index → its assigned id so replies link.
+  // We pre-generate uuids client-side so we can build the parent
+  // chain without round-tripping a returning() per row.
+  const closingDeals = insertedDeals.filter(
+    (d) => d.stage === 'won' || d.stage === 'lost' || d.stage === 'negotiation',
+  );
+  for (const d of closingDeals) {
+    if (Math.random() > 0.55) continue;
+    const topAuthor = pickActor();
+    const topId = crypto.randomUUID();
+    commentRows.push({
+      id: topId,
+      tenantId,
+      entityType: 'deal',
+      entityId: d.id,
+      authorUserId: topAuthor.id,
+      parentCommentId: null,
+      body: pick(COMMENT_BODIES),
+      mentionedUserIds: [],
+      createdAt: daysAgo(randInt(1, 40)),
+    });
+
+    // 50–80% chance to have a reply.
+    if (Math.random() < 0.7) {
+      const replyAuthor = pickActor();
+      // Mentioning a third party — pick someone who isn't the author
+      // or the top-level commenter so the mention reads naturally.
+      const mentionTarget =
+        SEED_ACTORS.find(
+          (a) => a.id !== replyAuthor.id && a.id !== topAuthor.id,
+        ) ?? SEED_ACTORS[0]!;
+      const template = pick(REPLY_BODIES);
+      const body = template.includes('{mention}')
+        ? template.replace('{mention}', buildMentionToken(mentionTarget))
+        : template;
+      const mentions = body.includes('](') ? [mentionTarget.id] : [];
+      commentRows.push({
+        tenantId,
+        entityType: 'deal',
+        entityId: d.id,
+        authorUserId: replyAuthor.id,
+        parentCommentId: topId,
+        body,
+        mentionedUserIds: mentions,
+        createdAt: daysAgo(randInt(0, 15)),
+      });
+    }
+  }
+
+  if (commentRows.length > 0) {
+    await db.insert(commentsTable).values(commentRows);
+  }
+  console.log(
+    `  comments  inserted: ${commentRows.length} in ${Date.now() - phase}ms`,
+  );
+
   /* -------- SUMMARY -------- */
 
   console.log('\n  summary');
@@ -1018,6 +1107,7 @@ async function main() {
   console.log(`    tasks:             ${taskRows.length}`);
   console.log(`    notes:             ${notesRows.length}`);
   console.log(`    notifications:     ${notifRows.length}`);
+  console.log(`    comments:          ${commentRows.length}`);
   console.log('\n  done.\n');
 
   await client.end({ timeout: 5 });

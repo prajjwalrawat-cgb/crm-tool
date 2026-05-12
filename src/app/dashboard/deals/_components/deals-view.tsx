@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { Teammate } from '@/lib/teammates/queries';
 import { formatCurrency, toMinorUnits } from '@/lib/deals/currency';
 import type { DealFilters } from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
@@ -64,6 +65,7 @@ export function DealsView({
   initialFilters,
   companyOptions,
   contactOptions,
+  teammates,
   currentRole,
   nextCursor,
   pageSize,
@@ -73,6 +75,7 @@ export function DealsView({
   initialFilters: DealFilters;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
+  teammates: Teammate[];
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
@@ -339,6 +342,7 @@ export function DealsView({
               items={optimisticItems}
               canEdit={canEdit}
               canDelete={canDelete}
+              teammates={teammates}
               onEdit={(d) => {
                 setEditError(null);
                 setEditFieldErrors({});
@@ -381,6 +385,7 @@ function DealsTable({
   items,
   canEdit,
   canDelete,
+  teammates,
   onEdit,
   onDelete,
   onStageChange,
@@ -390,12 +395,14 @@ function DealsTable({
   items: DealItem[];
   canEdit: boolean;
   canDelete: boolean;
+  teammates: Teammate[];
   onEdit: (deal: DealRow) => void;
   onDelete: (deal: DealRow) => void;
   onStageChange: (deal: DealRow, next: DealStage) => void;
   stagePending: boolean;
   deletePending: boolean;
 }) {
+  const teammateById = new Map(teammates.map((t) => [t.id, t]));
   const showActions = canEdit || canDelete;
   return (
     <>
@@ -436,15 +443,22 @@ function DealsTable({
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">
-                {canEdit && !isOptimistic ? (
-                  <InlineStageSelect
-                    deal={d}
-                    onChange={(next) => onStageChange(d, next)}
-                    pending={stagePending && d.__pending === true}
+                <div className="flex items-center gap-2">
+                  {canEdit && !isOptimistic ? (
+                    <InlineStageSelect
+                      deal={d}
+                      onChange={(next) => onStageChange(d, next)}
+                      pending={stagePending && d.__pending === true}
+                    />
+                  ) : (
+                    <StageBadge stage={d.stage} />
+                  )}
+                  <OwnerCell
+                    ownerId={d.ownerId}
+                    teammate={d.ownerId ? teammateById.get(d.ownerId) : undefined}
+                    compact
                   />
-                ) : (
-                  <StageBadge stage={d.stage} />
-                )}
+                </div>
                 {showActions ? (
                   <RowActions
                     canEdit={canEdit}
@@ -484,6 +498,12 @@ function DealsTable({
                 className="hidden px-3 py-1.5 text-left font-semibold lg:table-cell"
               >
                 Contact
+              </th>
+              <th
+                scope="col"
+                className="hidden px-3 py-1.5 text-left font-semibold md:table-cell"
+              >
+                Owner
               </th>
               <th
                 scope="col"
@@ -544,6 +564,12 @@ function DealsTable({
                   </td>
                   <td className="hidden px-3 py-2 text-slate-600 lg:table-cell">
                     {d.contactName ?? d.contactEmail ?? '—'}
+                  </td>
+                  <td className="hidden px-3 py-2 md:table-cell">
+                    <OwnerCell
+                      ownerId={d.ownerId}
+                      teammate={d.ownerId ? teammateById.get(d.ownerId) : undefined}
+                    />
                   </td>
                   <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 sm:table-cell">
                     {d.expectedCloseDate
@@ -727,6 +753,55 @@ function RowActions({
           <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </button>
       ) : null}
+    </span>
+  );
+}
+
+/**
+ * Compact owner cell. Shows avatar + name when the teammate lookup
+ * resolves; falls back to a muted "Unassigned" pill otherwise. The
+ * compact variant (mobile cards) hides the name and keeps only the
+ * avatar to save space.
+ */
+function OwnerCell({
+  ownerId,
+  teammate,
+  compact,
+}: {
+  ownerId: string | null;
+  teammate: Teammate | undefined;
+  compact?: boolean;
+}) {
+  if (!ownerId) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-dashed border-slate-300" />
+        {!compact ? <span>Unassigned</span> : null}
+      </span>
+    );
+  }
+  const name = teammate?.displayName ?? ownerId;
+  const initials = name
+    .split(/\s+|-/)
+    .map((p) => (p[0] ?? '').toUpperCase())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('') || '?';
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-600" title={name}>
+      {teammate?.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={teammate.imageUrl}
+          alt=""
+          className="h-4 w-4 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-200 text-[9px] font-semibold text-slate-700">
+          {initials}
+        </span>
+      )}
+      {!compact ? <span className="truncate">{name}</span> : null}
     </span>
   );
 }

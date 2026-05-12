@@ -5,6 +5,7 @@ import { parseDealFilters } from '@/lib/deals/filters';
 import { listDeals } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
+import { listTeammates } from '@/lib/teammates/queries';
 
 import { DealsView } from './_components/deals-view';
 import { DealViewTabs } from './_components/deal-view-tabs';
@@ -27,18 +28,20 @@ export default async function DealsPage({
     const size = parsePageSize(typeof sp.size === 'string' ? sp.size : undefined);
     const filters = parseDealFilters(sp);
 
-    const [membership, page, companyOptions, contactOptions] = await Promise.all([
-      requireMembership(),
-      listDeals(tenant.id, {
-        search,
-        cursor,
-        size,
-        filters,
-        currentUserId: userId,
-      }),
-      listCompanyOptions(tenant.id),
-      listContactOptions(tenant.id),
-    ]);
+    const [membership, page, companyOptions, contactOptions, teammates] =
+      await Promise.all([
+        requireMembership(),
+        listDeals(tenant.id, {
+          search,
+          cursor,
+          size,
+          filters,
+          currentUserId: userId,
+        }),
+        listCompanyOptions(tenant.id),
+        listContactOptions(tenant.id),
+        listTeammates(tenant.id, tenant.name),
+      ]);
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -58,6 +61,7 @@ export default async function DealsPage({
           initialFilters={filters}
           companyOptions={companyOptions}
           contactOptions={contactOptions}
+          teammates={teammates}
           currentRole={membership.role}
           nextCursor={page.nextCursor}
           pageSize={page.size}

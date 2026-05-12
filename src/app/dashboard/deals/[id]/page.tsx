@@ -2,10 +2,10 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { listActivityForEntity } from '@/lib/activity/queries';
 import { getAIMode } from '@/lib/ai/config';
 import { getCachedSummary } from '@/lib/ai/summary-queries';
 import { withTenantSession } from '@/lib/auth-guard';
+import { listCommentsForEntity } from '@/lib/comments/queries';
 import { formatCurrency } from '@/lib/deals/currency';
 import { getDealById } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
@@ -14,9 +14,12 @@ import { listNotesForEntity } from '@/lib/notes/queries';
 import { canManageDeals } from '@/lib/rbac';
 import { listTasksForEntity } from '@/lib/tasks/queries';
 import { listTeammates } from '@/lib/teammates/queries';
+import { getEntityTimeline } from '@/lib/timeline/queries';
 
-import { ActivityList } from '../../activity/_components/activity-list';
+import { resolveAuthorLookup } from '../../_components/author-lookup';
+import { CommentsThread } from '../../_components/comments-thread';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
+import { EntityTimeline } from '../../_components/entity-timeline';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { StageBadge } from '../_components/stage-badge';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
@@ -34,52 +37,6 @@ export const metadata = {
 
 type Params = Promise<{ id: string }>;
 
-/**
- * Author display lookup for notes. Reuses the same seeded-actor name
- * resolution we use in the activity feed — Clerk users come through
- * with their real names, seeded actors get realistic personas, and
- * unknown ids fall back to "Teammate" (never the raw id).
- */
-async function resolveAuthorLookup(
-  authorIds: string[],
-): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  if (authorIds.length === 0) return out;
-
-  // Skip seeded actors — their friendly name lives on each
-  // activity_log.metadata.actor entry, but we can derive it from the
-  // id pattern alone since the seed uses `seed-actor-<first>-<last>`.
-  const realIds = authorIds.filter((id) => !id.startsWith('seed-actor-'));
-
-  for (const id of authorIds) {
-    if (id.startsWith('seed-actor-')) {
-      const rest = id.slice('seed-actor-'.length);
-      const parts = rest.split('-').map((p) => p[0]!.toUpperCase() + p.slice(1));
-      out[id] = parts.join(' ');
-    }
-  }
-
-  if (realIds.length > 0) {
-    const { clerkClient } = await import('@clerk/nextjs/server');
-    const client = await clerkClient();
-    try {
-      const list = await client.users.getUserList({
-        userId: realIds,
-        limit: 500,
-      });
-      for (const u of list.data) {
-        const parts = [u.firstName, u.lastName].filter(Boolean) as string[];
-        out[u.id] = parts.length > 0
-          ? parts.join(' ')
-          : u.primaryEmailAddress?.emailAddress ?? 'Teammate';
-      }
-    } catch {
-      // Tolerate transient Clerk failure; fall through to "Teammate".
-    }
-  }
-  return out;
-}
-
 export default async function DealDetailPage({ params }: { params: Params }) {
   return await withTenantSession(async ({ tenant, userId }) => {
     const { id } = await params;
@@ -87,26 +44,42 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     const deal = await getDealById(tenant.id, id);
     if (!deal) notFound();
 
-    const [membership, activity, cachedSummary, notes, tasks, teammates] =
-      await Promise.all([
-        requireMembership(),
-        listActivityForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
-        getCachedSummary(tenant.id, 'deal', deal.id),
-        listNotesForEntity(tenant.id, 'deal', deal.id, { limit: 100 }),
-        listTasksForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
-        listTeammates(tenant.id, tenant.name),
-      ]);
+    const [
+      membership,
+      cachedSummary,
+      notes,
+      comments,
+      tasks,
+      teammates,
+      timeline,
+    ] = await Promise.all([
+      requireMembership(),
+      getCachedSummary(tenant.id, 'deal', deal.id),
+      listNotesForEntity(tenant.id, 'deal', deal.id, { limit: 100 }),
+      listCommentsForEntity(tenant.id, 'deal', deal.id, { limit: 200 }),
+      listTasksForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
+      listTeammates(tenant.id, tenant.name),
+      getEntityTimeline(tenant.id, 'deal', deal.id, { limit: 150 }),
+    ]);
 
     const canEdit = canManageDeals(membership.role);
 
-    // Resolve author display names for the notes timeline. Pool the
-    // ids and run a single batched lookup.
-    const noteAuthorIds = Array.from(
-      new Set(notes.map((n) => n.authorUserId)),
-    );
-    const authorLookup = await resolveAuthorLookup(
-      [...noteAuthorIds, ...(deal.ownerId ? [deal.ownerId] : [])],
-    );
+    // Resolve author display names across notes, comments, timeline
+    // activity, and the deal owner. One Clerk batch lookup serves
+    // everything.
+    const authorIds = new Set<string>();
+    for (const n of notes) authorIds.add(n.authorUserId);
+    for (const c of comments) {
+      authorIds.add(c.authorUserId);
+      for (const m of c.mentionedUserIds) authorIds.add(m);
+    }
+    for (const t of timeline) {
+      if (t.kind === 'activity' && t.row.actorUserId) {
+        authorIds.add(t.row.actorUserId);
+      }
+    }
+    if (deal.ownerId) authorIds.add(deal.ownerId);
+    const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -193,6 +166,16 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               canEdit={canEdit}
             />
 
+            <CommentsThread
+              entityType="deal"
+              entityId={deal.id}
+              currentUserId={userId}
+              initialComments={comments}
+              authorLookup={authorLookup}
+              teammates={teammates}
+              canWrite={canEdit}
+            />
+
             <NotesTimeline
               entityType="deal"
               entityId={deal.id}
@@ -202,15 +185,11 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               canWrite={canEdit}
             />
 
-            <div>
-              <h2 className="mb-3 text-[13px] font-semibold text-slate-900">
-                Timeline
-              </h2>
-              <ActivityList
-                rows={activity}
-                emptyMessage="No activity recorded for this deal yet."
-              />
-            </div>
+            <EntityTimeline
+              items={timeline}
+              authorLookup={authorLookup}
+              currentUserId={userId}
+            />
           </section>
         </div>
       </main>

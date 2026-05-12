@@ -71,6 +71,13 @@
       "when": 1778600000000,
       "tag": "0009_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778700000000,
+      "tag": "0010_comments",
+      "breakpoints": true
     }
   ]
 }

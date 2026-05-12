@@ -12,3 +12,4 @@ export * from './ai-summaries';
 export * from './tasks';
 export * from './notes';
 export * from './notifications';
+export * from './comments';
