@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
 import { PaginationControls } from '../../_components/pagination-controls';
+import { ToggleFilterBar } from '../../_components/toggle-filter-bar';
 import {
   createCompanyAction,
   softDeleteCompanyAction,
@@ -125,6 +126,7 @@ export function CompaniesView({
       name: name || '(unnamed)',
       domain: domain || null,
       industry: industry || null,
+      ownerId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       deletedAt: null,
@@ -239,6 +241,18 @@ export function CompaniesView({
             </CreateDrawer>
           ) : null}
         </div>
+
+        <ToggleFilterBar
+          basePath="/dashboard/companies"
+          toggles={[
+            { key: 'mine', label: 'My companies', title: 'Companies you own' },
+            { key: 'unassigned', label: 'Unassigned', title: 'No owner assigned' },
+            { key: 'hasDeals', label: 'Has active deals', title: 'Companies with at least one open deal' },
+            { key: 'recentActivityDays', value: '14', label: 'Recently active', title: 'Activity in the last 14 days' },
+            { key: 'createdWithinDays', value: '30', label: 'New (30d)', title: 'Created in the last 30 days' },
+            { key: 'stale', label: 'Stale', title: 'No activity for 30+ days' },
+          ]}
+        />
 
         {actionError ? (
           <p

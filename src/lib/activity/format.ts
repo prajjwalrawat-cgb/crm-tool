@@ -8,6 +8,8 @@ const ENTITY_LABEL: Record<ActivityEntityType, string> = {
   deal: 'deal',
   membership: 'member',
   invitation: 'invitation',
+  task: 'task',
+  note: 'note',
 };
 
 type FormattedActivity = {
@@ -97,6 +99,25 @@ export function formatActivity(row: ActivityRow): FormattedActivity {
           ? meta.targetUserId
           : 'a member';
       return { sentence: `${actor} removed ${target}` };
+    }
+    case 'task_completed': {
+      const taskTitle =
+        typeof meta.taskTitle === 'string' ? meta.taskTitle : name;
+      return {
+        sentence: taskTitle
+          ? `${actor} completed task ${taskTitle}`
+          : `${actor} completed a task`,
+      };
+    }
+    case 'owner_changed': {
+      const toName =
+        typeof meta.toName === 'string' ? meta.toName : null;
+      const target = name ?? entityLabel;
+      return {
+        sentence: toName
+          ? `${actor} reassigned ${target} to ${toName}`
+          : `${actor} changed the owner on ${target}`,
+      };
     }
     case 'automation_note': {
       // Workflows write a structured payload; the message is human-ready

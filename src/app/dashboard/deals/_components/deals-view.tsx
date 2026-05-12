@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ExternalLink, Loader2, Pencil, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, Pencil, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -10,14 +10,21 @@ import {
   useState,
   useTransition,
 } from 'react';
+import { toast } from 'sonner';
 
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { Teammate } from '@/lib/teammates/queries';
 import { formatCurrency, toMinorUnits } from '@/lib/deals/currency';
+import type { DealFilters } from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
 import type { PageSize } from '@/lib/pagination/page-size';
-import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
+import {
+  type DealStage,
+  DEAL_STAGES,
+  DEAL_STAGE_LABELS,
+} from '@/lib/deals/schema';
 import { canDeleteDeals, canManageDeals } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
@@ -27,8 +34,10 @@ import {
   createDealAction,
   softDeleteDealAction,
   updateDealAction,
+  updateDealStageAction,
 } from '../actions';
 import { CreateDealForm } from './create-deal-form';
+import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
 import { EmptyState } from './empty-state';
 import { StageBadge } from './stage-badge';
@@ -53,16 +62,20 @@ function isDealStage(value: string): value is DealStage {
 export function DealsView({
   initialItems,
   initialSearch,
+  initialFilters,
   companyOptions,
   contactOptions,
+  teammates,
   currentRole,
   nextCursor,
   pageSize,
 }: {
   initialItems: DealRow[];
   initialSearch: string;
+  initialFilters: DealFilters;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
+  teammates: Teammate[];
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
@@ -221,6 +234,38 @@ export function DealsView({
     setEditingDeal(null);
   }
 
+  // Inline stage edit — used by the stage-cell dropdown. Reuses the
+  // existing kanban server action so the audit trail + automation
+  // workflows fire identically regardless of where the move came from.
+  const [stagePending, startStageTransition] = useTransition();
+  function handleStageChange(deal: DealRow, nextStage: DealStage) {
+    if (deal.stage === nextStage) return;
+    const optimisticDraft: DealItem = {
+      ...deal,
+      stage: nextStage,
+      closedAt:
+        nextStage === 'won' || nextStage === 'lost'
+          ? deal.closedAt ?? new Date()
+          : null,
+      updatedAt: new Date(),
+      __pending: true,
+    };
+    startStageTransition(async () => {
+      applyOptimistic({ type: 'update', draft: optimisticDraft });
+      const result = await updateDealStageAction({
+        id: deal.id,
+        stage: nextStage,
+      });
+      if (!result.ok) {
+        toast.error(`Couldn't change stage: ${result.message}`);
+      } else if (result.changed) {
+        toast.success(
+          `${deal.name} → ${DEAL_STAGE_LABELS[nextStage]}`,
+        );
+      }
+    });
+  }
+
   const showEmpty = optimisticItems.length === 0;
   const trimmedSearch = search.trim();
 
@@ -275,6 +320,11 @@ export function DealsView({
           ) : null}
         </div>
 
+        <DealFilterBar
+          initialFilters={initialFilters}
+          companyOptions={companyOptions}
+        />
+
         {actionError ? (
           <p
             role="alert"
@@ -292,12 +342,15 @@ export function DealsView({
               items={optimisticItems}
               canEdit={canEdit}
               canDelete={canDelete}
+              teammates={teammates}
               onEdit={(d) => {
                 setEditError(null);
                 setEditFieldErrors({});
                 setEditingDeal(d);
               }}
               onDelete={handleDelete}
+              onStageChange={handleStageChange}
+              stagePending={stagePending}
               deletePending={deletePending}
             />
             <PaginationControls
@@ -332,20 +385,96 @@ function DealsTable({
   items,
   canEdit,
   canDelete,
+  teammates,
   onEdit,
   onDelete,
+  onStageChange,
+  stagePending,
   deletePending,
 }: {
   items: DealItem[];
   canEdit: boolean;
   canDelete: boolean;
+  teammates: Teammate[];
   onEdit: (deal: DealRow) => void;
   onDelete: (deal: DealRow) => void;
+  onStageChange: (deal: DealRow, next: DealStage) => void;
+  stagePending: boolean;
   deletePending: boolean;
 }) {
+  const teammateById = new Map(teammates.map((t) => [t.id, t]));
   const showActions = canEdit || canDelete;
   return (
-    <div className="overflow-x-auto">
+    <>
+      {/* Mobile / narrow viewports: stacked card list. The table below
+          is hidden on small screens so we never force horizontal scroll. */}
+      <ul className="flex flex-col divide-y divide-slate-100 sm:hidden">
+        {items.map((d) => {
+          const isOptimistic = d.id.startsWith('optimistic-');
+          return (
+            <li
+              key={d.id}
+              className={cn(
+                'flex flex-col gap-1.5 px-3 py-2.5 transition-colors',
+                d.__pending && 'opacity-60',
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  {isOptimistic ? (
+                    <span className="text-[13px] font-medium">{d.name}</span>
+                  ) : (
+                    <Link
+                      href={`/dashboard/deals/${d.id}`}
+                      className="text-[13px] font-medium hover:underline"
+                    >
+                      {d.name}
+                    </Link>
+                  )}
+                  <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                    {d.companyName ?? 'No company'}
+                    {d.contactName || d.contactEmail
+                      ? ` · ${d.contactName ?? d.contactEmail}`
+                      : ''}
+                  </p>
+                </div>
+                <span className="shrink-0 font-mono text-[12px] tabular-nums text-slate-700">
+                  {formatCurrency(d.amountMinor, d.currency)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {canEdit && !isOptimistic ? (
+                    <InlineStageSelect
+                      deal={d}
+                      onChange={(next) => onStageChange(d, next)}
+                      pending={stagePending && d.__pending === true}
+                    />
+                  ) : (
+                    <StageBadge stage={d.stage} />
+                  )}
+                  <OwnerCell
+                    ownerId={d.ownerId}
+                    teammate={d.ownerId ? teammateById.get(d.ownerId) : undefined}
+                    compact
+                  />
+                </div>
+                {showActions ? (
+                  <RowActions
+                    canEdit={canEdit}
+                    canDelete={canDelete}
+                    onEdit={() => onEdit(d)}
+                    onDelete={() => onDelete(d)}
+                    busy={deletePending && d.__pending === true}
+                  />
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="hidden overflow-x-auto sm:block">
       <table className="min-w-full divide-y divide-slate-200 text-[13px]">
         <thead className="sticky top-0 z-10 bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
             <tr>
@@ -372,12 +501,21 @@ function DealsTable({
               </th>
               <th
                 scope="col"
+                className="hidden px-3 py-1.5 text-left font-semibold md:table-cell"
+              >
+                Owner
+              </th>
+              <th
+                scope="col"
                 className="hidden px-3 py-1.5 text-right font-semibold sm:table-cell"
               >
                 Close date
               </th>
               {showActions ? (
-                <th scope="col" className="px-3 py-1.5 text-right font-semibold">
+                <th
+                  scope="col"
+                  className="sticky right-0 z-10 bg-slate-50/95 px-3 py-1.5 text-right font-semibold backdrop-blur"
+                >
                   <span className="sr-only">Actions</span>
                 </th>
               ) : null}
@@ -390,7 +528,7 @@ function DealsTable({
                 <tr
                   key={d.id}
                   className={cn(
-                    'transition-colors hover:bg-slate-50/70',
+                    'group transition-colors hover:bg-slate-50/70',
                     d.__pending && 'opacity-60',
                   )}
                 >
@@ -408,7 +546,15 @@ function DealsTable({
                     )}
                   </td>
                   <td className="px-3 py-2">
-                    <StageBadge stage={d.stage} />
+                    {canEdit && !isOptimistic ? (
+                      <InlineStageSelect
+                        deal={d}
+                        onChange={(next) => onStageChange(d, next)}
+                        pending={stagePending && d.__pending === true}
+                      />
+                    ) : (
+                      <StageBadge stage={d.stage} />
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
                     {formatCurrency(d.amountMinor, d.currency)}
@@ -419,13 +565,19 @@ function DealsTable({
                   <td className="hidden px-3 py-2 text-slate-600 lg:table-cell">
                     {d.contactName ?? d.contactEmail ?? '—'}
                   </td>
+                  <td className="hidden px-3 py-2 md:table-cell">
+                    <OwnerCell
+                      ownerId={d.ownerId}
+                      teammate={d.ownerId ? teammateById.get(d.ownerId) : undefined}
+                    />
+                  </td>
                   <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 sm:table-cell">
                     {d.expectedCloseDate
                       ? dateFormatter.format(new Date(d.expectedCloseDate))
                       : '—'}
                   </td>
                   {showActions ? (
-                    <td className="whitespace-nowrap px-3 py-2 text-right">
+                    <td className="sticky right-0 z-[1] whitespace-nowrap bg-white/95 px-3 py-2 text-right backdrop-blur group-hover:bg-slate-50/95">
                       <RowActions
                         canEdit={canEdit}
                         canDelete={canDelete}
@@ -440,6 +592,100 @@ function DealsTable({
             })}
         </tbody>
       </table>
+      </div>
+    </>
+  );
+}
+
+function InlineStageSelect({
+  deal,
+  onChange,
+  pending,
+}: {
+  deal: DealItem;
+  onChange: (next: DealStage) => void;
+  pending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  // Close on outside-click via a window-level handler installed only
+  // while the popover is mounted.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="inline-flex items-center gap-1 rounded transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Change stage"
+      >
+        <StageBadge stage={deal.stage} />
+        {pending ? (
+          <Loader2
+            className="h-3 w-3 animate-spin text-slate-400"
+            aria-hidden
+          />
+        ) : (
+          <ChevronDown
+            className="h-3 w-3 text-slate-400 transition-transform"
+            aria-hidden
+            style={{ transform: open ? 'rotate(180deg)' : undefined }}
+          />
+        )}
+      </button>
+      {open ? (
+        <ul
+          role="listbox"
+          className="absolute left-0 top-full z-30 mt-1 min-w-[8rem] overflow-hidden rounded-md border border-slate-200 bg-white py-0.5 shadow-md"
+        >
+          {DEAL_STAGES.map((stage) => (
+            <li key={stage}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={stage === deal.stage}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(stage);
+                }}
+                className={cn(
+                  'flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-[12px] transition',
+                  stage === deal.stage
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-slate-700 hover:bg-slate-50',
+                )}
+              >
+                <span className="capitalize">{DEAL_STAGE_LABELS[stage]}</span>
+                {stage === deal.stage ? (
+                  <span className="text-[10px] text-indigo-500">current</span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -507,6 +753,55 @@ function RowActions({
           <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </button>
       ) : null}
+    </span>
+  );
+}
+
+/**
+ * Compact owner cell. Shows avatar + name when the teammate lookup
+ * resolves; falls back to a muted "Unassigned" pill otherwise. The
+ * compact variant (mobile cards) hides the name and keeps only the
+ * avatar to save space.
+ */
+function OwnerCell({
+  ownerId,
+  teammate,
+  compact,
+}: {
+  ownerId: string | null;
+  teammate: Teammate | undefined;
+  compact?: boolean;
+}) {
+  if (!ownerId) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-dashed border-slate-300" />
+        {!compact ? <span>Unassigned</span> : null}
+      </span>
+    );
+  }
+  const name = teammate?.displayName ?? ownerId;
+  const initials = name
+    .split(/\s+|-/)
+    .map((p) => (p[0] ?? '').toUpperCase())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('') || '?';
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-600" title={name}>
+      {teammate?.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={teammate.imageUrl}
+          alt=""
+          className="h-4 w-4 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-200 text-[9px] font-semibold text-slate-700">
+          {initials}
+        </span>
+      )}
+      {!compact ? <span className="truncate">{name}</span> : null}
     </span>
   );
 }

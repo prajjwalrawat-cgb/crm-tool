@@ -22,6 +22,22 @@ export const dealStage = pgEnum('deal_stage', [
   'lost',
 ]);
 
+export const taskStatus = pgEnum('task_status', [
+  'todo',
+  'in_progress',
+  'completed',
+  'cancelled',
+]);
+
+export const taskPriority = pgEnum('task_priority', [
+  'low',
+  'medium',
+  'high',
+  'urgent',
+]);
+
 export type MembershipRole = (typeof membershipRole.enumValues)[number];
 export type MembershipStatus = (typeof membershipStatus.enumValues)[number];
 export type DealStage = (typeof dealStage.enumValues)[number];
+export type TaskStatus = (typeof taskStatus.enumValues)[number];
+export type TaskPriority = (typeof taskPriority.enumValues)[number];

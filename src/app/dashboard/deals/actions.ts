@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { companies, contacts, deals, type Deal } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
+import { recordNotification } from '@/lib/notifications/recorder';
 import {
   runWithTenantContext,
   tenantTransaction,
@@ -473,6 +474,31 @@ export async function updateDealStageAction(
             to: updated.stage,
           },
         });
+
+        // Notify the deal owner when their deal moves into a terminal
+        // stage. The actor (the person making the change) is skipped
+        // by the recorder when they own the deal — which is the
+        // common case during normal pipeline operation.
+        if (
+          (updated.stage === 'won' || updated.stage === 'lost') &&
+          updated.ownerId
+        ) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: updated.ownerId,
+            actorUserId: membership.userId,
+            type: updated.stage === 'won' ? 'deal_won' : 'deal_lost',
+            title:
+              updated.stage === 'won'
+                ? `Deal won: ${updated.name}`
+                : `Deal lost: ${updated.name}`,
+            subtitle: null,
+            entityType: 'deal',
+            entityId: updated.id,
+            metadata: { from: previous.stage, to: updated.stage },
+          });
+        }
+
         const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
         if (serialized) {
           await publishRealtimeEvent(tx, {
@@ -688,6 +714,106 @@ export async function restoreDealAction(id: string): Promise<SimpleResult> {
       revalidatePath('/dashboard/recently-deleted');
       revalidatePath('/dashboard/activity');
       return { ok: true };
+    },
+  );
+}
+
+/* -------- ASSIGN OWNER -------- */
+
+const updateOwnerSchema = z.object({
+  id: z.uuid({ message: 'Invalid deal id' }),
+  ownerId: z.string().min(1).max(120).nullable(),
+});
+
+export type UpdateOwnerInput = { id: string; ownerId: string | null };
+
+export type UpdateOwnerResult =
+  | { ok: true; deal: Deal; changed: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Reassign (or unassign) a deal's owner. Logs an `owner_changed`
+ * activity row carrying both the previous and the new owner id so the
+ * detail-page timeline can render "Priya reassigned Razorpay to Rahul".
+ */
+export async function updateDealOwnerAction(
+  input: UpdateOwnerInput,
+): Promise<UpdateOwnerResult> {
+  const gate = await checkPermission('manageDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const parsed = updateOwnerSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, message: 'Invalid owner payload' };
+      }
+
+      const result = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select()
+          .from(deals)
+          .where(
+            and(
+              eq(deals.id, parsed.data.id),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return { changed: false, deal: null as Deal | null };
+
+        if ((previous.ownerId ?? null) === parsed.data.ownerId) {
+          return { changed: false, deal: previous };
+        }
+
+        const [updated] = await tx
+          .update(deals)
+          .set({ ownerId: parsed.data.ownerId })
+          .where(eq(deals.id, parsed.data.id))
+          .returning();
+        if (!updated) return { changed: false, deal: null as Deal | null };
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'deal',
+          entityId: updated.id,
+          action: 'owner_changed',
+          metadata: {
+            name: updated.name,
+            from: previous.ownerId ?? null,
+            to: updated.ownerId ?? null,
+          },
+        });
+
+        // Notify the new owner that they've inherited the deal.
+        // Recorder skips self-targets so reassigning to yourself is silent.
+        if (updated.ownerId) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: updated.ownerId,
+            actorUserId: membership.userId,
+            type: 'owner_changed',
+            title: `You now own ${updated.name}`,
+            subtitle: null,
+            entityType: 'deal',
+            entityId: updated.id,
+            metadata: { from: previous.ownerId ?? null },
+          });
+        }
+
+        return { changed: true, deal: updated };
+      });
+
+      if (!result.deal) {
+        return { ok: false, message: 'Deal not found' };
+      }
+      revalidatePath('/dashboard/deals');
+      revalidatePath(`/dashboard/deals/${result.deal.id}`);
+      return { ok: true, deal: result.deal, changed: result.changed };
     },
   );
 }

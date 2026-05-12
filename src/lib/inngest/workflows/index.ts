@@ -19,6 +19,7 @@ import {
   regenerateEmbedding,
   regenerateEmbeddingHandler,
 } from './regenerate-embedding';
+import { notificationsRetention } from './notifications-retention';
 import { staleDealsScan } from './stale-deals-scan';
 import { workflowRunsRetention } from './workflow-runs-retention';
 
@@ -36,6 +37,7 @@ export {
   dealLost,
   dealWon,
   newMemberOnboarding,
+  notificationsRetention,
   regenerateEmbedding,
   staleDealsScan,
   workflowRunsRetention,

@@ -15,6 +15,8 @@ export const companies = pgTable(
     name: text('name').notNull(),
     domain: text('domain'),
     industry: text('industry'),
+    /** Clerk user id of the account owner. Null = unassigned. */
+    ownerId: text('owner_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
@@ -27,6 +29,7 @@ export const companies = pgTable(
     index('companies_tenant_id_idx').on(t.tenantId),
     index('companies_tenant_name_idx').on(t.tenantId, t.name),
     index('companies_tenant_domain_idx').on(t.tenantId, t.domain),
+    index('companies_tenant_owner_idx').on(t.tenantId, t.ownerId),
     index('companies_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
   ],
 );

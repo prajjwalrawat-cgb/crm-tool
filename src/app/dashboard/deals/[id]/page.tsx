@@ -2,16 +2,27 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { listActivityForEntity } from '@/lib/activity/queries';
 import { getAIMode } from '@/lib/ai/config';
 import { getCachedSummary } from '@/lib/ai/summary-queries';
 import { withTenantSession } from '@/lib/auth-guard';
+import { listCommentsForEntity } from '@/lib/comments/queries';
 import { formatCurrency } from '@/lib/deals/currency';
 import { getDealById } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import { requireMembership } from '@/lib/membership';
+import { listNotesForEntity } from '@/lib/notes/queries';
+import { canManageDeals } from '@/lib/rbac';
+import { listTasksForEntity } from '@/lib/tasks/queries';
+import { listTeammates } from '@/lib/teammates/queries';
+import { getEntityTimeline } from '@/lib/timeline/queries';
 
-import { ActivityList } from '../../activity/_components/activity-list';
+import { resolveAuthorLookup } from '../../_components/author-lookup';
+import { CommentsThread } from '../../_components/comments-thread';
+import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
+import { EntityTimeline } from '../../_components/entity-timeline';
+import { NotesTimeline } from '../../_components/notes-timeline';
 import { StageBadge } from '../_components/stage-badge';
+import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { SummaryCard } from './_components/summary-card';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -27,90 +38,162 @@ export const metadata = {
 type Params = Promise<{ id: string }>;
 
 export default async function DealDetailPage({ params }: { params: Params }) {
-  return await withTenantSession(async ({ tenant }) => {
+  return await withTenantSession(async ({ tenant, userId }) => {
     const { id } = await params;
 
     const deal = await getDealById(tenant.id, id);
     if (!deal) notFound();
 
-    const [activity, cachedSummary] = await Promise.all([
-      listActivityForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
+    const [
+      membership,
+      cachedSummary,
+      notes,
+      comments,
+      tasks,
+      teammates,
+      timeline,
+    ] = await Promise.all([
+      requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
+      listNotesForEntity(tenant.id, 'deal', deal.id, { limit: 100 }),
+      listCommentsForEntity(tenant.id, 'deal', deal.id, { limit: 200 }),
+      listTasksForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
+      listTeammates(tenant.id, tenant.name),
+      getEntityTimeline(tenant.id, 'deal', deal.id, { limit: 150 }),
     ]);
 
+    const canEdit = canManageDeals(membership.role);
+
+    // Resolve author display names across notes, comments, timeline
+    // activity, and the deal owner. One Clerk batch lookup serves
+    // everything.
+    const authorIds = new Set<string>();
+    for (const n of notes) authorIds.add(n.authorUserId);
+    for (const c of comments) {
+      authorIds.add(c.authorUserId);
+      for (const m of c.mentionedUserIds) authorIds.add(m);
+    }
+    for (const t of timeline) {
+      if (t.kind === 'activity' && t.row.actorUserId) {
+        authorIds.add(t.row.actorUserId);
+      }
+    }
+    if (deal.ownerId) authorIds.add(deal.ownerId);
+    const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
+
     return (
-    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-      <Link
-        href="/dashboard/deals"
-        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900"
-      >
-        <ArrowLeft className="h-3 w-3" aria-hidden />
-        All deals
-      </Link>
+      <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
+        <Link
+          href="/dashboard/deals"
+          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900"
+        >
+          <ArrowLeft className="h-3 w-3" aria-hidden />
+          All deals
+        </Link>
 
-      <header className="mt-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-slate-200 pb-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{deal.name}</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {DEAL_STAGE_LABELS[deal.stage]} ·{' '}
-            <span className="font-mono">
-              {formatCurrency(deal.amountMinor, deal.currency)}
-            </span>
-          </p>
-        </div>
-        <StageBadge stage={deal.stage} />
-      </header>
-
-      <div className="mt-8 grid gap-6 lg:grid-cols-[320px_1fr]">
-        <aside className="flex flex-col gap-3">
-          <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
-          <DetailCard
-            label="Amount"
-            value={formatCurrency(deal.amountMinor, deal.currency)}
-            mono
-          />
-          <DetailCard
-            label="Expected close"
-            value={
-              deal.expectedCloseDate
-                ? dateFormatter.format(new Date(deal.expectedCloseDate))
-                : '—'
-            }
-          />
-          <DetailCard label="Company" value={deal.companyName ?? '—'} />
-          <DetailCard
-            label="Contact"
-            value={deal.contactName ?? deal.contactEmail ?? '—'}
-          />
-          <DetailCard
-            label="Created"
-            value={dateFormatter.format(new Date(deal.createdAt))}
-          />
-          {deal.closedAt ? (
-            <DetailCard
-              label="Closed"
-              value={dateFormatter.format(new Date(deal.closedAt))}
-            />
-          ) : null}
-        </aside>
-
-        <section className="space-y-6">
-          <SummaryCard
-            dealId={deal.id}
-            initialSummary={cachedSummary?.summary ?? null}
-            initialGeneratedAt={cachedSummary?.generatedAt.toISOString() ?? null}
-            aiMode={getAIMode()}
-          />
+        <header className="mt-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-slate-200 pb-5">
           <div>
-            <h2 className="mb-3 text-base font-semibold">Timeline</h2>
-            <ActivityList
-              rows={activity}
-              emptyMessage="No activity recorded for this deal yet."
-            />
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+              {deal.name}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              {DEAL_STAGE_LABELS[deal.stage]} ·{' '}
+              <span className="font-mono">
+                {formatCurrency(deal.amountMinor, deal.currency)}
+              </span>
+            </p>
           </div>
-        </section>
-      </div>
-    </main>
+          <StageBadge stage={deal.stage} />
+        </header>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">
+          <aside className="flex flex-col gap-3">
+            <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
+            <DetailCard
+              label="Amount"
+              value={formatCurrency(deal.amountMinor, deal.currency)}
+              mono
+            />
+            <DetailCard
+              label="Expected close"
+              value={
+                deal.expectedCloseDate
+                  ? dateFormatter.format(new Date(deal.expectedCloseDate))
+                  : '—'
+              }
+            />
+            <DealOwnerPicker
+              dealId={deal.id}
+              currentOwnerId={deal.ownerId}
+              currentOwnerName={
+                deal.ownerId ? authorLookup[deal.ownerId] ?? null : null
+              }
+              currentUserId={userId}
+              teammates={teammates}
+              canEdit={canEdit}
+            />
+            <DetailCard label="Company" value={deal.companyName ?? '—'} />
+            <DetailCard
+              label="Contact"
+              value={deal.contactName ?? deal.contactEmail ?? '—'}
+            />
+            <DetailCard
+              label="Created"
+              value={dateFormatter.format(new Date(deal.createdAt))}
+            />
+            {deal.closedAt ? (
+              <DetailCard
+                label="Closed"
+                value={dateFormatter.format(new Date(deal.closedAt))}
+              />
+            ) : null}
+          </aside>
+
+          <section className="space-y-4">
+            <SummaryCard
+              dealId={deal.id}
+              initialSummary={cachedSummary?.summary ?? null}
+              initialGeneratedAt={cachedSummary?.generatedAt.toISOString() ?? null}
+              aiMode={getAIMode()}
+            />
+
+            <EntityTasksPanel
+              entityType="deal"
+              entityId={deal.id}
+              ownerId={deal.ownerId}
+              currentUserId={userId}
+              initialTasks={tasks}
+              canEdit={canEdit}
+            />
+
+            <CommentsThread
+              tenantId={tenant.id}
+              entityType="deal"
+              entityId={deal.id}
+              currentUserId={userId}
+              initialComments={comments}
+              authorLookup={authorLookup}
+              teammates={teammates}
+              canWrite={canEdit}
+            />
+
+            <NotesTimeline
+              entityType="deal"
+              entityId={deal.id}
+              currentUserId={userId}
+              initialNotes={notes}
+              authorLookup={authorLookup}
+              canWrite={canEdit}
+            />
+
+            <EntityTimeline
+              items={timeline}
+              authorLookup={authorLookup}
+              currentUserId={userId}
+            />
+          </section>
+        </div>
+      </main>
     );
   });
 }

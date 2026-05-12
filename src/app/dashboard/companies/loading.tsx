@@ -1,20 +1,19 @@
-﻿export default function Loading() {
+import { Skeleton } from '../_components/skeleton';
+
+export default function Loading() {
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mb-5">
-        <div className="h-7 w-32 animate-pulse rounded bg-slate-200" />
-        <div className="mt-2 h-4 w-48 animate-pulse rounded bg-slate-200" />
+    <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
+      <header className="mb-5 space-y-1.5">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-3 w-48" />
       </header>
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-16 animate-pulse rounded-lg border border-slate-200 bg-slate-50"
-            />
-          ))}
-        </div>
-        <div className="h-64 animate-pulse rounded-lg border border-slate-200 bg-slate-50" />
+      <Skeleton className="mb-3 h-7 w-full max-w-md" />
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="border-b border-slate-100 last:border-b-0">
+            <Skeleton.Row cols={4} />
+          </div>
+        ))}
       </div>
     </main>
   );

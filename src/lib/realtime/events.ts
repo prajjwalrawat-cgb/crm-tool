@@ -89,6 +89,31 @@ export type RealtimeEvent =
       type: 'presence.snapshot';
       tenantId: string;
       members: PresenceMember[];
+    }
+  /* ----- notifications -----
+   *
+   * Per-recipient. Published on the tenant channel and filtered by
+   * recipientUserId on the client — simpler than per-user channels
+   * and reuses existing infra.
+   */
+  | {
+      type: 'notification.created';
+      tenantId: string;
+      recipientUserId: string;
+      notification: SerializedNotification;
+    }
+  /* ----- comments -----
+   *
+   * Published on the tenant channel. The thread component filters by
+   * `(entityType, entityId)` so unrelated rooms don't reshuffle when
+   * a comment fires on a different deal.
+   */
+  | {
+      type: 'comment.created';
+      tenantId: string;
+      entityType: 'deal' | 'company' | 'contact';
+      entityId: string;
+      comment: SerializedComment;
     };
 
 export type EventKind = RealtimeEvent['type'];
@@ -150,6 +175,35 @@ export type SerializedActivity = {
   metadata: Record<string, unknown>;
   createdAt: string;
   actor: ActorSummary | null;
+};
+
+export type SerializedNotification = {
+  id: string;
+  tenantId: string;
+  recipientUserId: string;
+  actorUserId: string | null;
+  type: string;
+  entityType: string | null;
+  entityId: string | null;
+  title: string;
+  subtitle: string | null;
+  metadata: Record<string, unknown>;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export type SerializedComment = {
+  id: string;
+  tenantId: string;
+  entityType: string;
+  entityId: string;
+  authorUserId: string;
+  authorDisplayName: string | null;
+  parentCommentId: string | null;
+  body: string;
+  mentionedUserIds: string[];
+  editedAt: string | null;
+  createdAt: string;
 };
 
 /* -------- channel + helper utilities -------- */

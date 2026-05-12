@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { companies, type Company } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
+import { recordNotification } from '@/lib/notifications/recorder';
 import {
   companyIdSchema,
   createCompanySchema,
@@ -366,6 +367,107 @@ export async function restoreCompanyAction(id: string): Promise<SimpleResult> {
       revalidatePath('/dashboard/recently-deleted');
       revalidatePath('/dashboard/activity');
       return { ok: true };
+    },
+  );
+}
+
+/* -------- ASSIGN OWNER -------- */
+
+const updateCompanyOwnerSchema = z.object({
+  id: z.uuid({ message: 'Invalid company id' }),
+  ownerId: z.string().min(1).max(120).nullable(),
+});
+
+export type UpdateCompanyOwnerInput = {
+  id: string;
+  ownerId: string | null;
+};
+
+export type UpdateCompanyOwnerResult =
+  | { ok: true; company: Company; changed: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Reassign (or unassign) a company's owner. Mirrors the deal owner
+ * action: activity log + notification to the new owner. The recorder
+ * skips self-targets, so picking yourself is silent.
+ */
+export async function updateCompanyOwnerAction(
+  input: UpdateCompanyOwnerInput,
+): Promise<UpdateCompanyOwnerResult> {
+  const gate = await checkPermission('manageCompanies');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const parsed = updateCompanyOwnerSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, message: 'Invalid owner payload' };
+      }
+
+      const result = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select()
+          .from(companies)
+          .where(
+            and(
+              eq(companies.id, parsed.data.id),
+              eq(companies.tenantId, tenant.id),
+              isNull(companies.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return { changed: false, company: null as Company | null };
+
+        if ((previous.ownerId ?? null) === parsed.data.ownerId) {
+          return { changed: false, company: previous };
+        }
+
+        const [updated] = await tx
+          .update(companies)
+          .set({ ownerId: parsed.data.ownerId })
+          .where(eq(companies.id, parsed.data.id))
+          .returning();
+        if (!updated) return { changed: false, company: null as Company | null };
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'company',
+          entityId: updated.id,
+          action: 'owner_changed',
+          metadata: {
+            name: updated.name,
+            from: previous.ownerId ?? null,
+            to: updated.ownerId ?? null,
+          },
+        });
+
+        if (updated.ownerId) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: updated.ownerId,
+            actorUserId: membership.userId,
+            type: 'owner_changed',
+            title: `You now own ${updated.name}`,
+            subtitle: 'Company',
+            entityType: 'company',
+            entityId: updated.id,
+            metadata: { from: previous.ownerId ?? null },
+          });
+        }
+
+        return { changed: true, company: updated };
+      });
+
+      if (!result.company) {
+        return { ok: false, message: 'Company not found' };
+      }
+      revalidatePath('/dashboard/companies');
+      revalidatePath(`/dashboard/companies/${result.company.id}`);
+      return { ok: true, company: result.company, changed: result.changed };
     },
   );
 }

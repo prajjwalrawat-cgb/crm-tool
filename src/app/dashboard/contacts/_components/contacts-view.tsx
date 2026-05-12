@@ -18,6 +18,7 @@ import { canDeleteContacts, canManageContacts } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
+import { ToggleFilterBar } from '../../_components/toggle-filter-bar';
 import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createContactAction,
@@ -142,6 +143,7 @@ export function ContactsView({
       email: email || null,
       phone: phone || null,
       title: title || null,
+      ownerId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       deletedAt: null,
@@ -267,6 +269,17 @@ export function ContactsView({
             </CreateDrawer>
           ) : null}
         </div>
+
+        <ToggleFilterBar
+          basePath="/dashboard/contacts"
+          toggles={[
+            { key: 'mine', label: 'My contacts', title: 'Contacts you own' },
+            { key: 'unassigned', label: 'Unassigned', title: 'No owner assigned' },
+            { key: 'recentActivityDays', value: '14', label: 'Recently active', title: 'Activity in the last 14 days' },
+            { key: 'noCompany', label: 'No company', title: 'Contacts not linked to a company' },
+            { key: 'createdWithinDays', value: '30', label: 'New (30d)', title: 'Created in the last 30 days' },
+          ]}
+        />
 
         {actionError ? (
           <p

@@ -1,6 +1,10 @@
+import { eq, and, isNull } from 'drizzle-orm';
+
 import { db } from '@/db';
+import { deals, tasks } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
-import { runWithSystemContext } from '@/lib/db-context';
+import { runWithSystemContext, tenantTransaction } from '@/lib/db-context';
+import { recordNotification } from '@/lib/notifications/recorder';
 import {
   captureError,
   incr,
@@ -94,6 +98,76 @@ export async function dealWonHandler(args: {
                 workflow: WORKFLOW_ID,
                 kind: 'celebration',
               },
+            });
+          }),
+        );
+
+        // Auto-create an onboarding kickoff task assigned to the deal's
+        // owner. This is the first concrete "workflow → actionable
+        // work" bridge. If the deal has no owner the task is left
+        // unassigned and shows up under the "Unassigned" task filter.
+        await step.run('create-onboarding-task', async () =>
+          runWithSystemContext(tenantId, async () => {
+            await tenantTransaction(async (tx) => {
+              const [deal] = await tx
+                .select({ ownerId: deals.ownerId })
+                .from(deals)
+                .where(
+                  and(
+                    eq(deals.id, dealId),
+                    eq(deals.tenantId, tenantId),
+                    isNull(deals.deletedAt),
+                  ),
+                )
+                .limit(1);
+              const ownerId = deal?.ownerId ?? null;
+              const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .slice(0, 10);
+              const [task] = await tx
+                .insert(tasks)
+                .values({
+                  tenantId,
+                  title: `Onboarding kickoff for ${name}`,
+                  description:
+                    'Auto-created by the deal-won workflow. Schedule a kickoff call, send welcome email, and confirm implementation owner.',
+                  status: 'todo',
+                  priority: 'high',
+                  dueDate,
+                  assignedUserId: ownerId,
+                  createdBy: 'system',
+                  entityType: 'deal',
+                  entityId: dealId,
+                })
+                .returning();
+              if (!task) return;
+              await recordActivity(tx, {
+                tenantId,
+                actorUserId: null,
+                entityType: 'task',
+                entityId: task.id,
+                action: 'created',
+                metadata: {
+                  taskTitle: task.title,
+                  workflow: WORKFLOW_ID,
+                  linkedEntityType: 'deal',
+                  linkedEntityId: dealId,
+                  automation: true,
+                },
+              });
+              if (ownerId) {
+                await recordNotification(tx, {
+                  tenantId,
+                  recipientUserId: ownerId,
+                  actorUserId: null,
+                  type: 'task_assigned',
+                  title: `Onboarding task created: ${name}`,
+                  subtitle: `Due ${dueDate}`,
+                  entityType: 'task',
+                  entityId: task.id,
+                  metadata: { workflow: WORKFLOW_ID, automation: true },
+                });
+              }
             });
           }),
         );
