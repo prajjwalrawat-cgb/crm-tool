@@ -167,6 +167,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             />
 
             <CommentsThread
+              tenantId={tenant.id}
               entityType="deal"
               entityId={deal.id}
               currentUserId={userId}

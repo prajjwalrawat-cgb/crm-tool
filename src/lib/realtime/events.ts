@@ -101,6 +101,19 @@ export type RealtimeEvent =
       tenantId: string;
       recipientUserId: string;
       notification: SerializedNotification;
+    }
+  /* ----- comments -----
+   *
+   * Published on the tenant channel. The thread component filters by
+   * `(entityType, entityId)` so unrelated rooms don't reshuffle when
+   * a comment fires on a different deal.
+   */
+  | {
+      type: 'comment.created';
+      tenantId: string;
+      entityType: 'deal' | 'company' | 'contact';
+      entityId: string;
+      comment: SerializedComment;
     };
 
 export type EventKind = RealtimeEvent['type'];
@@ -176,6 +189,20 @@ export type SerializedNotification = {
   subtitle: string | null;
   metadata: Record<string, unknown>;
   readAt: string | null;
+  createdAt: string;
+};
+
+export type SerializedComment = {
+  id: string;
+  tenantId: string;
+  entityType: string;
+  entityId: string;
+  authorUserId: string;
+  authorDisplayName: string | null;
+  parentCommentId: string | null;
+  body: string;
+  mentionedUserIds: string[];
+  editedAt: string | null;
   createdAt: string;
 };
 

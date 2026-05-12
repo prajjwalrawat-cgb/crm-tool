@@ -33,7 +33,14 @@ import { cn } from '@/lib/utils';
  * existing intel-widget vocabulary so the page reads consistently.
  */
 
-type FilterMode = 'all' | 'activity' | 'note' | 'comment' | 'automation';
+type FilterMode =
+  | 'all'
+  | 'activity'
+  | 'note'
+  | 'comment'
+  | 'automation'
+  | 'mine'
+  | 'teammates';
 
 const FILTER_LABEL: Record<FilterMode, string> = {
   all: 'All',
@@ -41,13 +48,17 @@ const FILTER_LABEL: Record<FilterMode, string> = {
   note: 'Notes',
   comment: 'Comments',
   automation: 'Automation',
+  mine: 'Mine',
+  teammates: 'Teammates',
 };
 
 const FILTER_ORDER: FilterMode[] = [
   'all',
-  'activity',
+  'mine',
+  'teammates',
   'comment',
   'note',
+  'activity',
   'automation',
 ];
 
@@ -81,6 +92,16 @@ export function EntityTimeline({
 }) {
   const [filter, setFilter] = useState<FilterMode>('all');
 
+  // Item → author resolver. Reused by counts + filter + mine/teammates.
+  const actorOf = (item: TimelineItem): string | null => {
+    if (item.kind === 'comment') return item.row.authorUserId;
+    if (item.kind === 'note') return item.row.authorUserId;
+    return item.row.actorUserId;
+  };
+  const isAutomation = (item: TimelineItem): boolean =>
+    item.kind === 'activity' &&
+    (item.row.actorUserId === null || item.row.action === 'automation_note');
+
   const counts = useMemo(() => {
     const acc: Record<FilterMode, number> = {
       all: items.length,
@@ -88,42 +109,45 @@ export function EntityTimeline({
       note: 0,
       comment: 0,
       automation: 0,
+      mine: 0,
+      teammates: 0,
     };
     for (const item of items) {
       if (item.kind === 'activity') {
-        const isAutomation =
-          item.row.actorUserId === null ||
-          item.row.action === 'automation_note';
-        if (isAutomation) acc.automation++;
+        if (isAutomation(item)) acc.automation++;
         else acc.activity++;
       } else if (item.kind === 'note') {
         acc.note++;
       } else {
         acc.comment++;
       }
+      const actor = actorOf(item);
+      if (actor === currentUserId) acc.mine++;
+      else if (actor) acc.teammates++;
     }
     return acc;
-  }, [items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, currentUserId]);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return items;
     if (filter === 'comment') return items.filter((i) => i.kind === 'comment');
     if (filter === 'note') return items.filter((i) => i.kind === 'note');
-    if (filter === 'automation')
-      return items.filter(
-        (i) =>
-          i.kind === 'activity' &&
-          (i.row.actorUserId === null || i.row.action === 'automation_note'),
-      );
+    if (filter === 'automation') return items.filter(isAutomation);
     if (filter === 'activity')
       return items.filter(
-        (i) =>
-          i.kind === 'activity' &&
-          i.row.actorUserId !== null &&
-          i.row.action !== 'automation_note',
+        (i) => i.kind === 'activity' && !isAutomation(i),
       );
+    if (filter === 'mine')
+      return items.filter((i) => actorOf(i) === currentUserId);
+    if (filter === 'teammates')
+      return items.filter((i) => {
+        const a = actorOf(i);
+        return a !== null && a !== currentUserId;
+      });
     return items;
-  }, [filter, items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, items, currentUserId]);
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)]">

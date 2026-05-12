@@ -17,6 +17,7 @@ import {
   updateCommentAction,
 } from '@/app/dashboard/comments/actions';
 import type { Comment } from '@/db/schema';
+import { useRealtimeEvents } from '@/hooks/use-realtime-events';
 import {
   formatMentionToken,
   parseMentions,
@@ -44,6 +45,7 @@ type EntityType = 'deal' | 'company' | 'contact';
  * tenant SSE channel).
  */
 export function CommentsThread({
+  tenantId,
   entityType,
   entityId,
   currentUserId,
@@ -52,6 +54,7 @@ export function CommentsThread({
   teammates,
   canWrite,
 }: {
+  tenantId: string;
   entityType: EntityType;
   entityId: string;
   currentUserId: string;
@@ -64,6 +67,37 @@ export function CommentsThread({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // Live merge: when another user posts a comment on this same
+  // entity, drop it into the local list. Filters by entity scope
+  // (the SSE channel is tenant-wide so most events aren't ours).
+  // Optimistic creates are reconciled by id so we don't double-render.
+  useRealtimeEvents(tenantId, (event) => {
+    if (event.type !== 'comment.created') return;
+    if (event.entityType !== entityType || event.entityId !== entityId) return;
+    const incoming = event.comment;
+    setItems((prev) => {
+      if (prev.some((p) => p.id === incoming.id)) return prev;
+      return [
+        ...prev,
+        {
+          id: incoming.id,
+          tenantId: incoming.tenantId,
+          entityType: incoming.entityType,
+          entityId: incoming.entityId,
+          authorUserId: incoming.authorUserId,
+          parentCommentId: incoming.parentCommentId,
+          body: incoming.body,
+          mentionedUserIds: incoming.mentionedUserIds,
+          editedAt: incoming.editedAt ? new Date(incoming.editedAt) : null,
+          createdAt: new Date(incoming.createdAt),
+          updatedAt: new Date(incoming.createdAt),
+          deletedAt: null,
+          deletedBy: null,
+        },
+      ];
+    });
+  });
 
   // Group by parent. Top-level comments at the root; replies nested
   // under each.

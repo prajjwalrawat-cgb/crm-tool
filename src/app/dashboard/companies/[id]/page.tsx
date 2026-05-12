@@ -115,6 +115,7 @@ export default async function CompanyDetailPage({ params }: { params: Params }) 
             />
 
             <CommentsThread
+              tenantId={tenant.id}
               entityType="company"
               entityId={company.id}
               currentUserId={userId}

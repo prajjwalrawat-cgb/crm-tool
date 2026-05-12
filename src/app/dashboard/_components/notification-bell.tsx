@@ -228,74 +228,9 @@ export function NotificationBell({
               </div>
             ) : (
               <ul className="flex flex-col">
-                {items.map((n) => {
-                  const Icon = TYPE_ICON[n.type] ?? Bell;
-                  const tint = TYPE_TINT[n.type] ?? 'text-slate-500';
-                  const href = notificationHref(n);
-                  const content = (
-                    <>
-                      <Icon
-                        className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', tint)}
-                        aria-hidden
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={cn(
-                            'truncate text-[12.5px] leading-tight',
-                            n.readAt ? 'text-slate-600' : 'font-medium text-slate-900',
-                          )}
-                        >
-                          {n.title}
-                        </p>
-                        {n.subtitle ? (
-                          <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                            {n.subtitle}
-                          </p>
-                        ) : null}
-                        <p className="mt-0.5 text-[10px] tabular-nums text-slate-400">
-                          {relTime(n.createdAt)}
-                        </p>
-                      </div>
-                      {n.readAt === null ? (
-                        <span
-                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
-                          aria-label="Unread"
-                        />
-                      ) : null}
-                    </>
-                  );
-                  const onSelect = () => {
-                    if (n.readAt === null) handleMarkRead(n.id);
-                    setOpen(false);
-                  };
-                  return (
-                    <li
-                      key={n.id}
-                      className={cn(
-                        'border-b border-slate-100 last:border-b-0',
-                        n.readAt === null && 'bg-indigo-50/30',
-                      )}
-                    >
-                      {href ? (
-                        <Link
-                          href={href}
-                          onClick={onSelect}
-                          className="flex items-start gap-2 px-3 py-2 transition hover:bg-slate-50"
-                        >
-                          {content}
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={onSelect}
-                          className="flex w-full items-start gap-2 px-3 py-2 text-left transition hover:bg-slate-50"
-                        >
-                          {content}
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
+                {renderGroupedItems(items, handleMarkRead, () =>
+                  setOpen(false),
+                )}
               </ul>
             )}
           </div>
@@ -315,4 +250,154 @@ function relTime(d: Date): string {
   const days = Math.floor(h / 24);
   if (days < 7) return `${days}d ago`;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
+ * Time-bucket label for a notification. Today / Yesterday / This week /
+ * Earlier. Pure function — no React state.
+ */
+function bucketLabel(d: Date): string {
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - 7);
+  if (d >= startOfToday) return 'Today';
+  if (d >= startOfYesterday) return 'Yesterday';
+  if (d >= startOfWeek) return 'This week';
+  return 'Earlier';
+}
+
+function renderGroupedItems(
+  items: NotificationItem[],
+  onMarkRead: (id: string) => void,
+  closeDropdown: () => void,
+): React.ReactNode {
+  // Two-level grouping: unread first (with an "Unread" pseudo-bucket),
+  // then read items grouped by recency bucket. Within each group the
+  // newest item leads.
+  const unread = items.filter((n) => n.readAt === null);
+  const read = items.filter((n) => n.readAt !== null);
+
+  const readByBucket = new Map<string, NotificationItem[]>();
+  const bucketOrder = ['Today', 'Yesterday', 'This week', 'Earlier'];
+  for (const item of read) {
+    const key = bucketLabel(item.createdAt);
+    const arr = readByBucket.get(key) ?? [];
+    arr.push(item);
+    readByBucket.set(key, arr);
+  }
+
+  const nodes: React.ReactNode[] = [];
+
+  if (unread.length > 0) {
+    nodes.push(
+      <li
+        key="__unread_header"
+        className="sticky top-0 z-[1] flex items-center justify-between bg-white/95 px-3 py-1 text-[9.5px] font-semibold uppercase tracking-wide text-indigo-600 backdrop-blur"
+      >
+        <span>Unread</span>
+        <span className="tabular-nums text-indigo-500">{unread.length}</span>
+      </li>,
+    );
+    for (const n of unread) {
+      nodes.push(renderNotificationRow(n, onMarkRead, closeDropdown));
+    }
+  }
+
+  for (const bucket of bucketOrder) {
+    const rows = readByBucket.get(bucket);
+    if (!rows || rows.length === 0) continue;
+    nodes.push(
+      <li
+        key={`__bucket_${bucket}`}
+        className="sticky top-0 z-[1] bg-slate-50/95 px-3 py-1 text-[9.5px] font-semibold uppercase tracking-wide text-slate-500 backdrop-blur"
+      >
+        {bucket}
+      </li>,
+    );
+    for (const n of rows) {
+      nodes.push(renderNotificationRow(n, onMarkRead, closeDropdown));
+    }
+  }
+
+  return nodes;
+}
+
+function renderNotificationRow(
+  n: NotificationItem,
+  onMarkRead: (id: string) => void,
+  closeDropdown: () => void,
+): React.ReactNode {
+  const Icon = TYPE_ICON[n.type] ?? Bell;
+  const tint = TYPE_TINT[n.type] ?? 'text-slate-500';
+  const href = notificationHref(n);
+  const content = (
+    <>
+      <Icon
+        className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', tint)}
+        aria-hidden
+      />
+      <div className="min-w-0 flex-1">
+        <p
+          className={cn(
+            'truncate text-[12.5px] leading-tight',
+            n.readAt ? 'text-slate-600' : 'font-medium text-slate-900',
+          )}
+        >
+          {n.title}
+        </p>
+        {n.subtitle ? (
+          <p className="mt-0.5 truncate text-[11px] text-slate-500">
+            {n.subtitle}
+          </p>
+        ) : null}
+        <p className="mt-0.5 text-[10px] tabular-nums text-slate-400">
+          {relTime(n.createdAt)}
+        </p>
+      </div>
+      {n.readAt === null ? (
+        <span
+          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+          aria-label="Unread"
+        />
+      ) : null}
+    </>
+  );
+  const onSelect = () => {
+    if (n.readAt === null) onMarkRead(n.id);
+    closeDropdown();
+  };
+  return (
+    <li
+      key={n.id}
+      className={cn(
+        'border-b border-slate-100 last:border-b-0',
+        n.readAt === null && 'bg-indigo-50/30',
+      )}
+    >
+      {href ? (
+        <Link
+          href={href}
+          onClick={onSelect}
+          className="flex items-start gap-2 px-3 py-2 transition hover:bg-slate-50"
+        >
+          {content}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex w-full items-start gap-2 px-3 py-2 text-left transition hover:bg-slate-50"
+        >
+          {content}
+        </button>
+      )}
+    </li>
+  );
 }

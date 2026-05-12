@@ -121,6 +121,7 @@ export default async function ContactDetailPage({
             />
 
             <CommentsThread
+              tenantId={tenant.id}
               entityType="contact"
               entityId={contact.id}
               currentUserId={userId}

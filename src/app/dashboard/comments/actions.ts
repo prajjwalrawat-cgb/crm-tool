@@ -16,6 +16,7 @@ import {
   tenantTransaction,
 } from '@/lib/db-context';
 import { recordNotifications } from '@/lib/notifications/recorder';
+import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
 const ENTITY_TYPES = ['deal', 'company', 'contact'] as const;
 type EntityType = (typeof ENTITY_TYPES)[number];
@@ -155,6 +156,29 @@ export async function createCommentAction(input: {
             mentions,
           );
         }
+
+        // Realtime publish — every open thread on this entity merges
+        // the new comment without a refresh. The thread component
+        // filters by (entityType, entityId) so other rooms ignore it.
+        await publishRealtimeEvent(tx, {
+          type: 'comment.created',
+          tenantId: tenant.id,
+          entityType: parsed.data.entityType,
+          entityId: parsed.data.entityId,
+          comment: {
+            id: row.id,
+            tenantId: row.tenantId,
+            entityType: row.entityType,
+            entityId: row.entityId,
+            authorUserId: row.authorUserId,
+            authorDisplayName: null,
+            parentCommentId: row.parentCommentId,
+            body: row.body,
+            mentionedUserIds: row.mentionedUserIds,
+            editedAt: row.editedAt?.toISOString() ?? null,
+            createdAt: row.createdAt.toISOString(),
+          },
+        });
 
         return row;
       });
