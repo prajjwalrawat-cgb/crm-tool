@@ -2,9 +2,11 @@
 
 import {
   Activity,
+  AlertCircle,
   CheckCircle2,
   CheckSquare,
   Filter,
+  Mail,
   MessageCircle,
   StickyNote,
   UserCog,
@@ -38,6 +40,7 @@ type FilterMode =
   | 'activity'
   | 'note'
   | 'comment'
+  | 'email'
   | 'automation'
   | 'mine'
   | 'teammates';
@@ -47,6 +50,7 @@ const FILTER_LABEL: Record<FilterMode, string> = {
   activity: 'Activity',
   note: 'Notes',
   comment: 'Comments',
+  email: 'Emails',
   automation: 'Automation',
   mine: 'Mine',
   teammates: 'Teammates',
@@ -56,6 +60,7 @@ const FILTER_ORDER: FilterMode[] = [
   'all',
   'mine',
   'teammates',
+  'email',
   'comment',
   'note',
   'activity',
@@ -96,6 +101,7 @@ export function EntityTimeline({
   const actorOf = (item: TimelineItem): string | null => {
     if (item.kind === 'comment') return item.row.authorUserId;
     if (item.kind === 'note') return item.row.authorUserId;
+    if (item.kind === 'email') return item.row.actorUserId;
     return item.row.actorUserId;
   };
   const isAutomation = (item: TimelineItem): boolean =>
@@ -108,6 +114,7 @@ export function EntityTimeline({
       activity: 0,
       note: 0,
       comment: 0,
+      email: 0,
       automation: 0,
       mine: 0,
       teammates: 0,
@@ -118,6 +125,8 @@ export function EntityTimeline({
         else acc.activity++;
       } else if (item.kind === 'note') {
         acc.note++;
+      } else if (item.kind === 'email') {
+        acc.email++;
       } else {
         acc.comment++;
       }
@@ -133,6 +142,7 @@ export function EntityTimeline({
     if (filter === 'all') return items;
     if (filter === 'comment') return items.filter((i) => i.kind === 'comment');
     if (filter === 'note') return items.filter((i) => i.kind === 'note');
+    if (filter === 'email') return items.filter((i) => i.kind === 'email');
     if (filter === 'automation') return items.filter(isAutomation);
     if (filter === 'activity')
       return items.filter(
@@ -214,6 +224,14 @@ function IconCircle({ item }: { item: TimelineItem }) {
   } else if (item.kind === 'note') {
     Icon = StickyNote;
     tone = 'text-amber-600 bg-amber-50';
+  } else if (item.kind === 'email') {
+    if (item.row.status === 'failed') {
+      Icon = AlertCircle;
+      tone = 'text-rose-600 bg-rose-50';
+    } else {
+      Icon = Mail;
+      tone = 'text-sky-600 bg-sky-50';
+    }
   } else {
     const meta = (item.row.metadata ?? {}) as Record<string, unknown>;
     if (meta.automation || item.row.action === 'automation_note') {
@@ -290,6 +308,56 @@ function ItemBody({
           {item.row.body.length > 280
             ? commentPreview(item.row.body, 280)
             : item.row.body}
+        </p>
+      </div>
+    );
+  }
+  if (item.kind === 'email') {
+    const author = authorLookup[item.row.actorUserId] ?? 'Teammate';
+    const recipients = item.row.toRecipients.join(', ');
+    const failed = item.row.status === 'failed';
+    const preview =
+      item.row.textBody.length > 240
+        ? item.row.textBody.slice(0, 239) + '…'
+        : item.row.textBody;
+    return (
+      <div>
+        <p className="text-[12.5px] text-slate-700">
+          <span className="font-semibold">{author}</span>
+          <span className="text-slate-500">
+            {failed ? ' tried to send' : ' sent'} email
+          </span>
+          {recipients ? (
+            <>
+              <span className="text-slate-500"> to </span>
+              <span className="font-medium text-slate-700">{recipients}</span>
+            </>
+          ) : null}
+        </p>
+        <p className="mt-0.5 truncate text-[12.5px] font-medium text-slate-800">
+          {item.row.subject}
+        </p>
+        <p className="mt-0.5 whitespace-pre-wrap text-[11.5px] leading-relaxed text-slate-500">
+          {preview}
+        </p>
+        <p className="mt-0.5 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide">
+          <span
+            className={cn(
+              'rounded px-1 py-0 font-medium',
+              failed
+                ? 'bg-rose-100 text-rose-700'
+                : item.row.status === 'sent' ||
+                    item.row.status === 'delivered'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-slate-100 text-slate-600',
+            )}
+          >
+            {item.row.status}
+          </span>
+          <span className="text-slate-400">via {item.row.provider}</span>
+          {failed && item.row.error ? (
+            <span className="text-rose-600">· {item.row.error}</span>
+          ) : null}
         </p>
       </div>
     );

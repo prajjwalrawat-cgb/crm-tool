@@ -13,6 +13,7 @@ import { listTeammates } from '@/lib/teammates/queries';
 import { getEntityTimeline } from '@/lib/timeline/queries';
 
 import { CommentsThread } from '../../_components/comments-thread';
+import { ComposeEmailLauncher } from '../../_components/compose-email-launcher';
 import { EntityOwnerCard } from '../../_components/entity-owner-card';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { EntityTimeline } from '../../_components/entity-timeline';
@@ -91,6 +92,12 @@ export default async function CompanyDetailPage({ params }: { params: Params }) 
               ) : null}
             </p>
           </div>
+          <ComposeEmailLauncher
+            entityType="company"
+            entityId={company.id}
+            entityLabel={company.name}
+            canSend={canEdit}
+          />
         </header>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">

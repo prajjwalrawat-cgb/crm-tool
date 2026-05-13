@@ -10,6 +10,7 @@ const ENTITY_LABEL: Record<ActivityEntityType, string> = {
   invitation: 'invitation',
   task: 'task',
   note: 'note',
+  email: 'email',
 };
 
 type FormattedActivity = {
@@ -117,6 +118,30 @@ export function formatActivity(row: ActivityRow): FormattedActivity {
         sentence: toName
           ? `${actor} reassigned ${target} to ${toName}`
           : `${actor} changed the owner on ${target}`,
+      };
+    }
+    case 'email_sent': {
+      const subject =
+        typeof meta.subject === 'string' ? meta.subject : null;
+      const recipients =
+        typeof meta.recipientLabel === 'string' ? meta.recipientLabel : null;
+      const base = subject
+        ? `${actor} sent "${subject}"`
+        : `${actor} sent an email`;
+      return {
+        sentence: recipients ? `${base} to ${recipients}` : base,
+      };
+    }
+    case 'email_failed': {
+      const subject =
+        typeof meta.subject === 'string' ? meta.subject : null;
+      const err = typeof meta.error === 'string' ? meta.error : null;
+      const base = subject
+        ? `${actor} couldn't send "${subject}"`
+        : `${actor} couldn't send an email`;
+      return {
+        sentence: base,
+        detail: err ?? undefined,
       };
     }
     case 'automation_note': {

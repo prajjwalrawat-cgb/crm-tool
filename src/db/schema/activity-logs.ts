@@ -18,6 +18,7 @@ export const ACTIVITY_ENTITY_TYPES = [
   'invitation',
   'task',
   'note',
+  'email',
 ] as const;
 export type ActivityEntityType = (typeof ACTIVITY_ENTITY_TYPES)[number];
 
@@ -42,6 +43,10 @@ export const ACTIVITY_ACTIONS = [
   'task_completed',
   /** Owner changed on an entity (currently used for deal owner). */
   'owner_changed',
+  /** Email sent from the CRM (acted on the linked entity). */
+  'email_sent',
+  /** Email send attempt failed. */
+  'email_failed',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

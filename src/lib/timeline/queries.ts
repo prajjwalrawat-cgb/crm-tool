@@ -5,9 +5,11 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import {
   type ActivityLog,
   type Comment,
+  type EmailMessage,
   type Note,
   activityLogs,
   comments as commentsTable,
+  emailMessages as emailMessagesTable,
   notes as notesTable,
 } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
@@ -32,7 +34,8 @@ export type TimelineEntityType = 'deal' | 'company' | 'contact';
 export type TimelineItem =
   | { kind: 'activity'; id: string; createdAt: Date; row: ActivityLog }
   | { kind: 'note'; id: string; createdAt: Date; row: Note }
-  | { kind: 'comment'; id: string; createdAt: Date; row: Comment };
+  | { kind: 'comment'; id: string; createdAt: Date; row: Comment }
+  | { kind: 'email'; id: string; createdAt: Date; row: EmailMessage };
 
 export async function getEntityTimeline(
   tenantId: string,
@@ -44,7 +47,7 @@ export async function getEntityTimeline(
 
   return await timeQuery('timeline.entity', async () =>
     tenantTransaction(async (tx) => {
-      const [activity, notes, comments] = await Promise.all([
+      const [activity, notes, comments, emails] = await Promise.all([
         tx
           .select()
           .from(activityLogs)
@@ -85,16 +88,28 @@ export async function getEntityTimeline(
           )
           .orderBy(desc(commentsTable.createdAt))
           .limit(limit),
+
+        tx
+          .select()
+          .from(emailMessagesTable)
+          .where(
+            and(
+              eq(emailMessagesTable.tenantId, tenantId),
+              eq(emailMessagesTable.entityType, entityType),
+              eq(emailMessagesTable.entityId, entityId),
+            ),
+          )
+          .orderBy(desc(emailMessagesTable.createdAt))
+          .limit(limit),
       ]);
 
       const items: TimelineItem[] = [];
       for (const a of activity) {
-        // Skip the activity row we wrote when a note or comment was
-        // added — the note/comment themselves already represent the
-        // event. Without this filter, the timeline shows "X updated
-        // deal" right next to the actual note/comment content.
+        // Skip activity rows that are already represented by a sibling
+        // note/comment/email. Otherwise the timeline shows "X updated
+        // deal" right next to the actual content.
         const meta = (a.metadata ?? {}) as Record<string, unknown>;
-        if (meta.commentId || meta.noteId) continue;
+        if (meta.commentId || meta.noteId || meta.emailId) continue;
         items.push({
           kind: 'activity',
           id: `a-${a.id}`,
@@ -116,6 +131,14 @@ export async function getEntityTimeline(
           id: `c-${c.id}`,
           createdAt: c.createdAt,
           row: c,
+        });
+      }
+      for (const e of emails) {
+        items.push({
+          kind: 'email',
+          id: `e-${e.id}`,
+          createdAt: e.createdAt,
+          row: e,
         });
       }
       items.sort((x, y) => +y.createdAt - +x.createdAt);

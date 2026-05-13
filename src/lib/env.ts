@@ -38,6 +38,12 @@ const recommendedEnvSchema = z.object({
   CLERK_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
   /** OpenAI key for live AI (mock mode kicks in if absent). */
   OPENAI_API_KEY: z.string().min(1).optional(),
+  /** Email provider selection — `resend` or omitted (→ console fallback). */
+  EMAIL_PROVIDER: z.enum(['resend', 'smtp', 'console']).optional(),
+  /** Resend API key. Required only when EMAIL_PROVIDER=resend. */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  /** Sender identity used as the `From:` header. */
+  EMAIL_FROM: z.string().min(1).optional(),
 });
 
 export type EnvValidationResult =
@@ -97,6 +103,19 @@ export function validateEnv(): EnvValidationResult {
     if (!recommendedParsed.data.CLERK_WEBHOOK_SIGNING_SECRET) {
       warnings.push(
         'CLERK_WEBHOOK_SIGNING_SECRET not set — Clerk org webhooks will reject signature verification.',
+      );
+    }
+    if (
+      recommendedParsed.data.EMAIL_PROVIDER === 'resend' &&
+      !recommendedParsed.data.RESEND_API_KEY
+    ) {
+      warnings.push(
+        'EMAIL_PROVIDER=resend but RESEND_API_KEY is unset — sends will fall back to the console provider.',
+      );
+    }
+    if (!recommendedParsed.data.EMAIL_FROM) {
+      warnings.push(
+        'EMAIL_FROM not set — outgoing email will use the default onboarding@resend.dev sender. Configure a verified domain in production.',
       );
     }
   }

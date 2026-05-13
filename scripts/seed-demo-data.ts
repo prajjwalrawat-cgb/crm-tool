@@ -327,6 +327,12 @@ async function main() {
           WHERE tenant_id = ${tenantId}::uuid
             AND author_user_id LIKE 'seed-actor-%'`,
     );
+    await db.execute(
+      sql`DELETE FROM email_messages
+          WHERE tenant_id = ${tenantId}::uuid
+            AND actor_user_id LIKE 'seed-actor-%'
+            AND metadata->>'seedDemo' = 'true'`,
+    );
 
     // Entities — locate ids via creation activity_log rows we tagged.
     await db.execute(
@@ -1093,6 +1099,108 @@ async function main() {
     `  comments  inserted: ${commentRows.length} in ${Date.now() - phase}ms`,
   );
 
+  /* -------- EMAILS -------- */
+
+  phase = Date.now();
+  const { emailMessages: emailsTable } = await import('../src/db/schema');
+
+  // Sample email history for a subset of mid-funnel + closed deals.
+  // Mix of successful sends + one failed send so the timeline shows
+  // both states. All recorded via the 'console' provider so it's
+  // obviously synthetic; real Resend sends from the UI populate
+  // 'provider=resend' rows.
+  const EMAIL_SUBJECT_TEMPLATES = [
+    'Following up on our last conversation',
+    'Proposal — next steps',
+    'Introducing ourselves',
+    'Quick reminder',
+    'Welcome — let’s kick off',
+    'Q3 renewal — pricing options',
+  ];
+  const EMAIL_BODY_SAMPLES = [
+    'Hi,\n\nThanks for the call yesterday. As discussed, attaching the proposal — happy to walk through it whenever works for you.\n\nBest,',
+    'Hi,\n\nGreat to e-meet you! Wanted to introduce myself and share a quick overview of what we do, in case it’s relevant to your team.\n\nBest,',
+    'Hi,\n\nFollowing up on this — would Tuesday at 10am work for a kickoff call?\n\nThanks,',
+    'Hi,\n\nQuick reminder on the proposal — let me know if you have any questions before our next sync.\n\nThanks,',
+  ];
+
+  const emailRows: Array<typeof emailsTable.$inferInsert> = [];
+  const emailActivityRows: Array<typeof activityLogs.$inferInsert> = [];
+  const dealsForEmail = insertedDeals.filter(
+    (d) =>
+      d.stage === 'negotiation' ||
+      d.stage === 'proposal' ||
+      d.stage === 'won' ||
+      d.stage === 'lost',
+  );
+
+  let failedOnce = false;
+  for (const d of dealsForEmail) {
+    if (Math.random() > 0.55) continue;
+    const actor = pickActor();
+    const subject = pick(EMAIL_SUBJECT_TEMPLATES);
+    const body = pick(EMAIL_BODY_SAMPLES);
+    const recipient = `contact-${d.id.slice(0, 8)}@example.com`;
+    const createdAt = daysAgo(randInt(1, 30));
+    const failed = !failedOnce && Math.random() < 0.08;
+    if (failed) failedOnce = true;
+    const emailId = crypto.randomUUID();
+
+    emailRows.push({
+      id: emailId,
+      tenantId,
+      actorUserId: actor.id,
+      provider: 'console',
+      direction: 'outbound',
+      status: failed ? 'failed' : 'sent',
+      subject,
+      textBody: body,
+      htmlBody: null,
+      sender: 'CRM <onboarding@resend.dev>',
+      toRecipients: [recipient],
+      ccRecipients: [],
+      bccRecipients: [],
+      entityType: 'deal',
+      entityId: d.id,
+      providerMessageId: failed ? null : `console-seed-${emailId.slice(0, 8)}`,
+      idempotencyKey: `seed-${emailId}`,
+      error: failed ? 'Recipient address rejected by provider' : null,
+      retryCount: failed ? 1 : 0,
+      metadata: { seedDemo: true, source: 'seed' },
+      sentAt: failed ? null : createdAt,
+      failedAt: failed ? createdAt : null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    emailActivityRows.push({
+      tenantId,
+      actorUserId: actor.id,
+      entityType: 'deal',
+      entityId: d.id,
+      action: failed ? 'email_failed' : 'email_sent',
+      metadata: {
+        demoSeed: true,
+        emailId,
+        subject,
+        recipientLabel: recipient,
+        provider: 'console',
+        error: failed ? 'Recipient address rejected by provider' : undefined,
+      },
+      createdAt,
+    });
+  }
+
+  if (emailRows.length > 0) {
+    await db.insert(emailsTable).values(emailRows);
+  }
+  if (emailActivityRows.length > 0) {
+    await db.insert(activityLogs).values(emailActivityRows);
+  }
+  console.log(
+    `  emails    inserted: ${emailRows.length} in ${Date.now() - phase}ms`,
+  );
+
   /* -------- SUMMARY -------- */
 
   console.log('\n  summary');
@@ -1108,6 +1216,7 @@ async function main() {
   console.log(`    notes:             ${notesRows.length}`);
   console.log(`    notifications:     ${notifRows.length}`);
   console.log(`    comments:          ${commentRows.length}`);
+  console.log(`    emails:            ${emailRows.length}`);
   console.log('\n  done.\n');
 
   await client.end({ timeout: 5 });

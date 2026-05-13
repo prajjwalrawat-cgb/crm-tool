@@ -13,3 +13,5 @@ export * from './tasks';
 export * from './notes';
 export * from './notifications';
 export * from './comments';
+export * from './email-messages';
+export * from './email-drafts';

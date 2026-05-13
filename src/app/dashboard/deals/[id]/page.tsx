@@ -18,6 +18,7 @@ import { getEntityTimeline } from '@/lib/timeline/queries';
 
 import { resolveAuthorLookup } from '../../_components/author-lookup';
 import { CommentsThread } from '../../_components/comments-thread';
+import { ComposeEmailLauncher } from '../../_components/compose-email-launcher';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { EntityTimeline } from '../../_components/entity-timeline';
 import { NotesTimeline } from '../../_components/notes-timeline';
@@ -103,7 +104,18 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               </span>
             </p>
           </div>
-          <StageBadge stage={deal.stage} />
+          <div className="flex items-center gap-2">
+            <ComposeEmailLauncher
+              entityType="deal"
+              entityId={deal.id}
+              entityLabel={deal.name}
+              defaultRecipients={
+                deal.contactEmail ? [deal.contactEmail] : []
+              }
+              canSend={canEdit}
+            />
+            <StageBadge stage={deal.stage} />
+          </div>
         </header>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">
