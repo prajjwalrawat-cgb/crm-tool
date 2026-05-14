@@ -8,6 +8,7 @@ import {
   type GlobalEmailRow,
 } from '@/lib/email/queries';
 import { formatRelativeTime } from '@/lib/activity/format';
+import { formatDateTime } from '@/lib/dates/format';
 import { cn } from '@/lib/utils';
 
 import { EmailRetryButton } from '../_components/email-retry-button';
@@ -155,7 +156,7 @@ function EmailRow({ row }: { row: GlobalEmailRow }) {
           </p>
           <span
             className="shrink-0 cursor-default text-[10.5px] tabular-nums text-slate-400"
-            title={new Date(row.createdAt).toLocaleString()}
+            title={formatDateTime(row.createdAt)}
           >
             {formatRelativeTime(row.createdAt)}
           </span>

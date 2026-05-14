@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CompanyOption } from '@/lib/companies/queries';
+import { formatNumber } from '@/lib/dates/format';
 import {
   type DealFilters,
   dealFiltersToSearchParams,
@@ -368,9 +369,9 @@ function AmountPopover({
 
   const active = min !== undefined || max !== undefined;
   const label = active
-    ? `Amount: ${min ? '≥' + (min / 100).toLocaleString() : ''}${
+    ? `Amount: ${min ? '≥' + formatNumber(min / 100) : ''}${
         min && max ? ' · ' : ''
-      }${max ? '≤' + (max / 100).toLocaleString() : ''}`
+      }${max ? '≤' + formatNumber(max / 100) : ''}`
     : 'Amount';
 
   const apply = () => {

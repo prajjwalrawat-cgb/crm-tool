@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 
 import type { TaskComment } from '@/db/schema';
 import type { Teammate } from '@/lib/teammates/queries';
-import { formatRelativeTime } from '@/lib/activity/format';
+import { RelativeTime } from '@/lib/dates/relative-time';
 import { cn } from '@/lib/utils';
 
 import {
@@ -153,11 +153,8 @@ export function TaskComments({
                     <span className="truncate font-medium text-slate-800">
                       {authorName(c.authorUserId)}
                     </span>
-                    <span
-                      className="shrink-0 cursor-default text-[10px] tabular-nums text-slate-400"
-                      title={new Date(c.createdAt).toLocaleString()}
-                    >
-                      {formatRelativeTime(c.createdAt)}
+                    <span className="shrink-0 cursor-default text-[10px] tabular-nums text-slate-400">
+                      <RelativeTime date={c.createdAt} />
                       {c.editedAt ? ' · edited' : null}
                     </span>
                   </div>
