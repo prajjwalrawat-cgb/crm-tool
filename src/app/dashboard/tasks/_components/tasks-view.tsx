@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { DealOption } from '@/lib/deals/queries';
 import type { PageSize } from '@/lib/pagination/page-size';
 import { canManageDeals } from '@/lib/rbac';
 import type { TaskFilters } from '@/lib/tasks/filters';
@@ -31,6 +32,7 @@ import {
   toggleTaskCompletedAction,
 } from '../actions';
 import { CreateTaskForm } from './create-task-form';
+import { TaskDetailDrawer } from './task-detail-drawer';
 import { TaskRowItem } from './task-row';
 
 type TaskItem = TaskRow & { __pending?: boolean };
@@ -48,6 +50,7 @@ export function TasksView({
   currentRole,
   companyOptions,
   contactOptions,
+  dealOptions,
   teammates,
   nextCursor,
   pageSize,
@@ -59,6 +62,7 @@ export function TasksView({
   currentRole: MembershipRole;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
+  dealOptions: DealOption[];
   teammates: Teammate[];
   nextCursor: string | null;
   pageSize: PageSize;
@@ -75,6 +79,7 @@ export function TasksView({
     Record<string, string[]>
   >({});
   const [createResetKey, setCreateResetKey] = useState(0);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const [optimisticItems, applyOptimistic] = useOptimistic<TaskItem[], OptimisticOp>(
     initialItems,
@@ -237,6 +242,7 @@ export function TasksView({
                   resetKey={createResetKey}
                   companyOptions={companyOptions}
                   contactOptions={contactOptions}
+                  dealOptions={dealOptions}
                   currentUserId={currentUserId}
                   teammates={teammates}
                 />
@@ -279,6 +285,7 @@ export function TasksView({
                   canEdit={canEdit}
                   onToggle={(completed) => handleToggle(t, completed)}
                   onDelete={() => handleDelete(t)}
+                  onOpen={() => setSelectedTaskId(t.id)}
                 />
               ))}
             </ul>
@@ -291,6 +298,16 @@ export function TasksView({
           </div>
         )}
       </section>
+
+      <TaskDetailDrawer
+        task={
+          selectedTaskId
+            ? optimisticItems.find((t) => t.id === selectedTaskId) ?? null
+            : null
+        }
+        teammates={teammates}
+        onClose={() => setSelectedTaskId(null)}
+      />
     </div>
   );
 }

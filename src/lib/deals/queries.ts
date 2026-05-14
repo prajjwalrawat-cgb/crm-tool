@@ -2,6 +2,7 @@ import 'server-only';
 
 import {
   and,
+  asc,
   desc,
   eq,
   gte,
@@ -37,6 +38,26 @@ export type DealRow = Deal & {
   contactName: string | null;
   contactEmail: string | null;
 };
+
+export type DealOption = {
+  id: string;
+  label: string;
+};
+
+/**
+ * Lightweight picker source for entity-linking dropdowns (e.g. "link
+ * this task to a deal"). Returns active deals only, alphabetized by
+ * name. Mirrors `listCompanyOptions` / `listContactOptions` shape.
+ */
+export async function listDealOptions(tenantId: string): Promise<DealOption[]> {
+  return await tenantTransaction(async (tx) =>
+    tx
+      .select({ id: deals.id, label: deals.name })
+      .from(deals)
+      .where(and(eq(deals.tenantId, tenantId), isNull(deals.deletedAt)))
+      .orderBy(asc(deals.name)),
+  );
+}
 
 export type ListDealsOptions = {
   search?: string;

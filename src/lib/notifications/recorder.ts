@@ -3,6 +3,7 @@ import 'server-only';
 import { db } from '@/db';
 import { notifications, type NotificationType } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
+import { captureError, logger } from '@/lib/observability';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
 /**
@@ -41,6 +42,52 @@ export async function recordNotification(
     return;
   }
   await writeAndPublish(executor as DrizzleTx, input);
+}
+
+/**
+ * Best-effort notification fan-out. Runs OUTSIDE of any caller's
+ * transaction (opens its own) and **never throws** — failures are
+ * logged via the observability layer and the outer business operation
+ * is allowed to complete.
+ *
+ * Use this from server actions where the notification is ancillary to
+ * the core operation (e.g. "task was completed" → notify the creator).
+ * A notification crash must never roll back the task update.
+ *
+ * Returns `{ ok: true }` on success or `{ ok: false, message }` so
+ * callers can surface a soft warning if they want to. Most callers
+ * ignore the result.
+ */
+export async function recordNotificationSafe(
+  input: RecordNotificationInput,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await tenantTransaction(async (tx) => {
+      await writeAndPublish(tx, input);
+    });
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn('notification.publish_failed', {
+      tenantId: input.tenantId,
+      recipientUserId: input.recipientUserId,
+      type: input.type,
+      entityType: input.entityType ?? null,
+      entityId: input.entityId ?? null,
+      reason: message,
+    });
+    captureError(err instanceof Error ? err : new Error(message), {
+      category: 'notification.publish_failed',
+      severity: 'low',
+      retryable: true,
+      fields: {
+        recipientUserId: input.recipientUserId,
+        type: input.type,
+        entityType: input.entityType ?? null,
+      },
+    });
+    return { ok: false, message };
+  }
 }
 
 /**

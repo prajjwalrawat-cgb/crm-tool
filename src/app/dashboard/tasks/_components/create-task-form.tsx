@@ -1,10 +1,11 @@
 'use client';
 
 import { Loader2 } from 'lucide-react';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { DealOption } from '@/lib/deals/queries';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
@@ -12,6 +13,7 @@ import { OwnerFormField } from '../../_components/owner-form-field';
 
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const STATUSES = ['todo', 'in_progress', 'completed', 'cancelled'] as const;
+type LinkedKind = '' | 'deal' | 'company' | 'contact';
 
 export function CreateTaskForm({
   onSubmit,
@@ -21,6 +23,7 @@ export function CreateTaskForm({
   resetKey,
   companyOptions,
   contactOptions,
+  dealOptions,
   currentUserId,
   teammates,
 }: {
@@ -31,10 +34,29 @@ export function CreateTaskForm({
   resetKey: number;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
+  dealOptions: DealOption[];
   currentUserId: string;
   teammates: Teammate[];
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Track linked entity type locally so we can:
+  //   1) filter the entity dropdown to the right kind
+  //   2) reset the entity_id when the type changes (stale ids would
+  //      otherwise fail the foreign-key check on submit).
+  const [linkedKind, setLinkedKind] = useState<LinkedKind>('');
+  useEffect(() => {
+    setLinkedKind('');
+  }, [resetKey]);
+
+  const entityChoices: { id: string; label: string }[] =
+    linkedKind === 'deal'
+      ? dealOptions.map((d) => ({ id: d.id, label: d.label }))
+      : linkedKind === 'company'
+        ? companyOptions.map((c) => ({ id: c.id, label: c.name }))
+        : linkedKind === 'contact'
+          ? contactOptions.map((c) => ({ id: c.id, label: c.label }))
+          : [];
 
   return (
     <form
@@ -100,27 +122,45 @@ export function CreateTaskForm({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <SelectField name="entityType" label="Linked to" defaultValue="" errors={fieldErrors.entityType}>
-          <option value="">— None —</option>
-          <option value="deal">Deal</option>
-          <option value="company">Company</option>
-          <option value="contact">Contact</option>
-        </SelectField>
+        <Field label="Linked to" errors={fieldErrors.entityType}>
+          <select
+            name="entityType"
+            value={linkedKind}
+            onChange={(e) => setLinkedKind(e.target.value as LinkedKind)}
+            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+          >
+            <option value="">— None —</option>
+            <option value="deal">Deal</option>
+            <option value="company">Company</option>
+            <option value="contact">Contact</option>
+          </select>
+        </Field>
         <Field label="Entity" errors={fieldErrors.entityId}>
           <select
             name="entityId"
+            // `key` forces a remount when the linked kind changes, which
+            // clears the selection — guards against submitting a stale
+            // id from a different entity type.
+            key={linkedKind}
             defaultValue=""
-            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            disabled={linkedKind === '' || entityChoices.length === 0}
+            className={cn(
+              'rounded-md border bg-white px-3 py-1.5 text-sm shadow-sm transition focus:outline-none focus:ring-2',
+              linkedKind === '' || entityChoices.length === 0
+                ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
+                : 'border-slate-200 focus:border-indigo-500 focus:ring-indigo-500/20',
+            )}
           >
-            <option value="">— Pick one —</option>
-            {companyOptions.slice(0, 200).map((c) => (
-              <option key={`co-${c.id}`} value={c.id}>
-                Company: {c.name}
-              </option>
-            ))}
-            {contactOptions.slice(0, 200).map((c) => (
-              <option key={`ct-${c.id}`} value={c.id}>
-                Contact: {c.label}
+            <option value="">
+              {linkedKind === ''
+                ? '— Pick a type first —'
+                : entityChoices.length === 0
+                  ? `— No ${linkedKind}s yet —`
+                  : `— Pick a ${linkedKind} —`}
+            </option>
+            {entityChoices.slice(0, 200).map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label}
               </option>
             ))}
           </select>

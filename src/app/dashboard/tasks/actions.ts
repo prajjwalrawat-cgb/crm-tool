@@ -11,7 +11,7 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
-import { recordNotification } from '@/lib/notifications/recorder';
+import { recordNotificationSafe } from '@/lib/notifications/recorder';
 
 const TASK_STATUSES = ['todo', 'in_progress', 'completed', 'cancelled'] as const;
 const TASK_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
@@ -129,29 +129,31 @@ export async function createTaskAction(
           },
         });
 
-        // Notify the assignee when the task is assigned to someone
-        // other than the creator. The recorder skips self-targets and
-        // dedupes empty ids, so we can write the call unconditionally.
-        if (row.assignedUserId && row.assignedUserId !== membership.userId) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: row.assignedUserId,
-            actorUserId: membership.userId,
-            type: 'task_assigned',
-            title: `New task: ${row.title}`,
-            subtitle: row.dueDate ? `Due ${row.dueDate}` : null,
-            entityType: 'task',
-            entityId: row.id,
-            metadata: {
-              priority: row.priority,
-              linkedEntityType: row.entityType,
-              linkedEntityId: row.entityId,
-            },
-          });
-        }
-
         return row;
       });
+
+      // Post-commit best-effort notification. A failure here (RLS edge,
+      // realtime payload error, etc.) must not crash the create.
+      if (
+        inserted.assignedUserId &&
+        inserted.assignedUserId !== membership.userId
+      ) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: inserted.assignedUserId,
+          actorUserId: membership.userId,
+          type: 'task_assigned',
+          title: `New task: ${inserted.title}`,
+          subtitle: inserted.dueDate ? `Due ${inserted.dueDate}` : null,
+          entityType: 'task',
+          entityId: inserted.id,
+          metadata: {
+            priority: inserted.priority,
+            linkedEntityType: inserted.entityType,
+            linkedEntityId: inserted.entityId,
+          },
+        });
+      }
 
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
@@ -230,54 +232,55 @@ export async function updateTaskAction(
           },
         });
 
-        // Reassignment notification: notify the new assignee if it's
-        // a real change and not back to the actor themselves.
-        const reassigned =
-          (previous.assignedUserId ?? null) !== (row.assignedUserId ?? null);
-        if (
-          reassigned &&
-          row.assignedUserId &&
-          row.assignedUserId !== membership.userId
-        ) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: row.assignedUserId,
-            actorUserId: membership.userId,
-            type: 'task_assigned',
-            title: `Reassigned to you: ${row.title}`,
-            subtitle: row.dueDate ? `Due ${row.dueDate}` : null,
-            entityType: 'task',
-            entityId: row.id,
-            metadata: { reassign: true },
-          });
-        }
-
-        // Completion notification to the creator when someone else
-        // closes out their task.
-        if (
-          justCompleted &&
-          previous.createdBy &&
-          previous.createdBy !== membership.userId
-        ) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: previous.createdBy,
-            actorUserId: membership.userId,
-            type: 'task_completed',
-            title: `Task completed: ${row.title}`,
-            subtitle: null,
-            entityType: 'task',
-            entityId: row.id,
-            metadata: {},
-          });
-        }
-
-        return row;
+        return {
+          row,
+          previousAssignee: previous.assignedUserId ?? null,
+          previousCreator: previous.createdBy,
+          justCompleted,
+        };
       });
+
+      // Post-commit, best-effort notification fan-out.
+      const reassigned =
+        updated.previousAssignee !== (updated.row.assignedUserId ?? null);
+      if (
+        reassigned &&
+        updated.row.assignedUserId &&
+        updated.row.assignedUserId !== membership.userId
+      ) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: updated.row.assignedUserId,
+          actorUserId: membership.userId,
+          type: 'task_assigned',
+          title: `Reassigned to you: ${updated.row.title}`,
+          subtitle: updated.row.dueDate ? `Due ${updated.row.dueDate}` : null,
+          entityType: 'task',
+          entityId: updated.row.id,
+          metadata: { reassign: true },
+        });
+      }
+      if (
+        updated.justCompleted &&
+        updated.previousCreator &&
+        updated.previousCreator !== membership.userId
+      ) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: updated.previousCreator,
+          actorUserId: membership.userId,
+          type: 'task_completed',
+          title: `Task completed: ${updated.row.title}`,
+          subtitle: null,
+          entityType: 'task',
+          entityId: updated.row.id,
+          metadata: {},
+        });
+      }
 
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
-      return { ok: true, task: updated };
+      return { ok: true, task: updated.row };
     },
   );
 }
@@ -310,7 +313,11 @@ export async function toggleTaskCompletedAction(
         parsed.data.completed === true ||
         parsed.data.completed === 'true';
 
-      const updated = await tenantTransaction(async (tx) => {
+      // Critical path: update task + record activity atomically. Notifications
+      // are written AFTER this transaction commits so a notification crash
+      // (RLS edge, NOTIFY payload, transient publish error) can never roll
+      // back the task status change. See recordNotificationSafe.
+      const result = await tenantTransaction(async (tx) => {
         const [previous] = await tx
           .select()
           .from(tasks)
@@ -328,7 +335,7 @@ export async function toggleTaskCompletedAction(
           (completed && previous.status === 'completed') ||
           (!completed && previous.status !== 'completed')
         ) {
-          return previous; // no-op
+          return { row: previous, changed: false };
         }
 
         const [row] = await tx
@@ -356,30 +363,37 @@ export async function toggleTaskCompletedAction(
           },
         });
 
-        if (
-          completed &&
-          previous.createdBy &&
-          previous.createdBy !== membership.userId
-        ) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: previous.createdBy,
-            actorUserId: membership.userId,
-            type: 'task_completed',
-            title: `Task completed: ${row.title}`,
-            subtitle: null,
-            entityType: 'task',
-            entityId: row.id,
-            metadata: {},
-          });
-        }
-
-        return row;
+        return {
+          row,
+          changed: true,
+          notifyCreator:
+            completed &&
+            previous.createdBy &&
+            previous.createdBy !== membership.userId
+              ? previous.createdBy
+              : null,
+        };
       });
+
+      // Best-effort notification fan-out. Never bubbles up to the action
+      // boundary; logged + captured if it fails.
+      if (result.changed && 'notifyCreator' in result && result.notifyCreator) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: result.notifyCreator,
+          actorUserId: membership.userId,
+          type: 'task_completed',
+          title: `Task completed: ${result.row.title}`,
+          subtitle: null,
+          entityType: 'task',
+          entityId: result.row.id,
+          metadata: {},
+        });
+      }
 
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
-      return { ok: true, task: updated };
+      return { ok: true, task: result.row };
     },
   );
 }
@@ -497,32 +511,37 @@ export async function updateTaskFieldsAction(input: {
           },
         });
 
-        const reassigned =
-          parsed.data.assignedUserId !== undefined &&
-          (previous.assignedUserId ?? null) !== (row.assignedUserId ?? null);
-        if (
-          reassigned &&
-          row.assignedUserId &&
-          row.assignedUserId !== membership.userId
-        ) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: row.assignedUserId,
-            actorUserId: membership.userId,
-            type: 'task_assigned',
-            title: `Task assigned: ${row.title}`,
-            entityType: 'task',
-            entityId: row.id,
-            metadata: { taskTitle: row.title },
-          });
-        }
-        return row;
+        return {
+          row,
+          reassigned:
+            parsed.data.assignedUserId !== undefined &&
+            (previous.assignedUserId ?? null) !== (row.assignedUserId ?? null),
+        };
       });
 
       if (!updated) return { ok: false, message: 'Task not found' };
+
+      // Post-commit, best-effort reassignment notification.
+      if (
+        updated.reassigned &&
+        updated.row.assignedUserId &&
+        updated.row.assignedUserId !== membership.userId
+      ) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: updated.row.assignedUserId,
+          actorUserId: membership.userId,
+          type: 'task_assigned',
+          title: `Task assigned: ${updated.row.title}`,
+          entityType: 'task',
+          entityId: updated.row.id,
+          metadata: { taskTitle: updated.row.title },
+        });
+      }
+
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
-      return { ok: true, task: updated };
+      return { ok: true, task: updated.row };
     },
   );
 }

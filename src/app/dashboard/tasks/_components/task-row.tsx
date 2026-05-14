@@ -63,11 +63,13 @@ export function TaskRowItem({
   canEdit,
   onToggle,
   onDelete,
+  onOpen,
 }: {
   task: TaskRow & { __pending?: boolean };
   canEdit: boolean;
   onToggle: (completed: boolean) => void;
   onDelete: () => void;
+  onOpen?: () => void;
 }) {
   const completed = task.status === 'completed';
   const cancelled = task.status === 'cancelled';
@@ -131,14 +133,27 @@ export function TaskRowItem({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p
-            className={cn(
-              'truncate text-[13px] font-medium text-slate-800',
-              completed && 'line-through decoration-slate-300',
-            )}
-          >
-            {task.title}
-          </p>
+          {onOpen && !isOptimistic ? (
+            <button
+              type="button"
+              onClick={onOpen}
+              className={cn(
+                'truncate text-left text-[13px] font-medium text-slate-800 transition hover:text-indigo-700 hover:underline',
+                completed && 'line-through decoration-slate-300',
+              )}
+            >
+              {task.title}
+            </button>
+          ) : (
+            <p
+              className={cn(
+                'truncate text-[13px] font-medium text-slate-800',
+                completed && 'line-through decoration-slate-300',
+              )}
+            >
+              {task.title}
+            </p>
+          )}
           {task.__pending && !isOptimistic ? (
             <Loader2
               className="h-3 w-3 shrink-0 animate-spin text-slate-400"

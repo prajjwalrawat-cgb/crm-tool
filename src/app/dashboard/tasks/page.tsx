@@ -1,6 +1,7 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCompanyOptions } from '@/lib/companies/queries';
 import { listContactOptions } from '@/lib/contacts/queries';
+import { listDealOptions } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { parseTaskFilters } from '@/lib/tasks/filters';
@@ -32,20 +33,27 @@ export default async function TasksPage({
     );
     const filters = parseTaskFilters(sp);
 
-    const [membership, page, companyOptions, contactOptions, teammates] =
-      await Promise.all([
-        requireMembership(),
-        listTasks(tenant.id, {
-          search,
-          cursor,
-          size,
-          filters,
-          currentUserId: userId,
-        }),
-        listCompanyOptions(tenant.id),
-        listContactOptions(tenant.id),
-        listTeammates(tenant.id, tenant.name),
-      ]);
+    const [
+      membership,
+      page,
+      companyOptions,
+      contactOptions,
+      dealOptions,
+      teammates,
+    ] = await Promise.all([
+      requireMembership(),
+      listTasks(tenant.id, {
+        search,
+        cursor,
+        size,
+        filters,
+        currentUserId: userId,
+      }),
+      listCompanyOptions(tenant.id),
+      listContactOptions(tenant.id),
+      listDealOptions(tenant.id),
+      listTeammates(tenant.id, tenant.name),
+    ]);
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -64,6 +72,7 @@ export default async function TasksPage({
           currentRole={membership.role}
           companyOptions={companyOptions}
           contactOptions={contactOptions}
+          dealOptions={dealOptions}
           teammates={teammates}
           nextCursor={page.nextCursor}
           pageSize={page.size}
