@@ -17,6 +17,7 @@
     "demo:clean-others:execute": "tsx scripts/clean-demo-from-other-tenants.ts --execute",
     "env:check": "tsx --require ./scripts/_shim-server-only.cjs scripts/env-check.ts",
     "email:test": "tsx --require ./scripts/_shim-server-only.cjs scripts/test-smtp.ts",
+    "email:send-test": "tsx --require ./scripts/_shim-server-only.cjs scripts/send-test-email.ts",
     "bench": "tsx scripts/benchmark-queries.ts"
   },
   "dependencies": {
