@@ -10,6 +10,10 @@
 !.yarn/releases
 !.yarn/versions
 
+# Project uses pnpm. Block npm's lockfile so an accidental `npm install`
+# can't introduce a second, drifting source of truth.
+package-lock.json
+
 # testing
 /coverage
 

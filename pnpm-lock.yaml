@@ -92,9 +92,6 @@ importers:
       react-hook-form:
         specifier: ^7.75.0
         version: 7.75.0(react@19.2.4)
-      react-virtual:
-        specifier: ^2.10.4
-        version: 2.10.4(react@19.2.4)
       resend:
         specifier: ^6.12.2
         version: 6.12.2
@@ -1631,9 +1628,6 @@ packages:
 
   '@protobufjs/utf8@1.1.1':
     resolution: {integrity: sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==}
-
-  '@reach/observe-rect@1.2.0':
-    resolution: {integrity: sha512-Ba7HmkFgfQxZqqaeIWWkNK0rEhpxVQHIoVyW1YDSkGsGIXzcaW4deC8B0pZrNSSyLTdIk7y+5olKt5+g0GmFIQ==}
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
@@ -3856,11 +3850,6 @@ packages:
       redux:
         optional: true
 
-  react-virtual@2.10.4:
-    resolution: {integrity: sha512-Ir6+oPQZTVHfa6+JL9M7cvMILstFZH/H3jqeYeKI4MSUX+rIruVwFC6nGVXw9wqAw8L0Kg2KvfXxI85OvYQdpQ==}
-    peerDependencies:
-      react: ^16.6.3 || ^17.0.0
-
   react@19.2.4:
     resolution: {integrity: sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==}
     engines: {node: '>=0.10.0'}
@@ -5849,8 +5838,6 @@ snapshots:
   '@protobufjs/pool@1.1.0': {}
 
   '@protobufjs/utf8@1.1.1': {}
-
-  '@reach/observe-rect@1.2.0': {}
 
   '@rtsao/scc@1.1.0': {}
 
@@ -8242,11 +8229,6 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.14
       redux: 5.0.1
-
-  react-virtual@2.10.4(react@19.2.4):
-    dependencies:
-      '@reach/observe-rect': 1.2.0
-      react: 19.2.4
 
   react@19.2.4: {}
 
