@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { companies, contacts, type Contact } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
-import { recordNotification } from '@/lib/notifications/recorder';
+import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   contactIdSchema,
   createContactSchema,
@@ -510,26 +510,39 @@ export async function updateContactOwnerAction(
           },
         });
 
-        if (updated.ownerId) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: updated.ownerId,
-            actorUserId: membership.userId,
-            type: 'owner_changed',
-            title: `You now own ${displayName}`,
-            subtitle: 'Contact',
-            entityType: 'contact',
-            entityId: updated.id,
-            metadata: { from: previous.ownerId ?? null },
-          });
-        }
-
-        return { changed: true, contact: updated };
+        return {
+          changed: true,
+          contact: updated,
+          newOwnerId: updated.ownerId,
+          previousOwnerId: previous.ownerId ?? null,
+          displayName,
+        };
       });
 
       if (!result.contact) {
         return { ok: false, message: 'Contact not found' };
       }
+
+      // Post-commit, best-effort notification. Never crashes the action.
+      if (
+        result.changed &&
+        'newOwnerId' in result &&
+        result.newOwnerId &&
+        result.newOwnerId !== membership.userId
+      ) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: result.newOwnerId,
+          actorUserId: membership.userId,
+          type: 'owner_changed',
+          title: `You now own ${result.displayName}`,
+          subtitle: 'Contact',
+          entityType: 'contact',
+          entityId: result.contact.id,
+          metadata: { from: result.previousOwnerId },
+        });
+      }
+
       revalidatePath('/dashboard/contacts');
       revalidatePath(`/dashboard/contacts/${result.contact.id}`);
       return { ok: true, contact: result.contact, changed: result.changed };

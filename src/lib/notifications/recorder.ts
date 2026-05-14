@@ -114,6 +114,28 @@ export async function recordNotifications(
   }
 }
 
+/**
+ * Safe bulk variant: best-effort fan-out, never throws. Each recipient
+ * gets its own try/catch via `recordNotificationSafe`. Use from server
+ * actions where the underlying business operation (comment post, etc.)
+ * has already committed and we just need to ping people about it.
+ */
+export async function recordNotificationsSafe(
+  base: Omit<RecordNotificationInput, 'recipientUserId'>,
+  recipientUserIds: string[],
+): Promise<void> {
+  const seen = new Set<string>();
+  const filtered = recipientUserIds.filter((id) => {
+    if (!id || seen.has(id) || id === base.actorUserId) return false;
+    seen.add(id);
+    return true;
+  });
+  if (filtered.length === 0) return;
+  for (const recipientUserId of filtered) {
+    await recordNotificationSafe({ ...base, recipientUserId });
+  }
+}
+
 async function writeAndPublish(
   tx: DrizzleTx,
   input: RecordNotificationInput,

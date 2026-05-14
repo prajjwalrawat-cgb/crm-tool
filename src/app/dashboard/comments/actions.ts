@@ -15,7 +15,7 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
-import { recordNotifications } from '@/lib/notifications/recorder';
+import { recordNotificationsSafe } from '@/lib/notifications/recorder';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
 const ENTITY_TYPES = ['deal', 'company', 'contact'] as const;
@@ -139,24 +139,6 @@ export async function createCommentAction(input: {
           },
         });
 
-        // Notification fan-out to mentioned users.
-        if (mentions.length > 0) {
-          await recordNotifications(
-            tx,
-            {
-              tenantId: tenant.id,
-              actorUserId: membership.userId,
-              type: 'comment_mention',
-              title: `Mentioned you in a comment`,
-              subtitle: preview,
-              entityType: parsed.data.entityType,
-              entityId: parsed.data.entityId,
-              metadata: { commentId: row.id },
-            },
-            mentions,
-          );
-        }
-
         // Realtime publish — every open thread on this entity merges
         // the new comment without a refresh. The thread component
         // filters by (entityType, entityId) so other rooms ignore it.
@@ -180,11 +162,29 @@ export async function createCommentAction(input: {
           },
         });
 
-        return row;
+        return { row, mentions, preview };
       });
 
+      // Post-commit, best-effort mention fan-out. Mention failures must
+      // never roll back the comment itself.
+      if (inserted.mentions.length > 0) {
+        await recordNotificationsSafe(
+          {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            type: 'comment_mention',
+            title: 'Mentioned you in a comment',
+            subtitle: inserted.preview,
+            entityType: parsed.data.entityType,
+            entityId: parsed.data.entityId,
+            metadata: { commentId: inserted.row.id },
+          },
+          inserted.mentions,
+        );
+      }
+
       revalidatePath(PATH_FOR[parsed.data.entityType](parsed.data.entityId));
-      return { ok: true, comment: inserted };
+      return { ok: true, comment: inserted.row };
     },
   );
 }

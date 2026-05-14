@@ -14,6 +14,7 @@ import { recentErrors, recentLogs, snapshotMetrics } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 
 import { AiSection } from './_components/ai-section';
+import { AutomationHealthSection } from './_components/automation-health-section';
 import { EmailSection } from './_components/email-section';
 import { ErrorsSection } from './_components/errors-section';
 import { LatencySection } from './_components/latency-section';
@@ -70,6 +71,11 @@ export default async function OpsPage() {
             aiStats={aiStats}
             runStats={runStats}
             metrics={metrics}
+          />
+          <AutomationHealthSection
+            errors={errors}
+            runStats={runStats}
+            emailStats={emailStats}
           />
           <AiSection mode={aiMode} stats={aiStats} recent={recentAi} metrics={metrics} />
           <WorkflowsSection stats={runStats} recent={recentRuns} metrics={metrics} />

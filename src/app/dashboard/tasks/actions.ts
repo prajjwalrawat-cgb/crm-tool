@@ -407,6 +407,8 @@ export async function toggleTaskCompletedAction(
  */
 const inlineUpdateSchema = z.object({
   id: z.uuid(),
+  title: z.string().min(1, 'Title is required').max(280).optional(),
+  description: z.string().max(4000).nullable().optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
   status: z.enum(TASK_STATUSES).optional(),
   assignedUserId: z.string().max(120).nullable().optional(),
@@ -419,6 +421,8 @@ const inlineUpdateSchema = z.object({
 
 export async function updateTaskFieldsAction(input: {
   id: string;
+  title?: string;
+  description?: string | null;
   priority?: (typeof TASK_PRIORITIES)[number];
   status?: (typeof TASK_STATUSES)[number];
   assignedUserId?: string | null;
@@ -437,6 +441,10 @@ export async function updateTaskFieldsAction(input: {
       }
 
       const patch: Record<string, unknown> = {};
+      if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+      if (parsed.data.description !== undefined) {
+        patch.description = parsed.data.description;
+      }
       if (parsed.data.priority !== undefined) patch.priority = parsed.data.priority;
       if (parsed.data.status !== undefined) {
         patch.status = parsed.data.status;

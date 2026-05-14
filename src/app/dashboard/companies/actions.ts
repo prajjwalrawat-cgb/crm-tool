@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { companies, type Company } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
-import { recordNotification } from '@/lib/notifications/recorder';
+import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   companyIdSchema,
   createCompanySchema,
@@ -447,26 +447,38 @@ export async function updateCompanyOwnerAction(
           },
         });
 
-        if (updated.ownerId) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: updated.ownerId,
-            actorUserId: membership.userId,
-            type: 'owner_changed',
-            title: `You now own ${updated.name}`,
-            subtitle: 'Company',
-            entityType: 'company',
-            entityId: updated.id,
-            metadata: { from: previous.ownerId ?? null },
-          });
-        }
-
-        return { changed: true, company: updated };
+        return {
+          changed: true,
+          company: updated,
+          newOwnerId: updated.ownerId,
+          previousOwnerId: previous.ownerId ?? null,
+        };
       });
 
       if (!result.company) {
         return { ok: false, message: 'Company not found' };
       }
+
+      // Post-commit, best-effort notification. Never crashes the action.
+      if (
+        result.changed &&
+        'newOwnerId' in result &&
+        result.newOwnerId &&
+        result.newOwnerId !== membership.userId
+      ) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: result.newOwnerId,
+          actorUserId: membership.userId,
+          type: 'owner_changed',
+          title: `You now own ${result.company.name}`,
+          subtitle: 'Company',
+          entityType: 'company',
+          entityId: result.company.id,
+          metadata: { from: result.previousOwnerId },
+        });
+      }
+
       revalidatePath('/dashboard/companies');
       revalidatePath(`/dashboard/companies/${result.company.id}`);
       return { ok: true, company: result.company, changed: result.changed };

@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { companies, contacts, deals, type Deal } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
-import { recordNotification } from '@/lib/notifications/recorder';
+import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   runWithTenantContext,
   tenantTransaction,
@@ -482,30 +482,6 @@ export async function updateDealStageAction(
           },
         });
 
-        // Notify the deal owner when their deal moves into a terminal
-        // stage. The actor (the person making the change) is skipped
-        // by the recorder when they own the deal — which is the
-        // common case during normal pipeline operation.
-        if (
-          (updated.stage === 'won' || updated.stage === 'lost') &&
-          updated.ownerId
-        ) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: updated.ownerId,
-            actorUserId: membership.userId,
-            type: updated.stage === 'won' ? 'deal_won' : 'deal_lost',
-            title:
-              updated.stage === 'won'
-                ? `Deal won: ${updated.name}`
-                : `Deal lost: ${updated.name}`,
-            subtitle: null,
-            entityType: 'deal',
-            entityId: updated.id,
-            metadata: { from: previous.stage, to: updated.stage },
-          });
-        }
-
         const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
         if (serialized) {
           await publishRealtimeEvent(tx, {
@@ -529,6 +505,29 @@ export async function updateDealStageAction(
       }
 
       if (result.changed && result.previousStage) {
+        // Post-commit notification: terminal-stage owner alert. Best
+        // effort — must never roll back the deal update.
+        if (
+          (result.row.stage === 'won' || result.row.stage === 'lost') &&
+          result.row.ownerId &&
+          result.row.ownerId !== membership.userId
+        ) {
+          await recordNotificationSafe({
+            tenantId: tenant.id,
+            recipientUserId: result.row.ownerId,
+            actorUserId: membership.userId,
+            type: result.row.stage === 'won' ? 'deal_won' : 'deal_lost',
+            title:
+              result.row.stage === 'won'
+                ? `Deal won: ${result.row.name}`
+                : `Deal lost: ${result.row.name}`,
+            subtitle: null,
+            entityType: 'deal',
+            entityId: result.row.id,
+            metadata: { from: result.previousStage, to: result.row.stage },
+          });
+        }
+
         await sendWorkflowEvent('crm/deal.stage_changed', {
           tenantId: tenant.id,
           dealId: result.row.id,
@@ -796,28 +795,39 @@ export async function updateDealOwnerAction(
           },
         });
 
-        // Notify the new owner that they've inherited the deal.
-        // Recorder skips self-targets so reassigning to yourself is silent.
-        if (updated.ownerId) {
-          await recordNotification(tx, {
-            tenantId: tenant.id,
-            recipientUserId: updated.ownerId,
-            actorUserId: membership.userId,
-            type: 'owner_changed',
-            title: `You now own ${updated.name}`,
-            subtitle: null,
-            entityType: 'deal',
-            entityId: updated.id,
-            metadata: { from: previous.ownerId ?? null },
-          });
-        }
-
-        return { changed: true, deal: updated };
+        return {
+          changed: true,
+          deal: updated,
+          newOwnerId: updated.ownerId,
+          previousOwnerId: previous.ownerId ?? null,
+        };
       });
 
       if (!result.deal) {
         return { ok: false, message: 'Deal not found' };
       }
+
+      // Post-commit, best-effort notification. A failure here MUST NOT
+      // roll back the ownership change. See recordNotificationSafe.
+      if (
+        result.changed &&
+        'newOwnerId' in result &&
+        result.newOwnerId &&
+        result.newOwnerId !== membership.userId
+      ) {
+        await recordNotificationSafe({
+          tenantId: tenant.id,
+          recipientUserId: result.newOwnerId,
+          actorUserId: membership.userId,
+          type: 'owner_changed',
+          title: `You now own ${result.deal.name}`,
+          subtitle: null,
+          entityType: 'deal',
+          entityId: result.deal.id,
+          metadata: { from: result.previousOwnerId },
+        });
+      }
+
       revalidatePath('/dashboard/deals');
       revalidatePath(`/dashboard/deals/${result.deal.id}`);
       return { ok: true, deal: result.deal, changed: result.changed };

@@ -306,6 +306,7 @@ export function TasksView({
             : null
         }
         teammates={teammates}
+        currentUserId={currentUserId}
         onClose={() => setSelectedTaskId(null)}
       />
     </div>
