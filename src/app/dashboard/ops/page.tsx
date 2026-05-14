@@ -10,11 +10,20 @@ import {
   getRecentWorkflowRuns,
   getWorkflowStats,
 } from '@/lib/ops/queries';
+import {
+  getSenderIdentity,
+  readNodemailerConfig,
+} from '@/lib/email/providers/factory';
+import { validateEnv } from '@/lib/env';
 import { recentErrors, recentLogs, snapshotMetrics } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 
 import { AiSection } from './_components/ai-section';
 import { AutomationHealthSection } from './_components/automation-health-section';
+import {
+  EmailProviderSection,
+  type EmailProviderStatus,
+} from './_components/email-provider-section';
 import { EmailSection } from './_components/email-section';
 import { ErrorsSection } from './_components/errors-section';
 import { LatencySection } from './_components/latency-section';
@@ -53,6 +62,7 @@ export default async function OpsPage() {
     const errors = recentErrors.recent(50);
     const logs = recentLogs.recent(50);
     const aiMode = getAIMode();
+    const emailProviderStatus = readEmailProviderStatus();
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -79,6 +89,7 @@ export default async function OpsPage() {
           />
           <AiSection mode={aiMode} stats={aiStats} recent={recentAi} metrics={metrics} />
           <WorkflowsSection stats={runStats} recent={recentRuns} metrics={metrics} />
+          <EmailProviderSection status={emailProviderStatus} />
           <EmailSection stats={emailStats} />
           <RealtimeSection metrics={metrics} />
           <LatencySection metrics={metrics} />
@@ -88,4 +99,53 @@ export default async function OpsPage() {
       </main>
     );
   });
+}
+
+/**
+ * Collect a non-credential snapshot of the email provider config for
+ * the ops page. Never reads / surfaces SMTP_PASSWORD or RESEND_API_KEY
+ * directly — only their presence + the username masked to local-part
+ * prefix + domain.
+ */
+function readEmailProviderStatus(): EmailProviderStatus {
+  const raw = (process.env.EMAIL_PROVIDER ?? 'console').toLowerCase();
+  const provider: EmailProviderStatus['provider'] =
+    raw === 'nodemailer' || raw === 'resend' ? raw : 'console';
+
+  const senderIdentity = getSenderIdentity();
+  const envResult = validateEnv();
+  // Filter warnings to the email surface so this card doesn't
+  // duplicate unrelated warnings (e.g. CLERK_WEBHOOK_*) shown elsewhere.
+  const warnings = envResult.warnings.filter(
+    (w) =>
+      w.includes('EMAIL_PROVIDER') ||
+      w.includes('EMAIL_FROM') ||
+      w.includes('SMTP_') ||
+      w.includes('RESEND_API_KEY'),
+  );
+
+  const smtpCfg = readNodemailerConfig();
+  return {
+    provider,
+    senderIdentity,
+    smtp:
+      provider === 'nodemailer' && smtpCfg
+        ? {
+            host: smtpCfg.host,
+            port: smtpCfg.port,
+            secure: smtpCfg.secure,
+            userMasked: maskUser(smtpCfg.user),
+          }
+        : undefined,
+    resendKeyPresent:
+      provider === 'resend' ? Boolean(process.env.RESEND_API_KEY) : undefined,
+    warnings,
+  };
+}
+
+function maskUser(user: string): string {
+  if (!user.includes('@')) return user.slice(0, 3) + '***';
+  const [local, domain] = user.split('@', 2);
+  if (!local || !domain) return '***';
+  return `${local.slice(0, 3)}***@${domain}`;
 }

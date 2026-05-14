@@ -38,12 +38,29 @@ const recommendedEnvSchema = z.object({
   CLERK_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
   /** OpenAI key for live AI (mock mode kicks in if absent). */
   OPENAI_API_KEY: z.string().min(1).optional(),
-  /** Email provider selection — `resend` or omitted (→ console fallback). */
-  EMAIL_PROVIDER: z.enum(['resend', 'smtp', 'console']).optional(),
+  /** Email provider selection — `nodemailer`/`resend`/`console` (default). */
+  EMAIL_PROVIDER: z
+    .enum(['resend', 'smtp', 'console', 'nodemailer'])
+    .optional(),
   /** Resend API key. Required only when EMAIL_PROVIDER=resend. */
   RESEND_API_KEY: z.string().min(1).optional(),
   /** Sender identity used as the `From:` header. */
   EMAIL_FROM: z.string().min(1).optional(),
+  /** SMTP host (e.g. smtp.gmail.com). Required for EMAIL_PROVIDER=nodemailer. */
+  SMTP_HOST: z.string().min(1).optional(),
+  /** SMTP port — typically 465 (implicit TLS) or 587 (STARTTLS). */
+  SMTP_PORT: z
+    .string()
+    .refine((v) => Number.isFinite(Number(v)) && Number(v) > 0, {
+      message: 'SMTP_PORT must be a positive integer',
+    })
+    .optional(),
+  /** SMTP username (often the same as the From address for Gmail). */
+  SMTP_USER: z.string().min(1).optional(),
+  /** SMTP password / app password. Never log this value. */
+  SMTP_PASSWORD: z.string().min(1).optional(),
+  /** `true` for implicit TLS (port 465), `false` for STARTTLS (587). */
+  SMTP_SECURE: z.enum(['true', 'false']).optional(),
 });
 
 export type EnvValidationResult =
@@ -112,6 +129,18 @@ export function validateEnv(): EnvValidationResult {
       warnings.push(
         'EMAIL_PROVIDER=resend but RESEND_API_KEY is unset — sends will fall back to the console provider.',
       );
+    }
+    if (recommendedParsed.data.EMAIL_PROVIDER === 'nodemailer') {
+      const missing: string[] = [];
+      if (!recommendedParsed.data.SMTP_HOST) missing.push('SMTP_HOST');
+      if (!recommendedParsed.data.SMTP_PORT) missing.push('SMTP_PORT');
+      if (!recommendedParsed.data.SMTP_USER) missing.push('SMTP_USER');
+      if (!recommendedParsed.data.SMTP_PASSWORD) missing.push('SMTP_PASSWORD');
+      if (missing.length > 0) {
+        warnings.push(
+          `EMAIL_PROVIDER=nodemailer but ${missing.join(', ')} not set — sends will fall back to the console provider.`,
+        );
+      }
     }
     if (!recommendedParsed.data.EMAIL_FROM) {
       warnings.push(
