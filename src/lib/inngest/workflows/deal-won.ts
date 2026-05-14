@@ -4,7 +4,7 @@ import { db } from '@/db';
 import { deals, tasks } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { runWithSystemContext, tenantTransaction } from '@/lib/db-context';
-import { recordNotification } from '@/lib/notifications/recorder';
+import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   captureError,
   incr,
@@ -108,7 +108,10 @@ export async function dealWonHandler(args: {
         // unassigned and shows up under the "Unassigned" task filter.
         await step.run('create-onboarding-task', async () =>
           runWithSystemContext(tenantId, async () => {
-            await tenantTransaction(async (tx) => {
+            // Critical path: task insert + activity log atomic. Notification
+            // fan-out runs post-commit (safe) so a notification crash never
+            // rolls back the task creation.
+            const result = await tenantTransaction(async (tx) => {
               const [deal] = await tx
                 .select({ ownerId: deals.ownerId })
                 .from(deals)
@@ -140,7 +143,7 @@ export async function dealWonHandler(args: {
                   entityId: dealId,
                 })
                 .returning();
-              if (!task) return;
+              if (!task) return null;
               await recordActivity(tx, {
                 tenantId,
                 actorUserId: null,
@@ -155,20 +158,22 @@ export async function dealWonHandler(args: {
                   automation: true,
                 },
               });
-              if (ownerId) {
-                await recordNotification(tx, {
-                  tenantId,
-                  recipientUserId: ownerId,
-                  actorUserId: null,
-                  type: 'task_assigned',
-                  title: `Onboarding task created: ${name}`,
-                  subtitle: `Due ${dueDate}`,
-                  entityType: 'task',
-                  entityId: task.id,
-                  metadata: { workflow: WORKFLOW_ID, automation: true },
-                });
-              }
+              return { task, ownerId, dueDate };
             });
+
+            if (result?.ownerId) {
+              await recordNotificationSafe({
+                tenantId,
+                recipientUserId: result.ownerId,
+                actorUserId: null,
+                type: 'task_assigned',
+                title: `Onboarding task created: ${name}`,
+                subtitle: `Due ${result.dueDate}`,
+                entityType: 'task',
+                entityId: result.task.id,
+                metadata: { workflow: WORKFLOW_ID, automation: true },
+              });
+            }
           }),
         );
 

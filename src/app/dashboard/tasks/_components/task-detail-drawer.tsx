@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 
+import type { TaskComment } from '@/db/schema';
 import type { TaskRow } from '@/lib/tasks/queries';
 import {
   TASK_PRIORITY_LABELS,
@@ -25,6 +26,7 @@ import {
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
+import { ComposeEmailLauncher } from '../../_components/compose-email-launcher';
 import { Drawer } from '../../_components/drawer';
 import { TeammatePicker } from '../../_components/teammate-picker';
 import {
@@ -32,6 +34,8 @@ import {
   toggleTaskCompletedAction,
   updateTaskFieldsAction,
 } from '../actions';
+import { loadTaskCommentsAction } from '../comments-actions';
+import { TaskComments } from './task-comments';
 
 const PRIORITY_CYCLE: TaskRow['priority'][] = [
   'low',
@@ -136,6 +140,21 @@ function DrawerBody({
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
+  // Comments load on drawer open. They live below the metadata block;
+  // an empty initial array shows the "no comments yet" placeholder
+  // until the load resolves (usually one network round-trip).
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    loadTaskCommentsAction(task.id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setComments(result.comments);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id]);
+
   const assignee = task.assignedUserId
     ? teammates.find((t) => t.id === task.assignedUserId) ?? null
     : null;
@@ -271,22 +290,41 @@ function DrawerBody({
         </DetailCell>
       </section>
 
-      {entityHref && task.linkedName ? (
+      {entityHref && task.linkedName && task.entityType && task.entityId ? (
         <section>
           <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
             Linked to
           </h3>
-          <Link
-            href={entityHref}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50/40 hover:text-indigo-700"
-          >
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-              {task.entityType}
-            </span>
-            <span className="truncate">{task.linkedName}</span>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={entityHref}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50/40 hover:text-indigo-700"
+            >
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                {task.entityType}
+              </span>
+              <span className="truncate">{task.linkedName}</span>
+            </Link>
+            <ComposeEmailLauncher
+              entityType={task.entityType as 'deal' | 'company' | 'contact'}
+              entityId={task.entityId}
+              entityLabel={task.linkedName}
+              canSend={true}
+            />
+          </div>
+          <p className="mt-1 text-[10.5px] text-slate-500">
+            Email sends attach to the linked {task.entityType} and appear on its
+            timeline.
+          </p>
         </section>
       ) : null}
+
+      <TaskComments
+        taskId={task.id}
+        initialComments={comments}
+        teammates={teammates}
+        currentUserId={currentUserId}
+      />
 
       <div className="sticky bottom-0 -mx-5 mt-2 flex items-center justify-between gap-2 border-t border-slate-100 bg-white px-5 py-3">
         <button
