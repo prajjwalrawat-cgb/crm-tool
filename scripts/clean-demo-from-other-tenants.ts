@@ -12,10 +12,12 @@ config();
  * is preserved — the script only deletes rows that carry one of our
  * known seed markers:
  *
- *   - activity_logs.metadata->>'demoSeed' = 'true'   (seed-demo-data.ts)
+ *   - activity_logs.metadata->>'demoSeed' = 'true'    (seed-demo-data.ts)
  *   - activity_logs.metadata->>'seedRun' IS NOT NULL  (seed-stress-data.ts)
- *   - activity_logs.(actor_user_id IN ('seed-stress-data', 'demo-seed') OR actor_user_id LIKE 'seed-actor-%')
+ *   - activity_logs.metadata->>'seedDemo' = 'true'    (CP#9+ tables)
+ *   - actor / author / creator / recipient IDs LIKE 'seed-actor-%' or = 'demo-seed'
  *   - workflow_runs.metadata->>'demoSeed' = 'true'
+ *   - email_messages.metadata->>'seedDemo' = 'true'
  *
  * Companies / contacts / deals are identified through their creation
  * activity_log row. If a row has no creation log (e.g. created via the
@@ -139,8 +141,49 @@ async function main() {
         )
     `)) as unknown as C[])[0]?.n ?? 0;
 
+    // Newer tables (CP#9 onward) carry seed-actor IDs or `seedDemo` flags
+    // directly. Tasks/notes/comments/notifications/emails are not anchored
+    // by activity_log rows, so we count them straight from each table.
+    const seedTasks = ((await db.execute(sql`
+      SELECT COUNT(*)::int AS n
+      FROM tasks
+      WHERE tenant_id = ${t.id}::uuid
+        AND (created_by LIKE 'seed-actor-%' OR created_by = 'demo-seed')
+    `)) as unknown as C[])[0]?.n ?? 0;
+
+    const seedNotes = ((await db.execute(sql`
+      SELECT COUNT(*)::int AS n
+      FROM notes
+      WHERE tenant_id = ${t.id}::uuid
+        AND (author_user_id LIKE 'seed-actor-%' OR author_user_id = 'demo-seed')
+    `)) as unknown as C[])[0]?.n ?? 0;
+
+    const seedComments = ((await db.execute(sql`
+      SELECT COUNT(*)::int AS n
+      FROM comments
+      WHERE tenant_id = ${t.id}::uuid
+        AND author_user_id LIKE 'seed-actor-%'
+    `)) as unknown as C[])[0]?.n ?? 0;
+
+    const seedNotifs = ((await db.execute(sql`
+      SELECT COUNT(*)::int AS n
+      FROM notifications
+      WHERE tenant_id = ${t.id}::uuid
+        AND recipient_user_id LIKE 'seed-actor-%'
+    `)) as unknown as C[])[0]?.n ?? 0;
+
+    const seedEmails = ((await db.execute(sql`
+      SELECT COUNT(*)::int AS n
+      FROM email_messages
+      WHERE tenant_id = ${t.id}::uuid
+        AND (
+          actor_user_id LIKE 'seed-actor-%'
+          OR metadata->>'seedDemo' = 'true'
+        )
+    `)) as unknown as C[])[0]?.n ?? 0;
+
     console.log(
-      `  to delete:  companies=${seedCompanies} contacts=${seedContacts} deals=${seedDeals} activity=${seedActivity} workflows=${seedWorkflows}`,
+      `  to delete:  companies=${seedCompanies} contacts=${seedContacts} deals=${seedDeals} activity=${seedActivity} workflows=${seedWorkflows} tasks=${seedTasks} notes=${seedNotes} comments=${seedComments} notifs=${seedNotifs} emails=${seedEmails}`,
     );
 
     if (
@@ -148,7 +191,12 @@ async function main() {
       seedWorkflows === 0 &&
       seedDeals === 0 &&
       seedContacts === 0 &&
-      seedCompanies === 0
+      seedCompanies === 0 &&
+      seedTasks === 0 &&
+      seedNotes === 0 &&
+      seedComments === 0 &&
+      seedNotifs === 0 &&
+      seedEmails === 0
     ) {
       console.log('  (nothing to clean)\n');
       continue;
@@ -220,6 +268,34 @@ async function main() {
       DELETE FROM workflow_runs
       WHERE tenant_id = ${t.id}::uuid
         AND metadata->>'demoSeed' = 'true'
+    `);
+    await db.execute(sql`
+      DELETE FROM email_messages
+      WHERE tenant_id = ${t.id}::uuid
+        AND (
+          actor_user_id LIKE 'seed-actor-%'
+          OR metadata->>'seedDemo' = 'true'
+        )
+    `);
+    await db.execute(sql`
+      DELETE FROM notifications
+      WHERE tenant_id = ${t.id}::uuid
+        AND recipient_user_id LIKE 'seed-actor-%'
+    `);
+    await db.execute(sql`
+      DELETE FROM comments
+      WHERE tenant_id = ${t.id}::uuid
+        AND author_user_id LIKE 'seed-actor-%'
+    `);
+    await db.execute(sql`
+      DELETE FROM notes
+      WHERE tenant_id = ${t.id}::uuid
+        AND (author_user_id LIKE 'seed-actor-%' OR author_user_id = 'demo-seed')
+    `);
+    await db.execute(sql`
+      DELETE FROM tasks
+      WHERE tenant_id = ${t.id}::uuid
+        AND (created_by LIKE 'seed-actor-%' OR created_by = 'demo-seed')
     `);
 
     console.log('  cleaned.\n');

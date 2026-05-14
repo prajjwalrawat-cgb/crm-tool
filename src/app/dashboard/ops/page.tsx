@@ -5,6 +5,7 @@ import { withTenantSession } from '@/lib/auth-guard';
 import { requireMembership } from '@/lib/membership';
 import {
   getAiInvocationStats,
+  getEmailDeliveryStats,
   getRecentAiInvocations,
   getRecentWorkflowRuns,
   getWorkflowStats,
@@ -13,6 +14,7 @@ import { recentErrors, recentLogs, snapshotMetrics } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 
 import { AiSection } from './_components/ai-section';
+import { EmailSection } from './_components/email-section';
 import { ErrorsSection } from './_components/errors-section';
 import { LatencySection } from './_components/latency-section';
 import { LogsSection } from './_components/logs-section';
@@ -37,12 +39,14 @@ export default async function OpsPage() {
       redirect('/dashboard');
     }
 
-    const [aiStats, recentAi, runStats, recentRuns] = await Promise.all([
-      getAiInvocationStats(tenant.id, 24),
-      getRecentAiInvocations(tenant.id),
-      getWorkflowStats(tenant.id, 24),
-      getRecentWorkflowRuns(tenant.id),
-    ]);
+    const [aiStats, recentAi, runStats, recentRuns, emailStats] =
+      await Promise.all([
+        getAiInvocationStats(tenant.id, 24),
+        getRecentAiInvocations(tenant.id),
+        getWorkflowStats(tenant.id, 24),
+        getRecentWorkflowRuns(tenant.id),
+        getEmailDeliveryStats(tenant.id, 24),
+      ]);
 
     const metrics = snapshotMetrics();
     const errors = recentErrors.recent(50);
@@ -69,6 +73,7 @@ export default async function OpsPage() {
           />
           <AiSection mode={aiMode} stats={aiStats} recent={recentAi} metrics={metrics} />
           <WorkflowsSection stats={runStats} recent={recentRuns} metrics={metrics} />
+          <EmailSection stats={emailStats} />
           <RealtimeSection metrics={metrics} />
           <LatencySection metrics={metrics} />
           <ErrorsSection errors={errors} />

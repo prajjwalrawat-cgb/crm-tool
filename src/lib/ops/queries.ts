@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 
-import { aiInvocations, workflowRuns } from '@/db/schema';
+import { aiInvocations, emailMessages, workflowRuns } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
 export type AIInvocationRow = {
@@ -206,6 +206,145 @@ export async function getWorkflowStats(
       runs: r.runs,
       failed: r.failed,
       avgMs: r.avgMs == null ? null : Number(r.avgMs),
+    })),
+  };
+}
+
+export type EmailDeliveryStats = {
+  windowHours: number;
+  total: number;
+  sent: number;
+  delivered: number;
+  queued: number;
+  sending: number;
+  failed: number;
+  /** Failures that still have retry budget left (retryable=true, capped at 3 attempts). */
+  retryable: number;
+  /** Failed rows that have run out of retry budget. */
+  exhausted: number;
+  /** Provider breakdown of recent traffic. */
+  byProvider: Array<{ provider: string; count: number; failed: number }>;
+  /** Most recent failures, useful for surfacing on the ops page. */
+  recentFailures: Array<{
+    id: string;
+    subject: string;
+    error: string | null;
+    retryCount: number;
+    provider: string;
+    recipientLabel: string;
+    createdAt: Date;
+  }>;
+};
+
+/**
+ * Email delivery snapshot used by the ops dashboard. Buckets recent
+ * email_messages rows by their status state machine and pulls the
+ * latest failures for an "attention needed" panel.
+ */
+export async function getEmailDeliveryStats(
+  tenantId: string,
+  windowHours = 24,
+): Promise<EmailDeliveryStats> {
+  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+
+  const byStatus = await tenantTransaction(async (tx) =>
+    tx
+      .select({
+        status: emailMessages.status,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(emailMessages)
+      .where(
+        and(
+          eq(emailMessages.tenantId, tenantId),
+          gte(emailMessages.createdAt, since),
+        ),
+      )
+      .groupBy(emailMessages.status),
+  );
+
+  const lookup = (s: string): number =>
+    byStatus.find((r) => r.status === s)?.n ?? 0;
+
+  // Split failed → retryable vs exhausted via retryCount threshold (3).
+  const failureSplits = await tenantTransaction(async (tx) =>
+    tx.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE retry_count < 3)::int  AS retryable,
+        COUNT(*) FILTER (WHERE retry_count >= 3)::int AS exhausted
+      FROM email_messages
+      WHERE tenant_id = ${tenantId}::uuid
+        AND status = 'failed'
+        AND created_at >= ${since.toISOString()}
+    `),
+  );
+  const splits = (failureSplits as unknown as Array<{
+    retryable: number;
+    exhausted: number;
+  }>)[0] ?? { retryable: 0, exhausted: 0 };
+
+  const perProvider = await tenantTransaction(async (tx) =>
+    tx.execute(sql`
+      SELECT
+        provider                                  AS provider,
+        COUNT(*)::int                             AS count,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+      FROM email_messages
+      WHERE tenant_id = ${tenantId}::uuid
+        AND created_at >= ${since.toISOString()}
+      GROUP BY provider
+      ORDER BY count DESC
+    `),
+  );
+
+  const recentFailures = await tenantTransaction(async (tx) =>
+    tx.execute(sql`
+      SELECT
+        id, subject, error,
+        retry_count       AS "retryCount",
+        provider,
+        to_recipients[1]  AS "recipientLabel",
+        created_at        AS "createdAt"
+      FROM email_messages
+      WHERE tenant_id = ${tenantId}::uuid
+        AND status = 'failed'
+      ORDER BY created_at DESC
+      LIMIT 5
+    `),
+  );
+
+  const total = byStatus.reduce((s, r) => s + r.n, 0);
+  return {
+    windowHours,
+    total,
+    sent: lookup('sent'),
+    delivered: lookup('delivered'),
+    queued: lookup('queued'),
+    sending: lookup('sending'),
+    failed: lookup('failed'),
+    retryable: splits.retryable,
+    exhausted: splits.exhausted,
+    byProvider: (perProvider as unknown as Array<{
+      provider: string;
+      count: number;
+      failed: number;
+    }>).map((r) => ({ provider: r.provider, count: r.count, failed: r.failed })),
+    recentFailures: (recentFailures as unknown as Array<{
+      id: string;
+      subject: string;
+      error: string | null;
+      retryCount: number;
+      provider: string;
+      recipientLabel: string | null;
+      createdAt: Date | string;
+    }>).map((r) => ({
+      id: r.id,
+      subject: r.subject,
+      error: r.error,
+      retryCount: r.retryCount,
+      provider: r.provider,
+      recipientLabel: r.recipientLabel ?? '(no recipients)',
+      createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
     })),
   };
 }

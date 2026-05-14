@@ -13,6 +13,7 @@ import {
 import type { Company, MembershipRole } from '@/db/schema';
 import type { PageSize } from '@/lib/pagination/page-size';
 import { canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
@@ -43,12 +44,16 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 export function CompaniesView({
   initialItems,
   initialSearch,
+  teammates,
+  currentUserId,
   currentRole,
   nextCursor,
   pageSize,
 }: {
   initialItems: Company[];
   initialSearch: string;
+  teammates: Teammate[];
+  currentUserId: string;
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
@@ -236,6 +241,8 @@ export function CompaniesView({
                   error={createError}
                   fieldErrors={createFieldErrors}
                   resetKey={createResetKey}
+                  teammates={teammates}
+                  currentUserId={currentUserId}
                 />
               )}
             </CreateDrawer>

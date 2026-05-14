@@ -24,6 +24,8 @@ import {
 import type { TimelineItem } from '@/lib/timeline/queries';
 import { cn } from '@/lib/utils';
 
+import { EmailRetryButton } from './email-retry-button';
+
 /**
  * Unified per-entity timeline. Three feeds merged:
  *   - activity_logs (audit stream)
@@ -357,6 +359,12 @@ function ItemBody({
           <span className="text-slate-400">via {item.row.provider}</span>
           {failed && item.row.error ? (
             <span className="text-rose-600">· {item.row.error}</span>
+          ) : null}
+          {failed ? (
+            <EmailRetryButton
+              emailId={item.row.id}
+              retryCount={item.row.retryCount}
+            />
           ) : null}
         </p>
       </div>

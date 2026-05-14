@@ -47,6 +47,7 @@ export async function createCompanyAction(
         name: formData.get('name'),
         domain: formData.get('domain') || null,
         industry: formData.get('industry') || null,
+        ownerId: formData.get('ownerId') || null,
       });
       if (!parsed.success) {
         const flat = z.flattenError(parsed.error);
@@ -65,6 +66,7 @@ export async function createCompanyAction(
             name: parsed.data.name,
             domain: parsed.data.domain,
             industry: parsed.data.industry,
+            ownerId: parsed.data.ownerId ?? null,
           })
           .returning();
         if (!row) return null;

@@ -5,9 +5,12 @@ import { useEffect, useRef } from 'react';
 
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { Teammate } from '@/lib/teammates/queries';
 import { KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
 import { cn } from '@/lib/utils';
+
+import { OwnerFormField } from '../../_components/owner-form-field';
 
 type Props = {
   onSubmit: (formData: FormData) => void;
@@ -17,6 +20,8 @@ type Props = {
   resetKey: number;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
+  teammates: Teammate[];
+  currentUserId: string;
 };
 
 export function CreateDealForm({
@@ -27,6 +32,8 @@ export function CreateDealForm({
   resetKey,
   companyOptions,
   contactOptions,
+  teammates,
+  currentUserId,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -123,6 +130,12 @@ export function CreateDealForm({
           </option>
         ))}
       </SelectField>
+
+      <OwnerFormField
+        teammates={teammates}
+        currentUserId={currentUserId}
+        errors={fieldErrors.ownerId}
+      />
 
       {error ? (
         <p

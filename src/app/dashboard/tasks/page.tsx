@@ -5,6 +5,7 @@ import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { parseTaskFilters } from '@/lib/tasks/filters';
 import { listTasks } from '@/lib/tasks/queries';
+import { listTeammates } from '@/lib/teammates/queries';
 
 import { TasksView } from './_components/tasks-view';
 
@@ -31,8 +32,8 @@ export default async function TasksPage({
     );
     const filters = parseTaskFilters(sp);
 
-    const [membership, page, companyOptions, contactOptions] = await Promise.all(
-      [
+    const [membership, page, companyOptions, contactOptions, teammates] =
+      await Promise.all([
         requireMembership(),
         listTasks(tenant.id, {
           search,
@@ -43,8 +44,8 @@ export default async function TasksPage({
         }),
         listCompanyOptions(tenant.id),
         listContactOptions(tenant.id),
-      ],
-    );
+        listTeammates(tenant.id, tenant.name),
+      ]);
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -63,6 +64,7 @@ export default async function TasksPage({
           currentRole={membership.role}
           companyOptions={companyOptions}
           contactOptions={contactOptions}
+          teammates={teammates}
           nextCursor={page.nextCursor}
           pageSize={page.size}
         />

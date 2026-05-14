@@ -15,6 +15,7 @@ import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactRow } from '@/lib/contacts/queries';
 import type { PageSize } from '@/lib/pagination/page-size';
 import { canDeleteContacts, canManageContacts } from '@/lib/rbac';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
@@ -52,6 +53,8 @@ export function ContactsView({
   initialItems,
   initialSearch,
   companyOptions,
+  teammates,
+  currentUserId,
   currentRole,
   nextCursor,
   pageSize,
@@ -59,6 +62,8 @@ export function ContactsView({
   initialItems: ContactRow[];
   initialSearch: string;
   companyOptions: CompanyOption[];
+  teammates: Teammate[];
+  currentUserId: string;
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
@@ -264,6 +269,8 @@ export function ContactsView({
                   fieldErrors={createFieldErrors}
                   resetKey={createResetKey}
                   companyOptions={companyOptions}
+                  teammates={teammates}
+                  currentUserId={currentUserId}
                 />
               )}
             </CreateDrawer>

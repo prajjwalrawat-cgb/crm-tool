@@ -167,9 +167,10 @@ export function BoardView({
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      // Don't activate drag on a click — needed so the card name <Link>
-      // remains clickable.
-      activationConstraint: { distance: 4 },
+      // Larger activation distance + small delay so horizontal scroll
+      // and quick clicks don't get hijacked into drag gestures. Matches
+      // Linear/Notion ergonomics — a click is a click, a drag is a drag.
+      activationConstraint: { distance: 8, delay: 80, tolerance: 4 },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
@@ -326,7 +327,7 @@ export function BoardView({
       >
         <div
           className={cn(
-            'flex flex-1 gap-4 overflow-x-auto pb-4',
+            'flex flex-1 gap-4 overflow-x-auto overscroll-x-contain pb-4',
             // Subtle scrollbar styling on the horizontal axis.
             'snap-x snap-mandatory sm:snap-none',
           )}

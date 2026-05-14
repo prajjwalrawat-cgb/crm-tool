@@ -384,6 +384,149 @@ export async function toggleTaskCompletedAction(
   );
 }
 
+/**
+ * Partial-field updater for inline edits (priority cycler, status
+ * dropdown, assignee swap). Skips the heavy update form payload — the
+ * caller passes only what changed. Reassignment routes through
+ * `recordNotification` so the new assignee gets pinged the same way
+ * the full-form update does.
+ */
+const inlineUpdateSchema = z.object({
+  id: z.uuid(),
+  priority: z.enum(TASK_PRIORITIES).optional(),
+  status: z.enum(TASK_STATUSES).optional(),
+  assignedUserId: z.string().max(120).nullable().optional(),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+    .nullable()
+    .optional(),
+});
+
+export async function updateTaskFieldsAction(input: {
+  id: string;
+  priority?: (typeof TASK_PRIORITIES)[number];
+  status?: (typeof TASK_STATUSES)[number];
+  assignedUserId?: string | null;
+  dueDate?: string | null;
+}): Promise<TaskActionResult> {
+  const gate = await checkPermission(TASK_PERMISSION);
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const parsed = inlineUpdateSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, message: 'Invalid update payload' };
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (parsed.data.priority !== undefined) patch.priority = parsed.data.priority;
+      if (parsed.data.status !== undefined) {
+        patch.status = parsed.data.status;
+        // Mirror toggleTaskCompletedAction: stamp completedAt when entering
+        // the completed terminal state so the dashboard widgets stay
+        // honest about completion time.
+        if (parsed.data.status === 'completed') {
+          patch.completedAt = new Date();
+        } else {
+          patch.completedAt = null;
+        }
+      }
+      if (parsed.data.assignedUserId !== undefined) {
+        patch.assignedUserId = parsed.data.assignedUserId;
+      }
+      if (parsed.data.dueDate !== undefined) patch.dueDate = parsed.data.dueDate;
+
+      if (Object.keys(patch).length === 0) {
+        return { ok: false, message: 'Nothing to update' };
+      }
+
+      const updated = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select()
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.id, parsed.data.id),
+              eq(tasks.tenantId, tenant.id),
+              isNull(tasks.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return null;
+
+        const [row] = await tx
+          .update(tasks)
+          .set(patch)
+          .where(
+            and(
+              eq(tasks.id, parsed.data.id),
+              eq(tasks.tenantId, tenant.id),
+              isNull(tasks.deletedAt),
+            ),
+          )
+          .returning();
+        if (!row) return null;
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'task',
+          entityId: row.id,
+          action: 'updated',
+          metadata: {
+            taskTitle: row.title,
+            fields: Object.keys(patch),
+            ...(parsed.data.priority !== undefined
+              ? { priority: { from: previous.priority, to: row.priority } }
+              : {}),
+            ...(parsed.data.status !== undefined
+              ? { status: { from: previous.status, to: row.status } }
+              : {}),
+            ...(parsed.data.assignedUserId !== undefined
+              ? {
+                  assignedTo: {
+                    from: previous.assignedUserId ?? null,
+                    to: row.assignedUserId ?? null,
+                  },
+                }
+              : {}),
+          },
+        });
+
+        const reassigned =
+          parsed.data.assignedUserId !== undefined &&
+          (previous.assignedUserId ?? null) !== (row.assignedUserId ?? null);
+        if (
+          reassigned &&
+          row.assignedUserId &&
+          row.assignedUserId !== membership.userId
+        ) {
+          await recordNotification(tx, {
+            tenantId: tenant.id,
+            recipientUserId: row.assignedUserId,
+            actorUserId: membership.userId,
+            type: 'task_assigned',
+            title: `Task assigned: ${row.title}`,
+            entityType: 'task',
+            entityId: row.id,
+            metadata: { taskTitle: row.title },
+          });
+        }
+        return row;
+      });
+
+      if (!updated) return { ok: false, message: 'Task not found' };
+      revalidatePath('/dashboard/tasks');
+      revalidatePath('/dashboard');
+      return { ok: true, task: updated };
+    },
+  );
+}
+
 export async function softDeleteTaskAction(
   id: string,
 ): Promise<SimpleTaskResult> {

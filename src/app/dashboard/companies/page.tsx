@@ -3,6 +3,7 @@ import { parseCompanyFilters } from '@/lib/companies/filters';
 import { listCompanies } from '@/lib/companies/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
+import { listTeammates } from '@/lib/teammates/queries';
 
 import { CompaniesView } from './_components/companies-view';
 
@@ -29,7 +30,7 @@ export default async function CompaniesPage({
     );
     const filters = parseCompanyFilters(sp);
 
-    const [membership, page] = await Promise.all([
+    const [membership, page, teammates] = await Promise.all([
       requireMembership(),
       listCompanies(tenant.id, {
         search,
@@ -38,6 +39,7 @@ export default async function CompaniesPage({
         filters,
         currentUserId: userId,
       }),
+      listTeammates(tenant.id, tenant.name),
     ]);
 
     return (
@@ -52,6 +54,8 @@ export default async function CompaniesPage({
         <CompaniesView
           initialItems={page.items}
           initialSearch={search ?? ''}
+          teammates={teammates}
+          currentUserId={userId}
           currentRole={membership.role}
           nextCursor={page.nextCursor}
           pageSize={page.size}

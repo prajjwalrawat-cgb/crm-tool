@@ -16,6 +16,12 @@ export const createCompanySchema = z.object({
     .trim()
     .max(100, 'Industry must be 100 characters or fewer')
     .nullable(),
+  ownerId: z
+    .string()
+    .min(1)
+    .nullable()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
 export type CreateCompanyInput = z.infer<typeof createCompanySchema>;

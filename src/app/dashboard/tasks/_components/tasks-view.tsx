@@ -19,6 +19,7 @@ import type { PageSize } from '@/lib/pagination/page-size';
 import { canManageDeals } from '@/lib/rbac';
 import type { TaskFilters } from '@/lib/tasks/filters';
 import type { TaskRow } from '@/lib/tasks/queries';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
@@ -47,6 +48,7 @@ export function TasksView({
   currentRole,
   companyOptions,
   contactOptions,
+  teammates,
   nextCursor,
   pageSize,
 }: {
@@ -57,6 +59,7 @@ export function TasksView({
   currentRole: MembershipRole;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
+  teammates: Teammate[];
   nextCursor: string | null;
   pageSize: PageSize;
 }) {
@@ -235,6 +238,7 @@ export function TasksView({
                   companyOptions={companyOptions}
                   contactOptions={contactOptions}
                   currentUserId={currentUserId}
+                  teammates={teammates}
                 />
               )}
             </CreateDrawer>

@@ -35,6 +35,8 @@ export type DealFilters = {
   /** `mine` and `unassigned` are resolved server-side using the current user. */
   mine?: boolean;
   unassigned?: boolean;
+  /** Filter to deals owned by a specific teammate. Mutually exclusive with `mine` and `unassigned`. */
+  ownerId?: string;
 };
 
 export function parseDealFilters(
@@ -78,6 +80,10 @@ export function parseDealFilters(
         : undefined,
     mine: flag(raw.mine),
     unassigned: flag(raw.unassigned),
+    ownerId:
+      typeof raw.owner === 'string' && raw.owner.length > 0
+        ? raw.owner
+        : undefined,
   };
 }
 
@@ -111,6 +117,7 @@ export function dealFiltersToSearchParams(
   }
   if (filters.mine) out.set('mine', '1');
   if (filters.unassigned) out.set('unassigned', '1');
+  if (filters.ownerId) out.set('owner', filters.ownerId);
   return out;
 }
 
@@ -124,6 +131,7 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.stale ||
       filters.companyId ||
       filters.mine ||
-      filters.unassigned,
+      filters.unassigned ||
+      filters.ownerId,
   );
 }

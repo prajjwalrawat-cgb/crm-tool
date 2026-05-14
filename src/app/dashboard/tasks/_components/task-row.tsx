@@ -2,10 +2,16 @@
 
 import { Check, Loader2, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import { useTransition } from 'react';
 
 import type { TaskRow } from '@/lib/tasks/queries';
 import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from '@/lib/tasks/filters';
 import { cn } from '@/lib/utils';
+
+import { updateTaskFieldsAction } from '../actions';
+
+const PRIORITY_CYCLE: TaskRow['priority'][] = ['low', 'medium', 'high', 'urgent'];
+const STATUS_CYCLE: TaskRow['status'][] = ['todo', 'in_progress', 'completed'];
 
 const PRIORITY_TINT: Record<TaskRow['priority'], string> = {
   low: 'bg-slate-100 text-slate-600',
@@ -67,6 +73,29 @@ export function TaskRowItem({
   const cancelled = task.status === 'cancelled';
   const due = dueLabel(task.dueDate);
   const isOptimistic = task.id.startsWith('optimistic-');
+  const [inlinePending, startInline] = useTransition();
+  const interactive = canEdit && !isOptimistic;
+
+  function cyclePriority() {
+    if (!interactive) return;
+    const idx = PRIORITY_CYCLE.indexOf(task.priority);
+    const next = PRIORITY_CYCLE[(idx + 1) % PRIORITY_CYCLE.length]!;
+    startInline(async () => {
+      await updateTaskFieldsAction({ id: task.id, priority: next });
+    });
+  }
+
+  function cycleStatus() {
+    if (!interactive) return;
+    const idx = STATUS_CYCLE.indexOf(task.status as (typeof STATUS_CYCLE)[number]);
+    const next =
+      idx === -1
+        ? STATUS_CYCLE[0]!
+        : STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length]!;
+    startInline(async () => {
+      await updateTaskFieldsAction({ id: task.id, status: next });
+    });
+  }
 
   return (
     <li
@@ -74,6 +103,7 @@ export function TaskRowItem({
         'group flex items-start gap-3 px-3 py-2.5 transition-colors hover:bg-slate-50/70',
         task.__pending && 'opacity-60',
         (completed || cancelled) && 'opacity-70',
+        due?.tone === 'overdue' && 'border-l-2 border-rose-400/70',
       )}
     >
       {canEdit && !isOptimistic ? (
@@ -117,22 +147,38 @@ export function TaskRowItem({
           ) : null}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px]">
-          <span
+          <button
+            type="button"
+            onClick={cyclePriority}
+            disabled={!interactive || inlinePending}
+            title={interactive ? 'Cycle priority' : undefined}
             className={cn(
-              'rounded px-1 py-0 font-medium uppercase tracking-wide',
+              'rounded px-1 py-0 font-medium uppercase tracking-wide transition',
               PRIORITY_TINT[task.priority],
+              interactive
+                ? 'cursor-pointer hover:brightness-95'
+                : 'cursor-default',
+              inlinePending && 'opacity-70',
             )}
           >
             {TASK_PRIORITY_LABELS[task.priority]}
-          </span>
-          <span
+          </button>
+          <button
+            type="button"
+            onClick={cycleStatus}
+            disabled={!interactive || inlinePending}
+            title={interactive ? 'Cycle status' : undefined}
             className={cn(
-              'rounded px-1 py-0 font-medium uppercase tracking-wide',
+              'rounded px-1 py-0 font-medium uppercase tracking-wide transition',
               STATUS_TINT[task.status],
+              interactive
+                ? 'cursor-pointer hover:brightness-95'
+                : 'cursor-default',
+              inlinePending && 'opacity-70',
             )}
           >
             {TASK_STATUS_LABELS[task.status]}
-          </span>
+          </button>
           {due ? (
             <span
               className={cn(

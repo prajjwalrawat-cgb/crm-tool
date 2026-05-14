@@ -27,6 +27,12 @@ export const createContactSchema = z
       .max(100, 'Title must be 100 characters or fewer')
       .nullable(),
     companyId: z.uuid({ message: 'Pick a valid company' }).nullable(),
+    ownerId: z
+      .string()
+      .min(1)
+      .nullable()
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
   })
   .refine((data) => Boolean(data.firstName || data.lastName || data.email), {
     message: 'Provide a first name, last name, or email.',

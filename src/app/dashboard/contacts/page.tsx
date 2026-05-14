@@ -4,6 +4,7 @@ import { parseContactFilters } from '@/lib/contacts/filters';
 import { listContacts } from '@/lib/contacts/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
+import { listTeammates } from '@/lib/teammates/queries';
 
 import { ContactsView } from './_components/contacts-view';
 
@@ -30,7 +31,7 @@ export default async function ContactsPage({
     );
     const filters = parseContactFilters(sp);
 
-    const [membership, page, companyOptions] = await Promise.all([
+    const [membership, page, companyOptions, teammates] = await Promise.all([
       requireMembership(),
       listContacts(tenant.id, {
         search,
@@ -40,6 +41,7 @@ export default async function ContactsPage({
         currentUserId: userId,
       }),
       listCompanyOptions(tenant.id),
+      listTeammates(tenant.id, tenant.name),
     ]);
 
     return (
@@ -55,6 +57,8 @@ export default async function ContactsPage({
           initialItems={page.items}
           initialSearch={search ?? ''}
           companyOptions={companyOptions}
+          teammates={teammates}
+          currentUserId={userId}
           currentRole={membership.role}
           nextCursor={page.nextCursor}
           pageSize={page.size}

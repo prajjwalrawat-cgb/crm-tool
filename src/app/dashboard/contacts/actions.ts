@@ -81,6 +81,7 @@ export async function createContactAction(
         phone: formData.get('phone'),
         title: formData.get('title'),
         companyId: formData.get('companyId'),
+        ownerId: formData.get('ownerId'),
       };
       for (const key of Object.keys(raw)) {
         if (typeof raw[key] === 'string' && raw[key].trim() === '') raw[key] = null;
@@ -118,6 +119,7 @@ export async function createContactAction(
             email: parsed.data.email,
             phone: parsed.data.phone,
             title: parsed.data.title,
+            ownerId: parsed.data.ownerId ?? null,
           })
           .returning();
         if (!row) return null;

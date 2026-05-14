@@ -3,7 +3,10 @@
 import { Loader2, Plus } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
+
+import { OwnerFormField } from '../../_components/owner-form-field';
 
 type Props = {
   onSubmit: (formData: FormData) => void;
@@ -12,6 +15,8 @@ type Props = {
   fieldErrors: Record<string, string[]>;
   /** Increments after each successful submit so the form resets via remount. */
   resetKey: number;
+  teammates: Teammate[];
+  currentUserId: string;
 };
 
 export function CreateCompanyForm({
@@ -20,6 +25,8 @@ export function CreateCompanyForm({
   error,
   fieldErrors,
   resetKey,
+  teammates,
+  currentUserId,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -53,6 +60,12 @@ export function CreateCompanyForm({
         label="Industry"
         placeholder="SaaS"
         errors={fieldErrors.industry}
+      />
+
+      <OwnerFormField
+        teammates={teammates}
+        currentUserId={currentUserId}
+        errors={fieldErrors.ownerId}
       />
 
       {error ? (

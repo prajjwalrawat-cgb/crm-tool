@@ -152,6 +152,9 @@ export async function listDeals(
   if (f.unassigned) {
     conditions.push(isNull(deals.ownerId));
   }
+  if (f.ownerId) {
+    conditions.push(eq(deals.ownerId, f.ownerId));
+  }
 
   if (options.cursor) {
     conditions.push(

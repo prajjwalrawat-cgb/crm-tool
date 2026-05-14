@@ -29,6 +29,7 @@ import { canDeleteDeals, canManageDeals } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
+import { FilterChips, type FilterChip } from '../../_components/filter-chips';
 import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createDealAction,
@@ -66,6 +67,7 @@ export function DealsView({
   companyOptions,
   contactOptions,
   teammates,
+  currentUserId,
   currentRole,
   nextCursor,
   pageSize,
@@ -76,6 +78,7 @@ export function DealsView({
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
   teammates: Teammate[];
+  currentUserId: string;
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
@@ -83,6 +86,11 @@ export function DealsView({
   const router = useRouter();
   const canEdit = canManageDeals(currentRole);
   const canDelete = canDeleteDeals(currentRole);
+  const filterChips = buildDealFilterChips(initialFilters, {
+    companyOptions,
+    teammates,
+    currentUserId,
+  });
 
   const [search, setSearch] = useState(initialSearch);
   const [searchPending, startSearchTransition] = useTransition();
@@ -314,6 +322,8 @@ export function DealsView({
                   resetKey={createResetKey}
                   companyOptions={companyOptions}
                   contactOptions={contactOptions}
+                  teammates={teammates}
+                  currentUserId={currentUserId}
                 />
               )}
             </CreateDrawer>
@@ -324,6 +334,8 @@ export function DealsView({
           initialFilters={initialFilters}
           companyOptions={companyOptions}
         />
+
+        <FilterChips chips={filterChips} />
 
         {actionError ? (
           <p
@@ -474,11 +486,14 @@ function DealsTable({
         })}
       </ul>
 
-      <div className="hidden overflow-x-auto sm:block">
-      <table className="min-w-full divide-y divide-slate-200 text-[13px]">
+      <div className="hidden overflow-x-auto overscroll-x-contain sm:block">
+      <table className="min-w-[60rem] divide-y divide-slate-200 text-[13px]">
         <thead className="sticky top-0 z-10 bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
             <tr>
-              <th scope="col" className="px-3 py-1.5 text-left font-semibold">
+              <th
+                scope="col"
+                className="sticky left-0 z-20 bg-slate-50/95 px-3 py-1.5 text-left font-semibold backdrop-blur"
+              >
                 Name
               </th>
               <th scope="col" className="px-3 py-1.5 text-left font-semibold">
@@ -532,7 +547,7 @@ function DealsTable({
                     d.__pending && 'opacity-60',
                   )}
                 >
-                  <td className="px-3 py-2">
+                  <td className="sticky left-0 z-[1] bg-white/95 px-3 py-2 backdrop-blur group-hover:bg-slate-50/95">
                     {isOptimistic ? (
                       <span className="font-medium">{d.name}</span>
                     ) : (
@@ -804,4 +819,81 @@ function OwnerCell({
       {!compact ? <span className="truncate">{name}</span> : null}
     </span>
   );
+}
+
+function formatAmountMinor(minor: number): string {
+  // Lightweight money formatting just for the chip label — full currency
+  // formatting lives in `formatCurrency` but that needs a currency code,
+  // which the filter (range across all currencies) doesn't have.
+  return new Intl.NumberFormat('en-US').format(Math.round(minor / 100));
+}
+
+function buildDealFilterChips(
+  filters: DealFilters,
+  ctx: {
+    companyOptions: CompanyOption[];
+    teammates: Teammate[];
+    currentUserId: string;
+  },
+): FilterChip[] {
+  const chips: FilterChip[] = [];
+
+  if (filters.stages && filters.stages.length > 0) {
+    chips.push({
+      id: 'stages',
+      keys: ['stage', 'stages'],
+      label: `Stage: ${filters.stages.map((s) => DEAL_STAGE_LABELS[s]).join(', ')}`,
+    });
+  }
+  if (filters.amountMinorMin !== undefined || filters.amountMinorMax !== undefined) {
+    const lo = filters.amountMinorMin !== undefined
+      ? formatAmountMinor(filters.amountMinorMin)
+      : '0';
+    const hi = filters.amountMinorMax !== undefined
+      ? formatAmountMinor(filters.amountMinorMax)
+      : '∞';
+    chips.push({
+      id: 'amount',
+      keys: ['amountMin', 'amountMax'],
+      label: `Amount: ${lo} – ${hi}`,
+    });
+  }
+  if (filters.expectedCloseFrom || filters.expectedCloseTo) {
+    chips.push({
+      id: 'close',
+      keys: ['closeFrom', 'closeTo'],
+      label: `Close: ${filters.expectedCloseFrom ?? '∞'} → ${filters.expectedCloseTo ?? '∞'}`,
+    });
+  }
+  if (filters.stale) {
+    chips.push({
+      id: 'stale',
+      keys: ['stale', 'staleDays'],
+      label: `Stale (>${filters.staleDays ?? 14}d)`,
+    });
+  }
+  if (filters.companyId) {
+    const co = ctx.companyOptions.find((c) => c.id === filters.companyId);
+    chips.push({
+      id: 'company',
+      keys: ['companyId'],
+      label: `Company: ${co?.name ?? 'Unknown'}`,
+    });
+  }
+  if (filters.mine) {
+    chips.push({ id: 'mine', keys: ['mine'], label: 'Mine' });
+  }
+  if (filters.unassigned) {
+    chips.push({ id: 'unassigned', keys: ['unassigned'], label: 'Unassigned' });
+  }
+  if (filters.ownerId) {
+    const t = ctx.teammates.find((tt) => tt.id === filters.ownerId);
+    chips.push({
+      id: 'owner',
+      keys: ['owner'],
+      label: `Owner: ${t?.displayName ?? filters.ownerId.slice(0, 8)}`,
+    });
+  }
+
+  return chips;
 }

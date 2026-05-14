@@ -93,8 +93,14 @@ export async function createDealAction(
         expectedCloseDate: formData.get('expectedCloseDate'),
         companyId: formData.get('companyId'),
         contactId: formData.get('contactId'),
+        ownerId: formData.get('ownerId'),
       };
-      for (const key of ['expectedCloseDate', 'companyId', 'contactId'] as const) {
+      for (const key of [
+        'expectedCloseDate',
+        'companyId',
+        'contactId',
+        'ownerId',
+      ] as const) {
         if (typeof raw[key] === 'string' && raw[key].trim() === '') raw[key] = null;
       }
 
@@ -148,6 +154,7 @@ export async function createDealAction(
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt,
+            ownerId: parsed.data.ownerId ?? null,
           })
           .returning();
         if (!row) return null;

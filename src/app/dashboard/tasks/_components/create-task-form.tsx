@@ -5,7 +5,10 @@ import { useRef } from 'react';
 
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
+
+import { OwnerFormField } from '../../_components/owner-form-field';
 
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const STATUSES = ['todo', 'in_progress', 'completed', 'cancelled'] as const;
@@ -19,6 +22,7 @@ export function CreateTaskForm({
   companyOptions,
   contactOptions,
   currentUserId,
+  teammates,
 }: {
   onSubmit: (formData: FormData) => void;
   pending: boolean;
@@ -28,6 +32,7 @@ export function CreateTaskForm({
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
   currentUserId: string;
+  teammates: Teammate[];
 }) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -84,11 +89,12 @@ export function CreateTaskForm({
           type="date"
           errors={fieldErrors.dueDate}
         />
-        <TextField
+        <OwnerFormField
           name="assignedUserId"
           label="Assignee"
-          defaultValue={currentUserId}
-          placeholder="User id (defaults to you)"
+          teammates={teammates}
+          currentUserId={currentUserId}
+          defaultOwnerId={currentUserId}
           errors={fieldErrors.assignedUserId}
         />
       </div>

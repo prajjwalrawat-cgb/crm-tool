@@ -42,6 +42,12 @@ export const createDealSchema = z.object({
     .nullable(),
   companyId: z.uuid({ message: 'Pick a valid company' }).nullable(),
   contactId: z.uuid({ message: 'Pick a valid contact' }).nullable(),
+  ownerId: z
+    .string()
+    .min(1, 'Pick an owner')
+    .nullable()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
 export type CreateDealInput = z.infer<typeof createDealSchema>;

@@ -62,6 +62,7 @@ export default async function DealsPage({
           companyOptions={companyOptions}
           contactOptions={contactOptions}
           teammates={teammates}
+          currentUserId={userId}
           currentRole={membership.role}
           nextCursor={page.nextCursor}
           pageSize={page.size}

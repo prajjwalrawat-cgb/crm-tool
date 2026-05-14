@@ -4,7 +4,10 @@ import { Loader2, Plus } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import type { CompanyOption } from '@/lib/companies/queries';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
+
+import { OwnerFormField } from '../../_components/owner-form-field';
 
 type Props = {
   onSubmit: (formData: FormData) => void;
@@ -13,6 +16,8 @@ type Props = {
   fieldErrors: Record<string, string[]>;
   resetKey: number;
   companyOptions: CompanyOption[];
+  teammates: Teammate[];
+  currentUserId: string;
 };
 
 export function CreateContactForm({
@@ -22,6 +27,8 @@ export function CreateContactForm({
   fieldErrors,
   resetKey,
   companyOptions,
+  teammates,
+  currentUserId,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -80,6 +87,12 @@ export function CreateContactForm({
       <CompanyPicker
         options={companyOptions}
         errors={fieldErrors.companyId}
+      />
+
+      <OwnerFormField
+        teammates={teammates}
+        currentUserId={currentUserId}
+        errors={fieldErrors.ownerId}
       />
 
       {error ? (
