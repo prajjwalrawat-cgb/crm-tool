@@ -28,9 +28,13 @@ if (process.env.NODE_ENV !== 'production') {
   globalForDb.postgresClient = client;
 }
 
+// Drizzle's query logger prints every SQL statement + params on stdout.
+// Useful when debugging a specific query but very noisy by default
+// (~10 lines per page render). Opt in with `DB_QUERY_LOG=true` in
+// `.env.local` when you actually want to see the SQL.
 export const db = drizzle(client, {
   schema,
-  logger: process.env.NODE_ENV !== 'production',
+  logger: process.env.DB_QUERY_LOG === 'true',
 });
 
 export { client };
