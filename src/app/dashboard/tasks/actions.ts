@@ -11,7 +11,39 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
+import { sendAutomatedEmailSafe } from '@/lib/email/automation';
 import { recordNotificationSafe } from '@/lib/notifications/recorder';
+
+/**
+ * Helper: render the task-assignment auto-email body. Kept small so
+ * the three callsites (create, full-update, partial-update) emit
+ * structurally-identical messages.
+ */
+function buildTaskAssignmentEmail(input: {
+  title: string;
+  dueDate: string | null;
+  priority: string;
+  linkedEntityType: string | null;
+  linkedEntityId: string | null;
+  reassigned: boolean;
+}): { subject: string; textBody: string } {
+  const verb = input.reassigned ? 'reassigned to you' : 'assigned to you';
+  const subject = `Task ${verb}: ${input.title}`;
+  const linkLine =
+    input.linkedEntityType && input.linkedEntityId
+      ? `Linked ${input.linkedEntityType}: /dashboard/${input.linkedEntityType}s/${input.linkedEntityId}`
+      : null;
+  const textBody =
+    `Hi,\n\n` +
+    `A task has been ${verb} in the CRM.\n\n` +
+    `Title    : ${input.title}\n` +
+    `Priority : ${input.priority}\n` +
+    `Due      : ${input.dueDate ?? '(no due date)'}\n` +
+    (linkLine ? `${linkLine}\n` : '') +
+    `\nOpen tasks: /dashboard/tasks\n\n` +
+    `— Automated from the CRM`;
+  return { subject, textBody };
+}
 
 const TASK_STATUSES = ['todo', 'in_progress', 'completed', 'cancelled'] as const;
 const TASK_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
@@ -153,6 +185,36 @@ export async function createTaskAction(
             linkedEntityId: inserted.entityId,
           },
         });
+
+        // Auto-email the new assignee. Skipped in console-provider dev
+        // and skipped entirely when the task has no linked entity
+        // (email_messages requires an entity attachment).
+        if (
+          inserted.entityType &&
+          inserted.entityId &&
+          (inserted.entityType === 'deal' ||
+            inserted.entityType === 'company' ||
+            inserted.entityType === 'contact')
+        ) {
+          const { subject, textBody } = buildTaskAssignmentEmail({
+            title: inserted.title,
+            dueDate: inserted.dueDate,
+            priority: inserted.priority,
+            linkedEntityType: inserted.entityType,
+            linkedEntityId: inserted.entityId,
+            reassigned: false,
+          });
+          await sendAutomatedEmailSafe({
+            tenantId: tenant.id,
+            recipientUserId: inserted.assignedUserId,
+            actorUserId: membership.userId,
+            subject,
+            textBody,
+            entityType: inserted.entityType,
+            entityId: inserted.entityId,
+            metadata: { kind: 'task_assigned', taskId: inserted.id },
+          });
+        }
       }
 
       revalidatePath('/dashboard/tasks');
@@ -259,6 +321,32 @@ export async function updateTaskAction(
           entityId: updated.row.id,
           metadata: { reassign: true },
         });
+        if (
+          updated.row.entityType &&
+          updated.row.entityId &&
+          (updated.row.entityType === 'deal' ||
+            updated.row.entityType === 'company' ||
+            updated.row.entityType === 'contact')
+        ) {
+          const { subject, textBody } = buildTaskAssignmentEmail({
+            title: updated.row.title,
+            dueDate: updated.row.dueDate,
+            priority: updated.row.priority,
+            linkedEntityType: updated.row.entityType,
+            linkedEntityId: updated.row.entityId,
+            reassigned: true,
+          });
+          await sendAutomatedEmailSafe({
+            tenantId: tenant.id,
+            recipientUserId: updated.row.assignedUserId,
+            actorUserId: membership.userId,
+            subject,
+            textBody,
+            entityType: updated.row.entityType,
+            entityId: updated.row.entityId,
+            metadata: { kind: 'task_reassigned', taskId: updated.row.id },
+          });
+        }
       }
       if (
         updated.justCompleted &&
@@ -545,6 +633,32 @@ export async function updateTaskFieldsAction(input: {
           entityId: updated.row.id,
           metadata: { taskTitle: updated.row.title },
         });
+        if (
+          updated.row.entityType &&
+          updated.row.entityId &&
+          (updated.row.entityType === 'deal' ||
+            updated.row.entityType === 'company' ||
+            updated.row.entityType === 'contact')
+        ) {
+          const { subject, textBody } = buildTaskAssignmentEmail({
+            title: updated.row.title,
+            dueDate: updated.row.dueDate,
+            priority: updated.row.priority,
+            linkedEntityType: updated.row.entityType,
+            linkedEntityId: updated.row.entityId,
+            reassigned: true,
+          });
+          await sendAutomatedEmailSafe({
+            tenantId: tenant.id,
+            recipientUserId: updated.row.assignedUserId,
+            actorUserId: membership.userId,
+            subject,
+            textBody,
+            entityType: updated.row.entityType,
+            entityId: updated.row.entityId,
+            metadata: { kind: 'task_reassigned', taskId: updated.row.id },
+          });
+        }
       }
 
       revalidatePath('/dashboard/tasks');

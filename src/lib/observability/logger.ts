@@ -20,9 +20,14 @@ import { getTraceContext } from './trace';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
+// Default to `warn` in dev so info-level chatter (SSE opens, AI chat
+// starting, console-mode email "sends") doesn't dominate the terminal.
+// Bump to `info` or `debug` via LOG_LEVEL when actively investigating.
+// Production stays at `info` so platform log collectors capture the
+// usual operational signal.
 const ENABLED_LEVEL: Level =
   (process.env.LOG_LEVEL as Level | undefined) ??
-  (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
+  (process.env.NODE_ENV === 'production' ? 'info' : 'warn');
 
 const ORDER: Record<Level, number> = {
   debug: 10,

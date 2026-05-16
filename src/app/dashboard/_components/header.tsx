@@ -77,13 +77,27 @@ export function Header({
           initialNotifications={initialNotifications}
         />
         <PresenceIndicator key={tenantId} tenantId={tenantId} />
-        <OrganizationSwitcher
-          hidePersonal
-          afterCreateOrganizationUrl="/dashboard"
-          afterSelectOrganizationUrl="/dashboard"
-          afterLeaveOrganizationUrl="/select-org"
-        />
-        <UserButton />
+        {/*
+         * Clerk's <OrganizationSwitcher /> and <UserButton /> mount their
+         * actual UI client-side after Clerk's bundle initializes. The
+         * server renders a minimal placeholder, the client swaps in the
+         * real widget — this trips React's hydration matcher even though
+         * the swap is intentional. Wrapping in a div with
+         * suppressHydrationWarning is Clerk's documented escape hatch
+         * for Next.js App Router and is scoped to just these two
+         * widgets, not the whole header.
+         */}
+        <div suppressHydrationWarning>
+          <OrganizationSwitcher
+            hidePersonal
+            afterCreateOrganizationUrl="/dashboard"
+            afterSelectOrganizationUrl="/dashboard"
+            afterLeaveOrganizationUrl="/select-org"
+          />
+        </div>
+        <div suppressHydrationWarning>
+          <UserButton />
+        </div>
       </div>
     </header>
   );

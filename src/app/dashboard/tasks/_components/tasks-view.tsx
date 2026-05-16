@@ -276,26 +276,15 @@ export function TasksView({
         {showEmpty ? (
           <EmptyState searchActive={trimmedSearch.length > 0} />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-            <ul className="divide-y divide-slate-100">
-              {optimisticItems.map((t) => (
-                <TaskRowItem
-                  key={t.id}
-                  task={t}
-                  canEdit={canEdit}
-                  onToggle={(completed) => handleToggle(t, completed)}
-                  onDelete={() => handleDelete(t)}
-                  onOpen={() => setSelectedTaskId(t.id)}
-                />
-              ))}
-            </ul>
-            <PaginationControls
-              basePath="/dashboard/tasks"
-              nextCursor={nextCursor}
-              size={pageSize}
-              visibleCount={optimisticItems.length}
-            />
-          </div>
+          <TaskList
+            items={optimisticItems}
+            canEdit={canEdit}
+            onToggle={handleToggle}
+            onDelete={handleDelete}
+            onOpen={(id) => setSelectedTaskId(id)}
+            nextCursor={nextCursor}
+            pageSize={pageSize}
+          />
         )}
       </section>
 
@@ -308,6 +297,102 @@ export function TasksView({
         teammates={teammates}
         currentUserId={currentUserId}
         onClose={() => setSelectedTaskId(null)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Splits the task list into "active" (todo/in_progress/cancelled) and
+ * "completed" buckets and renders the completed bucket as a collapsible
+ * section so a long backlog of finished work doesn't bury what's open.
+ * Pagination control hangs off the bottom regardless of whether
+ * completed is expanded.
+ */
+function TaskList({
+  items,
+  canEdit,
+  onToggle,
+  onDelete,
+  onOpen,
+  nextCursor,
+  pageSize,
+}: {
+  items: TaskItem[];
+  canEdit: boolean;
+  onToggle: (task: TaskItem, completed: boolean) => void;
+  onDelete: (task: TaskItem) => void;
+  onOpen: (id: string) => void;
+  nextCursor: string | null;
+  pageSize: PageSize;
+}) {
+  const active = items.filter((t) => t.status !== 'completed');
+  const completed = items.filter((t) => t.status === 'completed');
+  const [showCompleted, setShowCompleted] = useState(false);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      {active.length === 0 && completed.length > 0 ? (
+        <p className="px-4 py-3 text-[12px] text-slate-500">
+          No active tasks — {completed.length} completed below.
+        </p>
+      ) : null}
+      <ul className="divide-y divide-slate-100">
+        {active.map((t) => (
+          <TaskRowItem
+            key={t.id}
+            task={t}
+            canEdit={canEdit}
+            onToggle={(completed) => onToggle(t, completed)}
+            onDelete={() => onDelete(t)}
+            onOpen={() => onOpen(t.id)}
+          />
+        ))}
+      </ul>
+
+      {completed.length > 0 ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowCompleted((v) => !v)}
+            className="flex w-full items-center justify-between border-t border-slate-100 bg-slate-50/60 px-4 py-2 text-[11.5px] font-medium text-slate-600 transition hover:bg-slate-100"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={cn(
+                  'inline-block h-2 w-2 rotate-0 border-y-[4px] border-l-[5px] border-y-transparent border-l-slate-500 transition-transform',
+                  showCompleted && 'rotate-90',
+                )}
+                aria-hidden
+              />
+              Completed ({completed.length})
+            </span>
+            <span className="text-[10.5px] text-slate-500">
+              {showCompleted ? 'Hide' : 'Show'}
+            </span>
+          </button>
+          {showCompleted ? (
+            <ul className="divide-y divide-slate-100 bg-slate-50/30">
+              {completed.map((t) => (
+                <TaskRowItem
+                  key={t.id}
+                  task={t}
+                  canEdit={canEdit}
+                  onToggle={(completedNext) => onToggle(t, completedNext)}
+                  onDelete={() => onDelete(t)}
+                  onOpen={() => onOpen(t.id)}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+
+      <PaginationControls
+        basePath="/dashboard/tasks"
+        nextCursor={nextCursor}
+        size={pageSize}
+        visibleCount={items.length}
       />
     </div>
   );

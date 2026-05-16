@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { companies, contacts, deals, type Deal } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
+import { sendAutomatedEmailSafe } from '@/lib/email/automation';
 import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   runWithTenantContext,
@@ -815,6 +816,7 @@ export async function updateDealOwnerAction(
         result.newOwnerId &&
         result.newOwnerId !== membership.userId
       ) {
+        // In-app notification (bell).
         await recordNotificationSafe({
           tenantId: tenant.id,
           recipientUserId: result.newOwnerId,
@@ -825,6 +827,28 @@ export async function updateDealOwnerAction(
           entityType: 'deal',
           entityId: result.deal.id,
           metadata: { from: result.previousOwnerId },
+        });
+
+        // Real email to the new owner. Operational, not customer-facing —
+        // skipped in console-provider dev mode. Best-effort; failures are
+        // logged but never crash the reassignment.
+        await sendAutomatedEmailSafe({
+          tenantId: tenant.id,
+          recipientUserId: result.newOwnerId,
+          actorUserId: membership.userId,
+          subject: `You've been assigned: ${result.deal.name}`,
+          textBody:
+            `Hi,\n\n` +
+            `${result.deal.name} has been assigned to you in the CRM.\n\n` +
+            `Open it: /dashboard/deals/${result.deal.id}\n\n` +
+            `— Automated from the CRM`,
+          entityType: 'deal',
+          entityId: result.deal.id,
+          metadata: {
+            kind: 'owner_changed',
+            dealName: result.deal.name,
+            previousOwnerId: result.previousOwnerId,
+          },
         });
       }
 

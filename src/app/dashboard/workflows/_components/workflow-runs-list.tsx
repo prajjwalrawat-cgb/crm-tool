@@ -4,7 +4,7 @@ import { Workflow } from 'lucide-react';
 import { useState } from 'react';
 
 import type { WorkflowRun, WorkflowStatus } from '@/db/schema';
-import { formatRelativeTime } from '@/lib/activity/format';
+import { RelativeTime } from '@/lib/dates/relative-time';
 import { cn } from '@/lib/utils';
 
 import { WorkflowRunDrawer } from './workflow-run-drawer';
@@ -144,7 +144,7 @@ export function WorkflowRunsList({ rows }: { rows: WorkflowRun[] }) {
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500">
-                      <div>{formatRelativeTime(run.startedAt)}</div>
+                      <div><RelativeTime date={run.startedAt} /></div>
                       <div className="font-mono text-[10px] text-slate-400">
                         {dateFormatter.format(run.startedAt)}
                       </div>

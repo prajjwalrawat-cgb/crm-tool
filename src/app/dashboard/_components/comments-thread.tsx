@@ -22,6 +22,7 @@ import {
   formatMentionToken,
   parseMentions,
 } from '@/lib/comments/mentions';
+import { RelativeTime } from '@/lib/dates/relative-time';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
@@ -306,7 +307,7 @@ function CommentItemView({
               {author}
             </span>
             <span className="text-[10px] tabular-nums text-slate-400">
-              {relTime(new Date(comment.createdAt))}
+              <RelativeTime date={comment.createdAt} />
               {comment.editedAt ? ' · edited' : ''}
             </span>
             {comment.__pending && !isOptimistic ? (
@@ -442,7 +443,7 @@ function ReplyRow({
             {author}
           </span>
           <span className="text-[10px] tabular-nums text-slate-400">
-            {relTime(new Date(comment.createdAt))}
+            <RelativeTime date={comment.createdAt} />
             {comment.editedAt ? ' · edited' : ''}
           </span>
         </div>

@@ -10,6 +10,7 @@ import {
   deleteNoteAction,
   updateNoteAction,
 } from '@/app/dashboard/notes/actions';
+import { RelativeTime } from '@/lib/dates/relative-time';
 import { cn } from '@/lib/utils';
 
 type NoteEntityType = 'deal' | 'company' | 'contact';
@@ -177,7 +178,7 @@ export function NotesTimeline({
                     {author}
                   </span>
                   <span className="text-[10px] tabular-nums text-slate-400">
-                    {relTime(new Date(note.createdAt))}
+                    <RelativeTime date={note.createdAt} />
                   </span>
                 </div>
                 {isEditing ? (

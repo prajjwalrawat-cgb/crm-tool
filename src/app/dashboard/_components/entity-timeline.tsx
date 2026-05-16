@@ -15,13 +15,14 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { formatActivity, formatRelativeTime } from '@/lib/activity/format';
+import { formatActivity } from '@/lib/activity/format';
 import type { ActivityRow } from '@/lib/activity/queries';
 import {
   commentPreview,
   parseMentions,
 } from '@/lib/comments/mentions';
 import type { TimelineItem } from '@/lib/timeline/queries';
+import { RelativeTime } from '@/lib/dates/relative-time';
 import { cn } from '@/lib/utils';
 
 import { EmailRetryButton } from './email-retry-button';
@@ -205,9 +206,10 @@ export function EntityTimeline({
                   authorLookup={authorLookup}
                   currentUserId={currentUserId}
                 />
-                <span className="mt-0.5 block text-[10px] tabular-nums text-slate-400">
-                  {formatRelativeTime(item.createdAt)}
-                </span>
+                <RelativeTime
+                  date={item.createdAt}
+                  className="mt-0.5 block text-[10px] tabular-nums text-slate-400"
+                />
               </div>
             </li>
           ))}

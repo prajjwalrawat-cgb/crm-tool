@@ -3,6 +3,7 @@ import Link from 'next/link';
 
 import { formatActivity, formatRelativeTime } from '@/lib/activity/format';
 import type { ActivityRow } from '@/lib/activity/queries';
+import { formatDateTime } from '@/lib/dates/format';
 import { cn } from '@/lib/utils';
 
 /**
@@ -50,7 +51,7 @@ function ActivityListItem({ row }: { row: ActivityRow }) {
   const formatted = formatActivity(row);
   const actorName = row.actor?.displayName ?? 'Someone';
   const isAutomation = row.action === 'automation_note' || !row.actorUserId;
-  const absoluteTimestamp = new Date(row.createdAt).toLocaleString();
+  const absoluteTimestamp = formatDateTime(row.createdAt);
   const entityHref = ENTITY_HREF[row.entityType]?.(row.entityId);
   const meta = (row.metadata ?? {}) as Record<string, unknown>;
   const entityName =
