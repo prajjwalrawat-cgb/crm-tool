@@ -8,6 +8,10 @@ import {
   getReport,
   type ReportId,
 } from '@/lib/reports/registry';
+import type {
+  EmailEngagementExtras,
+  EmailEngagementRow,
+} from '@/lib/reports/queries/email-engagement';
 import type { PipelineByStageRow } from '@/lib/reports/queries/pipeline-by-stage';
 import type { RepPerformanceRow } from '@/lib/reports/queries/rep-performance';
 import type {
@@ -30,6 +34,7 @@ import type {
 import { cn } from '@/lib/utils';
 
 import { CsvDownloadButton } from '../_components/csv-download-button';
+import { EmailEngagementSection } from '../_components/email-engagement-section';
 import { PipelineByStageChart } from '../_components/pipeline-by-stage-chart';
 import { RepPerformanceSection } from '../_components/rep-performance-section';
 import { ReportFilterBar } from '../_components/report-filter-bar';
@@ -211,6 +216,13 @@ function ReportBody({
     case 'rep-performance':
       return (
         <RepPerformanceSection rows={result.rows as RepPerformanceRow[]} />
+      );
+    case 'email-engagement':
+      return (
+        <EmailEngagementSection
+          rows={result.rows as EmailEngagementRow[]}
+          extras={result.extras as EmailEngagementExtras}
+        />
       );
     default: {
       const _exhaustive: never = reportId;

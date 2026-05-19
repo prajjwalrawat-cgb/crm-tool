@@ -56,6 +56,11 @@ const REPORT_COLUMNS: Record<ReportId, { key: string; label: string }[]> = {
     { key: 'emailCount', label: 'Emails sent' },
     { key: 'tasksCompleted', label: 'Tasks completed' },
   ],
+  'email-engagement': [
+    { key: 'status', label: 'Status' },
+    { key: 'count', label: 'Count' },
+    { key: 'retrySum', label: 'Retry sum' },
+  ],
 };
 
 export async function buildReportCsvAction(input: {

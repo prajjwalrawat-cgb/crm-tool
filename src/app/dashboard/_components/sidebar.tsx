@@ -1,9 +1,10 @@
 ﻿'use client';
 
-import { ChevronsLeft, ChevronsRight, Sparkles, X } from 'lucide-react';
+import { ChevronsLeft, ChevronsRight, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { SaleinxIcon, SaleinxWordmark } from '@/lib/brand/logo';
 import { cn } from '@/lib/utils';
 
 import { isNavActive, NAV_ITEMS } from './nav-config';
@@ -141,25 +142,20 @@ function Brand({
   collapsed?: boolean;
 }) {
   return (
-    <div
+    <Link
+      href="/dashboard"
+      aria-label="Saleinx — go to dashboard"
       className={cn(
-        'flex items-center gap-2',
+        'flex items-center gap-2 transition hover:opacity-90',
         inline
           ? 'pb-2'
           : 'border-b border-slate-200 px-3 py-3',
         collapsed && !inline && 'justify-center px-0',
       )}
     >
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-sm">
-        <Sparkles className="h-3.5 w-3.5" aria-hidden />
-      </div>
-      {!collapsed ? (
-        <div className="leading-tight">
-          <div className="text-[13px] font-semibold tracking-tight">CRM</div>
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">multi-tenant</div>
-        </div>
-      ) : null}
-    </div>
+      <SaleinxIcon size={22} className="shrink-0" />
+      {!collapsed ? <SaleinxWordmark size="md" /> : null}
+    </Link>
   );
 }
 

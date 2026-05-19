@@ -14,8 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CRM',
-  description: 'Multi-tenant CRM',
+  title: {
+    template: '%s · Saleinx',
+    default: 'Saleinx',
+  },
+  description:
+    'Saleinx — operational CRM with built-in analytics, automation, and team collaboration.',
 };
 
 export default function RootLayout({
