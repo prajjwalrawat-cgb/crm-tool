@@ -25,6 +25,37 @@ const REPORT_COLUMNS: Record<ReportId, { key: string; label: string }[]> = {
     { key: 'count', label: 'Deal count' },
     { key: 'totalAmountMinor', label: 'Total amount (minor units)' },
   ],
+  'win-loss-rate': [
+    { key: 'stage', label: 'Stage' },
+    { key: 'count', label: 'Deal count' },
+    { key: 'revenueMinor', label: 'Revenue (minor units)' },
+  ],
+  'stale-deals': [
+    { key: 'dealId', label: 'Deal ID' },
+    { key: 'name', label: 'Deal name' },
+    { key: 'stage', label: 'Stage' },
+    { key: 'amountMinor', label: 'Amount (minor units)' },
+    { key: 'ownerId', label: 'Owner user id' },
+    { key: 'severity', label: 'Severity' },
+    { key: 'daysSinceActivity', label: 'Days since activity' },
+    { key: 'daysSinceEmail', label: 'Days since email' },
+    { key: 'daysSinceStageChange', label: 'Days since stage change' },
+    { key: 'lastActivityAt', label: 'Last activity at' },
+    { key: 'lastEmailAt', label: 'Last email at' },
+    { key: 'lastStageChangeAt', label: 'Last stage change at' },
+  ],
+  'rep-performance': [
+    { key: 'ownerDisplayName', label: 'Rep' },
+    { key: 'ownerEmail', label: 'Email' },
+    { key: 'wonCount', label: 'Won' },
+    { key: 'lostCount', label: 'Lost' },
+    { key: 'revenueMinor', label: 'Revenue (minor units)' },
+    { key: 'avgWonAmountMinor', label: 'Avg won amount (minor units)' },
+    { key: 'winRate', label: 'Win rate (0-1)' },
+    { key: 'activityCount', label: 'Activity count' },
+    { key: 'emailCount', label: 'Emails sent' },
+    { key: 'tasksCompleted', label: 'Tasks completed' },
+  ],
 };
 
 export async function buildReportCsvAction(input: {
