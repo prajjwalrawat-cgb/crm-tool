@@ -53,8 +53,15 @@ export type ReportResultMeta = {
   headline?: { label: string; value: string };
 };
 
-export type ReportResult<R> = {
+export type ReportResult<R, X = undefined> = {
   rows: R[];
+  /**
+   * Per-report computed extras the chart layer needs but that don't
+   * fit the row shape. Examples: win rate %, time-window bounds the
+   * runner resolved, top-N truncation flag. `undefined` for reports
+   * that don't need anything beyond rows.
+   */
+  extras?: X;
   meta: ReportResultMeta;
 };
 
@@ -76,15 +83,20 @@ export type ReportCategory =
   | 'email'
   | 'forecast';
 
-export type RowOf<T> = T extends ReportRunner<unknown, infer R> ? R : never;
+export type RowOf<T> = T extends ReportRunner<unknown, infer R, unknown> ? R : never;
 
 /**
  * The contract every report implements. `currentUserId` is passed
  * explicitly (rather than read from a global) so unit tests can drive
  * the function without an HTTP context.
+ *
+ * Three type parameters:
+ *   F = filter shape (defaults to the base `ReportFilter`)
+ *   R = row shape   (per-report)
+ *   X = extras shape (per-report metadata beyond rows; e.g., winRate)
  */
-export type ReportRunner<F = ReportFilter, R = unknown> = (
+export type ReportRunner<F = ReportFilter, R = unknown, X = undefined> = (
   tenantId: string,
   filters: F,
   context: { currentUserId: string },
-) => Promise<ReportResult<R>>;
+) => Promise<ReportResult<R, X>>;
