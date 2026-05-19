@@ -1,6 +1,10 @@
 import 'server-only';
 
 import {
+  emailEngagementRunner,
+  type EmailEngagementRow,
+} from './queries/email-engagement';
+import {
   pipelineByStageRunner,
   type PipelineByStageRow,
 } from './queries/pipeline-by-stage';
@@ -97,13 +101,25 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsOwnerScope: false,
     runner: repPerformanceRunner as ReportRunner<ReportFilter, unknown, unknown>,
   },
+  'email-engagement': {
+    title: 'Email engagement',
+    description:
+      'Outbound delivery health — sent / delivered / failed / retried counts across the selected window.',
+    category: 'email',
+    chart: 'bar',
+    supportsCsv: true,
+    supportsDateRange: true,
+    supportsOwnerScope: false,
+    runner: emailEngagementRunner as ReportRunner<ReportFilter, unknown, unknown>,
+  },
 };
 
 export type ReportId =
   | 'pipeline-by-stage'
   | 'win-loss-rate'
   | 'stale-deals'
-  | 'rep-performance';
+  | 'rep-performance'
+  | 'email-engagement';
 
 /** The full registration including its id — handy for list rendering. */
 export type ReportRegistration = ReportRegistrationBase & { id: ReportId };
@@ -131,4 +147,5 @@ export type ReportRowMap = {
   'win-loss-rate': WinLossRateRow;
   'stale-deals': StaleDealsRow;
   'rep-performance': RepPerformanceRow;
+  'email-engagement': EmailEngagementRow;
 };
