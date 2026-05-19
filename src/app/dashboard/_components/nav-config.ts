@@ -1,5 +1,6 @@
 import {
   Activity,
+  BarChart3,
   Briefcase,
   Building2,
   CheckSquare,
@@ -28,6 +29,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
   { href: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
   { href: '/dashboard/email', label: 'Email', icon: Mail },
+  { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
   { href: '/dashboard/team', label: 'Team', icon: UserCog },
   { href: '/dashboard/activity', label: 'Activity', icon: Activity },
   { href: '/dashboard/workflows', label: 'Workflows', icon: Workflow },
