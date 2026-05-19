@@ -33,29 +33,63 @@ export function SaleinxIcon({
       role="img"
       aria-label="Saleinx logo"
     >
-      {/* Top-left: square */}
+      {/*
+        Geometry trace against the reference image:
+          - 2x2 grid on a 32-unit canvas
+          - 2-unit outer padding so the mark stays visible inside any
+            container that crops to its bounding box
+          - cells centered around (8,8), (24,8), (8,24), (24,24)
+
+        Soft corners on the triangle + arrow come from
+        `stroke-linejoin="round"` plus a same-color stroke. The stroke
+        expands the fill outward to round vertices without us having to
+        hand-author bezier curves. Stroke width 1.5 was tuned to match
+        the reference's friendly-but-still-distinct corner radius.
+      */}
+
+      {/* Top-left: rounded square (squircle radius for friendly feel) */}
       <rect
-        x="1"
-        y="1"
-        width="14"
-        height="14"
-        rx="2"
+        x="2"
+        y="2"
+        width="12"
+        height="12"
+        rx="3"
         fill={BRAND_COLORS.iconSquare}
       />
-      {/* Top-right: triangle pointing up */}
+
+      {/* Top-right: rounded triangle, vertex up */}
       <path
-        d="M24 1 L31 15 L17 15 Z"
+        d="M24 3 L30 14 L18 14 Z"
         fill={BRAND_COLORS.iconTriangle}
-      />
-      {/* Bottom-left: circle */}
-      <circle cx="8" cy="24" r="7" fill={BRAND_COLORS.iconCircle} />
-      {/* Bottom-right: arrow pointing up */}
-      <path
-        d="M24 31 L24 21 M24 21 L20 25 M24 21 L28 25"
-        stroke={BRAND_COLORS.iconArrow}
-        strokeWidth="3"
-        strokeLinecap="round"
+        stroke={BRAND_COLORS.iconTriangle}
+        strokeWidth="1.5"
         strokeLinejoin="round"
+      />
+
+      {/* Bottom-left: circle (slightly smaller than r=7 so it doesn't dominate) */}
+      <circle cx="8" cy="24" r="6.5" fill={BRAND_COLORS.iconCircle} />
+
+      {/*
+        Bottom-right: a single filled "chunky arrow" pointing up. One
+        closed path traces the outline (stem + arrowhead) so the shape
+        reads as a single pointer, not three intersecting lines.
+
+        Path walk, counter-clockwise from the bottom-left of the stem:
+          22.5 30  → bottom-left of stem
+          22.5 23  → top-left of stem
+          19   23  → left base of arrowhead
+          24   18  → tip
+          29   23  → right base of arrowhead
+          25.5 23  → top-right of stem
+          25.5 30  → bottom-right of stem
+      */}
+      <path
+        d="M22.5 30 L22.5 23 L19 23 L24 18 L29 23 L25.5 23 L25.5 30 Z"
+        fill={BRAND_COLORS.iconArrow}
+        stroke={BRAND_COLORS.iconArrow}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
       />
     </svg>
   );

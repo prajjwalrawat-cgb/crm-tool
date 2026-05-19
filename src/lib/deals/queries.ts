@@ -80,6 +80,7 @@ type RawJoinedRow = {
   expectedCloseDate: string | null;
   closedAt: Date | null;
   ownerId: string | null;
+  probability: number | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -102,6 +103,7 @@ const DEALS_PROJECTION = {
   expectedCloseDate: deals.expectedCloseDate,
   closedAt: deals.closedAt,
   ownerId: deals.ownerId,
+  probability: deals.probability,
   createdAt: deals.createdAt,
   updatedAt: deals.updatedAt,
   deletedAt: deals.deletedAt,

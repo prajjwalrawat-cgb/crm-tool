@@ -78,6 +78,7 @@ export async function loadSerializedDeal(
       expectedCloseDate: deals.expectedCloseDate,
       closedAt: deals.closedAt,
       ownerId: deals.ownerId,
+      probability: deals.probability,
       createdAt: deals.createdAt,
       updatedAt: deals.updatedAt,
       deletedAt: deals.deletedAt,

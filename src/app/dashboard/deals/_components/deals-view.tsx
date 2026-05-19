@@ -183,6 +183,7 @@ export function DealsView({
       expectedCloseDate,
       closedAt,
       ownerId: base?.ownerId ?? null,
+      probability: base?.probability ?? null,
       createdAt: base?.createdAt ?? new Date(),
       updatedAt: new Date(),
       deletedAt: null,

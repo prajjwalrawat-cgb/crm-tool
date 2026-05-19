@@ -61,6 +61,14 @@ const REPORT_COLUMNS: Record<ReportId, { key: string; label: string }[]> = {
     { key: 'count', label: 'Count' },
     { key: 'retrySum', label: 'Retry sum' },
   ],
+  'revenue-forecast': [
+    { key: 'monthIso', label: 'Month' },
+    { key: 'monthLabel', label: 'Label' },
+    { key: 'dealCount', label: 'Deal count' },
+    { key: 'likelyMinor', label: 'Likely (minor units)' },
+    { key: 'bestCaseMinor', label: 'Best case (minor units)' },
+    { key: 'worstCaseMinor', label: 'Worst case (minor units)' },
+  ],
 };
 
 export async function buildReportCsvAction(input: {
