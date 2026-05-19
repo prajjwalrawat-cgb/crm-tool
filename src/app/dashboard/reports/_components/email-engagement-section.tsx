@@ -18,6 +18,8 @@ import type {
 } from '@/lib/reports/queries/email-engagement';
 import { cn } from '@/lib/utils';
 
+import { MetricCard } from '../../_components/metric-card';
+
 const STATUS_COLORS: Record<EmailEngagementRow['status'], string> = {
   sent: '#059669',
   delivered: '#10b981',
@@ -77,29 +79,47 @@ export function EmailEngagementSection({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <KpiTile
+        <MetricCard
           label="Delivered"
           value={`${successRatePct}%`}
           hint={`${sent + delivered} of ${total} attempts`}
-          tone={successRatePct >= 95 ? 'success' : successRatePct >= 80 ? 'warn' : 'danger'}
+          tone={
+            successRatePct >= 95
+              ? 'success'
+              : successRatePct >= 80
+                ? 'warning'
+                : 'danger'
+          }
         />
-        <KpiTile
+        <MetricCard
           label="Failed"
           value={formatNumber(failed)}
           hint={total > 0 ? `${Math.round((failed / total) * 100)}% of total` : '—'}
-          tone={failed === 0 ? 'success' : failed / total < 0.05 ? 'warn' : 'danger'}
+          tone={
+            failed === 0
+              ? 'success'
+              : failed / total < 0.05
+                ? 'warning'
+                : 'danger'
+          }
         />
-        <KpiTile
+        <MetricCard
           label="Retry rate"
           value={`${retryRatePct}%`}
           hint="Retries per attempt"
-          tone={retryRatePct < 5 ? 'success' : retryRatePct < 15 ? 'warn' : 'danger'}
+          tone={
+            retryRatePct < 5
+              ? 'success'
+              : retryRatePct < 15
+                ? 'warning'
+                : 'danger'
+          }
         />
-        <KpiTile
+        <MetricCard
           label="Volume"
           value={formatNumber(total)}
           hint="Total attempts"
-          tone="muted"
+          tone="neutral"
         />
       </div>
 
@@ -197,38 +217,5 @@ export function EmailEngagementSection({
   );
 }
 
-function KpiTile({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  tone: 'success' | 'warn' | 'danger' | 'muted';
-}) {
-  const toneClass: Record<typeof tone, string> = {
-    success: 'border-emerald-200 bg-emerald-50/40',
-    warn: 'border-amber-200 bg-amber-50/40',
-    danger: 'border-rose-200 bg-rose-50/40',
-    muted: 'border-slate-200 bg-white',
-  };
-  const valueTone: Record<typeof tone, string> = {
-    success: 'text-emerald-700',
-    warn: 'text-amber-800',
-    danger: 'text-rose-700',
-    muted: 'text-slate-900',
-  };
-  return (
-    <div className={cn('rounded-md border p-3', toneClass[tone])}>
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-        {label}
-      </div>
-      <div className={cn('mt-1 font-mono text-xl font-semibold tabular-nums', valueTone[tone])}>
-        {value}
-      </div>
-      <p className="mt-1 text-[10.5px] text-slate-500">{hint}</p>
-    </div>
-  );
-}
+// Local KpiTile removed — replaced by the shared <MetricCard /> primitive
+// in `app/dashboard/_components/metric-card.tsx`.

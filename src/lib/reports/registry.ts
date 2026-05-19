@@ -9,6 +9,10 @@ import {
   type PipelineByStageRow,
 } from './queries/pipeline-by-stage';
 import {
+  revenueForecastRunner,
+  type RevenueForecastRow,
+} from './queries/revenue-forecast';
+import {
   repPerformanceRunner,
   type RepPerformanceRow,
 } from './queries/rep-performance';
@@ -112,6 +116,17 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsOwnerScope: false,
     runner: emailEngagementRunner as ReportRunner<ReportFilter, unknown, unknown>,
   },
+  'revenue-forecast': {
+    title: 'Revenue forecast',
+    description:
+      'Weighted projection of expected revenue by close month. Likely / best case / worst case scenarios from active deals.',
+    category: 'forecast',
+    chart: 'area',
+    supportsCsv: true,
+    supportsDateRange: true,
+    supportsOwnerScope: false,
+    runner: revenueForecastRunner as ReportRunner<ReportFilter, unknown, unknown>,
+  },
 };
 
 export type ReportId =
@@ -119,7 +134,8 @@ export type ReportId =
   | 'win-loss-rate'
   | 'stale-deals'
   | 'rep-performance'
-  | 'email-engagement';
+  | 'email-engagement'
+  | 'revenue-forecast';
 
 /** The full registration including its id — handy for list rendering. */
 export type ReportRegistration = ReportRegistrationBase & { id: ReportId };
@@ -148,4 +164,5 @@ export type ReportRowMap = {
   'stale-deals': StaleDealsRow;
   'rep-performance': RepPerformanceRow;
   'email-engagement': EmailEngagementRow;
+  'revenue-forecast': RevenueForecastRow;
 };

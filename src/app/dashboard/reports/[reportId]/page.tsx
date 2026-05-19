@@ -15,6 +15,10 @@ import type {
 import type { PipelineByStageRow } from '@/lib/reports/queries/pipeline-by-stage';
 import type { RepPerformanceRow } from '@/lib/reports/queries/rep-performance';
 import type {
+  RevenueForecastExtras,
+  RevenueForecastRow,
+} from '@/lib/reports/queries/revenue-forecast';
+import type {
   StaleDealsExtras,
   StaleDealsRow,
 } from '@/lib/reports/queries/stale-deals';
@@ -38,6 +42,7 @@ import { EmailEngagementSection } from '../_components/email-engagement-section'
 import { PipelineByStageChart } from '../_components/pipeline-by-stage-chart';
 import { RepPerformanceSection } from '../_components/rep-performance-section';
 import { ReportFilterBar } from '../_components/report-filter-bar';
+import { RevenueForecastSection } from '../_components/revenue-forecast-section';
 import { StaleDealsSection } from '../_components/stale-deals-section';
 import { WinLossRateChart } from '../_components/win-loss-rate-chart';
 
@@ -222,6 +227,13 @@ function ReportBody({
         <EmailEngagementSection
           rows={result.rows as EmailEngagementRow[]}
           extras={result.extras as EmailEngagementExtras}
+        />
+      );
+    case 'revenue-forecast':
+      return (
+        <RevenueForecastSection
+          rows={result.rows as RevenueForecastRow[]}
+          extras={result.extras as RevenueForecastExtras}
         />
       );
     default: {

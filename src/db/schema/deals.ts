@@ -4,6 +4,7 @@ import {
   date,
   index,
   pgTable,
+  smallint,
   text,
   timestamp,
   uuid,
@@ -37,6 +38,13 @@ export const deals = pgTable(
     expectedCloseDate: date('expected_close_date'),
     closedAt: timestamp('closed_at', { withTimezone: true }),
     ownerId: text('owner_id'),
+    /**
+     * Forecast confidence 0–100. Defaults to a stage-derived value
+     * via migration 0015; can be overridden per-deal. NULL means the
+     * deal pre-dates the migration AND no override was set — treat
+     * as the stage default at query time.
+     */
+    probability: smallint('probability'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
