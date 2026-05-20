@@ -47,16 +47,38 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/*
+ * Dark palette — neutral grayscale, "true black" enterprise feel.
+ * Replaces an earlier blue-tinted palette (slate-* derived) per CP#16-hotfix.
+ * Reference visual targets: Linear, Vercel, Raycast, Notion.
+ *
+ * Layering depth conventions (avoid going darker than 0 or lighter than the
+ * elevated layer for any single surface):
+ *   --background  page chrome
+ *   --surface     cards
+ *   --elevated    drawers, hover states on cards
+ *   --hover       row hover, button hover
+ *   --border      default lines
+ *   --border-strong  focus / divider lines
+ *
+ * Accent (Saleinx purple) is unchanged. Foreground tokens drop the cool
+ * tint and use ZINC-derived grayscale so headings/body/muted text read
+ * neutrally even on pure black.
+ */
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --surface: #18181b;
-  --surface-muted: #27272a;
-  --border: #27272a;
-  --border-strong: #3f3f46;
+  --background: #000000;
+  --foreground: #fafafa;
+  --foreground-muted: #a1a1aa;
+  --foreground-subtle: #71717a;
+  --surface: #0a0a0a;
+  --surface-muted: #111111;
+  --elevated: #111111;
+  --hover: #181818;
+  --border: #1f1f1f;
+  --border-strong: #2a2a2a;
   --accent: #818cf8;
-  --accent-fg: #18181b;
-  --accent-soft: #1e1b4b;
+  --accent-fg: #0a0a0a;
+  --accent-soft: rgba(99, 102, 241, 0.12);
   --accent-soft-fg: #c7d2fe;
 }
 

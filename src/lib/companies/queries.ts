@@ -5,6 +5,7 @@ import { and, asc, desc, eq, ilike, isNotNull, isNull, sql } from 'drizzle-orm';
 import { companies, type Company } from '@/db/schema';
 import { type CompanyFilters } from '@/lib/companies/filters';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
+import { UUID_REGEX_LITERAL } from '@/lib/db-sql/safe-uuid';
 import {
   buildPage,
   type Cursor,
@@ -78,6 +79,7 @@ export async function listCompanies(
       SELECT 1 FROM activity_logs al
       WHERE al.tenant_id = ${tenantId}::uuid
         AND al.entity_type = 'company'
+        AND al.entity_id ~ ${sql.raw(`'${UUID_REGEX_LITERAL}'`)}
         AND al.entity_id::uuid = ${companies.id}
         AND al.created_at >= NOW() - (${f.recentActivityDays}::int * INTERVAL '1 day')
     )`);
@@ -93,6 +95,7 @@ export async function listCompanies(
       SELECT 1 FROM activity_logs al
       WHERE al.tenant_id = ${tenantId}::uuid
         AND al.entity_type = 'company'
+        AND al.entity_id ~ ${sql.raw(`'${UUID_REGEX_LITERAL}'`)}
         AND al.entity_id::uuid = ${companies.id}
         AND al.created_at >= NOW() - (${days}::int * INTERVAL '1 day')
     )`);
