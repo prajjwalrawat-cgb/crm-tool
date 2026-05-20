@@ -43,18 +43,18 @@ export function MetricCard({
   className?: string;
 }) {
   const toneClass: Record<MetricTone, string> = {
-    info: 'border-indigo-200 bg-indigo-50/30',
-    success: 'border-emerald-200 bg-emerald-50/30',
-    warning: 'border-amber-200 bg-amber-50/30',
-    danger: 'border-rose-200 bg-rose-50/30',
-    neutral: 'border-slate-200 bg-white',
+    info: 'border-indigo-200 bg-indigo-50/30 dark:border-indigo-500/30 dark:bg-indigo-500/10',
+    success: 'border-emerald-200 bg-emerald-50/30 dark:border-emerald-500/30 dark:bg-emerald-500/10',
+    warning: 'border-amber-200 bg-amber-50/30 dark:border-amber-500/30 dark:bg-amber-500/10',
+    danger: 'border-rose-200 bg-rose-50/30 dark:border-rose-500/30 dark:bg-rose-500/10',
+    neutral: 'border-slate-200 bg-white dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
   };
   const valueTone: Record<MetricTone, string> = {
-    info: 'text-indigo-700',
-    success: 'text-emerald-700',
-    warning: 'text-amber-800',
-    danger: 'text-rose-700',
-    neutral: 'text-slate-900',
+    info: 'text-indigo-700 dark:text-indigo-300',
+    success: 'text-emerald-700 dark:text-emerald-300',
+    warning: 'text-amber-800 dark:text-amber-300',
+    danger: 'text-rose-700 dark:text-rose-300',
+    neutral: 'text-slate-900 dark:text-[#FAFAFA]',
   };
 
   return (
@@ -66,7 +66,7 @@ export function MetricCard({
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
           {label}
         </span>
         {trend ?? null}
@@ -79,7 +79,7 @@ export function MetricCard({
       >
         {value}
       </div>
-      <div className="mt-1 truncate text-[10.5px] text-slate-500">
+      <div className="mt-1 truncate text-[10.5px] text-slate-500 dark:text-[#A1A1AA]">
         {hint ?? ' '}
       </div>
     </div>

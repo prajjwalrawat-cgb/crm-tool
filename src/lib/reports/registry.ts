@@ -1,6 +1,10 @@
 import 'server-only';
 
 import {
+  dealVelocityRunner,
+  type DealVelocityRow,
+} from './queries/deal-velocity';
+import {
   emailEngagementRunner,
   type EmailEngagementRow,
 } from './queries/email-engagement';
@@ -127,6 +131,17 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsOwnerScope: false,
     runner: revenueForecastRunner as ReportRunner<ReportFilter, unknown, unknown>,
   },
+  'deal-velocity': {
+    title: 'Deal velocity',
+    description:
+      'How long deals spend in each stage and how long they take to close. Highlights bottlenecks and fastest-moving stages.',
+    category: 'pipeline',
+    chart: 'bar',
+    supportsCsv: true,
+    supportsDateRange: true,
+    supportsOwnerScope: true,
+    runner: dealVelocityRunner as ReportRunner<ReportFilter, unknown, unknown>,
+  },
 };
 
 export type ReportId =
@@ -135,7 +150,8 @@ export type ReportId =
   | 'stale-deals'
   | 'rep-performance'
   | 'email-engagement'
-  | 'revenue-forecast';
+  | 'revenue-forecast'
+  | 'deal-velocity';
 
 /** The full registration including its id — handy for list rendering. */
 export type ReportRegistration = ReportRegistrationBase & { id: ReportId };
@@ -165,4 +181,5 @@ export type ReportRowMap = {
   'rep-performance': RepPerformanceRow;
   'email-engagement': EmailEngagementRow;
   'revenue-forecast': RevenueForecastRow;
+  'deal-velocity': DealVelocityRow;
 };

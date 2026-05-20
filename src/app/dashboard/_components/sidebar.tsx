@@ -41,7 +41,7 @@ function DesktopSidebar({
   return (
     <aside
       className={cn(
-        'hidden shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-200 ease-out md:flex',
+        'hidden shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-200 ease-out md:flex dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
         collapsed ? 'w-14' : 'w-[12.5rem]',
       )}
     >
@@ -60,14 +60,14 @@ function CollapseToggle({
   onToggle: () => void;
 }) {
   return (
-    <div className="border-t border-slate-200">
+    <div className="border-t border-slate-200 dark:border-[#1F1F1F]">
       <button
         type="button"
         onClick={onToggle}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         className={cn(
-          'flex w-full items-center gap-2 px-3 py-2 text-[11px] text-slate-500 transition hover:bg-slate-50 hover:text-slate-900',
+          'flex w-full items-center gap-2 px-3 py-2 text-[11px] text-slate-500 transition hover:bg-slate-50 hover:text-slate-900 dark:text-[#A1A1AA] dark:hover:bg-slate-800/60 dark:hover:text-slate-100',
           collapsed && 'justify-center px-0',
         )}
       >
@@ -113,7 +113,7 @@ function MobileSidebar({
       />
       <aside
         className={cn(
-          'absolute inset-y-0 left-0 flex w-72 flex-col border-r border-slate-200 bg-white shadow-xl transition-transform',
+          'absolute inset-y-0 left-0 flex w-72 flex-col border-r border-slate-200 bg-white shadow-xl transition-transform dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
       >
@@ -123,7 +123,7 @@ function MobileSidebar({
             type="button"
             onClick={onClose}
             aria-label="Close navigation"
-            className="rounded-md p-2 text-slate-500 hover:bg-slate-100"
+            className="rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:text-[#A1A1AA] dark:hover:bg-slate-800/60"
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -149,7 +149,7 @@ function Brand({
         'flex items-center gap-2 transition hover:opacity-90',
         inline
           ? 'pb-2'
-          : 'border-b border-slate-200 px-3 py-3',
+          : 'border-b border-slate-200 px-3 py-3 dark:border-[#1F1F1F]',
         collapsed && !inline && 'justify-center px-0',
       )}
     >
@@ -182,7 +182,7 @@ function NavList({
                   aria-disabled
                   title={collapsed ? `${item.label} (soon)` : undefined}
                   className={cn(
-                    'flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-slate-400',
+                    'flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-slate-400 dark:text-[#A1A1AA]',
                     collapsed && 'justify-center px-2',
                   )}
                 >
@@ -190,7 +190,7 @@ function NavList({
                   {!collapsed ? (
                     <>
                       <span className="flex-1">{item.label}</span>
-                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:bg-[#181818] dark:text-[#A1A1AA]">
                         Soon
                       </span>
                     </>
@@ -214,8 +214,8 @@ function NavList({
                   // than "SaaS product".
                   'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition',
                   active
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-[#A1A1AA] dark:hover:bg-slate-800/60 dark:hover:text-slate-100',
                   collapsed && 'justify-center px-2',
                 )}
               >

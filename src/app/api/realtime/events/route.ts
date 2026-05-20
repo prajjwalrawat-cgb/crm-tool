@@ -19,6 +19,7 @@ import {
   trackPresence,
   untrackPresence,
 } from '@/lib/realtime/presence';
+import { envelopesSince, recordEnvelope } from '@/lib/realtime/replay';
 import { getCurrentTenant } from '@/lib/tenant';
 
 // Force Node runtime: we hold a long-lived Postgres LISTEN connection per
@@ -102,9 +103,18 @@ async function handleSseConnection(request: NextRequest): Promise<Response> {
         }
       };
 
-      const sendData = (data: string) => {
+      const sendData = (data: string, envelopeId?: string) => {
         // Multi-line payloads must be prefixed per SSE spec; JSON is
         // single-line so a single `data:` frame is fine.
+        //
+        // We prefix each frame with `id: <envelopeId>` when available
+        // so the native EventSource client tracks it as `lastEventId`
+        // and sends it back in the `Last-Event-ID` header on reconnect.
+        // The server-side replay buffer (src/lib/realtime/replay.ts)
+        // uses that id to ship missed envelopes.
+        if (envelopeId) {
+          safeEnqueue(encoder.encode(`id: ${envelopeId}\n`));
+        }
         safeEnqueue(encoder.encode(`data: ${data}\n\n`));
       };
 
@@ -149,6 +159,18 @@ async function handleSseConnection(request: NextRequest): Promise<Response> {
       });
 
       try {
+        // Replay events the client missed while disconnected. Native
+        // EventSource sends its tracked last id as the `Last-Event-ID`
+        // header on reconnect — we use it to slice the per-process ring.
+        const lastEventId = request.headers.get('last-event-id');
+        const missed = envelopesSince(tenant.id, lastEventId);
+        if (missed.length > 0) {
+          incr('realtime.replayed', missed.length, { tenantId: tenant.id });
+          for (const env of missed) {
+            sendData(JSON.stringify(env), env.id);
+          }
+        }
+
         // Send the current presence snapshot up-front so the UI doesn't
         // have to wait for a NOTIFY round-trip on first paint.
         const initialPresence: RealtimeEnvelope = {
@@ -160,13 +182,23 @@ async function handleSseConnection(request: NextRequest): Promise<Response> {
             members: getPresenceSnapshot(tenant.id),
           },
         };
-        sendData(JSON.stringify(initialPresence));
+        sendData(JSON.stringify(initialPresence), initialPresence.id);
 
         // Subscribe to the tenant channel. The callback fires for every
         // pg_notify on this channel for the lifetime of the connection.
         listenHandle = await pgClient.listen(channel, (payload) => {
           incr('realtime.events_dispatched', 1, { tenantId: tenant.id });
-          sendData(payload);
+          // Parse to capture envelope id; the ring buffer needs structured
+          // data and the SSE frame needs the id for client lastEventId
+          // tracking. Malformed payloads are stamped without an id and
+          // skip the buffer.
+          try {
+            const env = JSON.parse(payload) as RealtimeEnvelope;
+            recordEnvelope(env);
+            sendData(payload, env.id);
+          } catch {
+            sendData(payload);
+          }
         });
 
         // Track this user in presence and broadcast the snapshot to others.

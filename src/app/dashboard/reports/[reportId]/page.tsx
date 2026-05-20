@@ -9,6 +9,10 @@ import {
   type ReportId,
 } from '@/lib/reports/registry';
 import type {
+  DealVelocityExtras,
+  DealVelocityRow,
+} from '@/lib/reports/queries/deal-velocity';
+import type {
   EmailEngagementExtras,
   EmailEngagementRow,
 } from '@/lib/reports/queries/email-engagement';
@@ -38,6 +42,7 @@ import type {
 import { cn } from '@/lib/utils';
 
 import { CsvDownloadButton } from '../_components/csv-download-button';
+import { DealVelocitySection } from '../_components/deal-velocity-section';
 import { EmailEngagementSection } from '../_components/email-engagement-section';
 import { PipelineByStageChart } from '../_components/pipeline-by-stage-chart';
 import { RepPerformanceSection } from '../_components/rep-performance-section';
@@ -234,6 +239,13 @@ function ReportBody({
         <RevenueForecastSection
           rows={result.rows as RevenueForecastRow[]}
           extras={result.extras as RevenueForecastExtras}
+        />
+      );
+    case 'deal-velocity':
+      return (
+        <DealVelocitySection
+          rows={result.rows as DealVelocityRow[]}
+          extras={result.extras as DealVelocityExtras}
         />
       );
     default: {

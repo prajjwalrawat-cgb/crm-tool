@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { companies, contacts, deals, type Deal } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
+import { recordObservation } from '@/lib/agents/observations/record';
 import { checkPermission } from '@/lib/auth-guard';
 import { sendAutomatedEmailSafe } from '@/lib/email/automation';
 import { recordNotificationSafe } from '@/lib/notifications/recorder';
@@ -481,6 +482,37 @@ export async function updateDealStageAction(
             from: previous.stage,
             to: updated.stage,
           },
+        });
+
+        // Agent learning hook: emit an observation so future
+        // followup_timing / velocity / outcome derivations can train
+        // on real workflow signal. The observation rolls back with
+        // the parent transaction if the stage update is aborted.
+        //
+        // outcome_score is filled only on terminal stages: +1 for
+        // won (reinforces the path that led here), -1 for lost.
+        // Intermediate stage transitions have no outcome yet.
+        const terminalOutcome =
+          parsed.data.stage === 'won'
+            ? 1
+            : parsed.data.stage === 'lost'
+              ? -1
+              : undefined;
+        await recordObservation(tx, tenant.id, membership.userId, {
+          observationType:
+            parsed.data.stage === 'won'
+              ? 'deal.won'
+              : parsed.data.stage === 'lost'
+                ? 'deal.lost'
+                : 'deal.stage_changed',
+          entityType: 'deal',
+          entityId: updated.id,
+          metadata: {
+            name: updated.name,
+            from: previous.stage,
+            to: updated.stage,
+          },
+          outcomeScore: terminalOutcome,
         });
 
         const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
