@@ -3,7 +3,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { withTenantSession } from '@/lib/auth-guard';
+import {
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import { formatDateTime, formatNumber } from '@/lib/dates/format';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import {
   getReport,
   type ReportId,
@@ -96,9 +101,10 @@ export default async function ReportDetailPage({
       ownerParam === 'mine' ? { type: 'mine' } : { type: 'all' };
     const filter: ReportFilter = { range: rangePreset, owner };
 
-    const result = await report.runner(tenant.id, filter, {
-      currentUserId: userId,
-    });
+    const [result, settings] = await Promise.all([
+      report.runner(tenant.id, filter, { currentUserId: userId }),
+      getOrgSettings(tenant.id),
+    ]);
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -148,7 +154,12 @@ export default async function ReportDetailPage({
           ) : null}
         </section>
 
-        <ReportBody reportId={report.id} result={result} mode={modeParam} />
+        <ReportBody
+          reportId={report.id}
+          result={result}
+          mode={modeParam}
+          currency={settings}
+        />
 
         <footer className="mt-4 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
           <span>
@@ -179,10 +190,12 @@ function ReportBody({
   reportId,
   result,
   mode,
+  currency,
 }: {
   reportId: ReportId;
   result: { rows: unknown[]; extras?: unknown };
   mode: 'count' | 'amount';
+  currency: TenantCurrencyContext;
 }): React.ReactNode {
   switch (reportId) {
     case 'pipeline-by-stage':
@@ -192,10 +205,14 @@ function ReportBody({
             <PipelineByStageChart
               rows={result.rows as PipelineByStageRow[]}
               mode={mode}
+              currency={currency}
             />
           </section>
           <section className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-            <PipelineByStageTable rows={result.rows as PipelineByStageRow[]} />
+            <PipelineByStageTable
+              rows={result.rows as PipelineByStageRow[]}
+              currency={currency}
+            />
           </section>
         </>
       );
@@ -206,12 +223,14 @@ function ReportBody({
             <WinLossRateChart
               rows={result.rows as WinLossRateRow[]}
               mode={mode}
+              currency={currency}
             />
           </section>
           <section className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
             <WinLossRateTable
               rows={result.rows as WinLossRateRow[]}
               extras={result.extras as WinLossRateExtras | undefined}
+              currency={currency}
             />
           </section>
         </>
@@ -221,11 +240,15 @@ function ReportBody({
         <StaleDealsSection
           rows={result.rows as StaleDealsRow[]}
           extras={result.extras as StaleDealsExtras}
+          currency={currency}
         />
       );
     case 'rep-performance':
       return (
-        <RepPerformanceSection rows={result.rows as RepPerformanceRow[]} />
+        <RepPerformanceSection
+          rows={result.rows as RepPerformanceRow[]}
+          currency={currency}
+        />
       );
     case 'email-engagement':
       return (
@@ -239,6 +262,7 @@ function ReportBody({
         <RevenueForecastSection
           rows={result.rows as RevenueForecastRow[]}
           extras={result.extras as RevenueForecastExtras}
+          currency={currency}
         />
       );
     case 'deal-velocity':
@@ -256,7 +280,13 @@ function ReportBody({
   }
 }
 
-function PipelineByStageTable({ rows }: { rows: PipelineByStageRow[] }) {
+function PipelineByStageTable({
+  rows,
+  currency,
+}: {
+  rows: PipelineByStageRow[];
+  currency: TenantCurrencyContext;
+}) {
   return (
     <table className="min-w-full divide-y divide-slate-100 text-[13px]">
       <thead className="bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500">
@@ -280,7 +310,7 @@ function PipelineByStageTable({ rows }: { rows: PipelineByStageRow[] }) {
               {formatNumber(row.count)}
             </td>
             <td className="px-3 py-2 text-right font-mono tabular-nums">
-              ${formatNumber(Math.round(row.totalAmountMinor / 100))}
+              {formatTenantCurrency(row.totalAmountMinor, currency)}
             </td>
           </tr>
         ))}
@@ -292,9 +322,11 @@ function PipelineByStageTable({ rows }: { rows: PipelineByStageRow[] }) {
 function WinLossRateTable({
   rows,
   extras,
+  currency,
 }: {
   rows: WinLossRateRow[];
   extras: WinLossRateExtras | undefined;
+  currency: TenantCurrencyContext;
 }) {
   const won = rows.find((r) => r.stage === 'won')?.count ?? 0;
   const lost = rows.find((r) => r.stage === 'lost')?.count ?? 0;
@@ -316,7 +348,7 @@ function WinLossRateTable({
               {formatNumber(row.count)}
             </td>
             <td className="px-3 py-2 text-right font-mono tabular-nums">
-              ${formatNumber(Math.round(row.revenueMinor / 100))}
+              {formatTenantCurrency(row.revenueMinor, currency)}
             </td>
           </tr>
         ))}

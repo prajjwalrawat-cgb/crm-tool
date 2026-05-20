@@ -6,6 +6,7 @@ import { hashContent } from '@/lib/ai/embed';
 import { AI_MODELS } from '@/lib/ai/openai';
 import { listPatternsByType } from '@/lib/agents/patterns/queries';
 import { applyLearnedBoost } from '@/lib/agents/scoring/boost';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 import { db } from '@/db';
 
@@ -181,7 +182,7 @@ async function regenDailyExec(args: {
         userContent: args.source,
         insightType: 'daily-exec',
       })
-    : generateMockDailyExec(JSON.parse(args.source));
+    : generateMockDailyExec(JSON.parse(args.source), await getOrgSettings(args.tenantId));
   if (!summary) return;
   await persistAndAnnounce({
     tenantId: args.tenantId,
@@ -207,7 +208,7 @@ async function regenDealSummary(args: {
         userContent: args.source,
         insightType: 'deal-summary',
       })
-    : generateMockDealSummary(JSON.parse(args.source));
+    : generateMockDealSummary(JSON.parse(args.source), await getOrgSettings(args.tenantId));
   if (!summary) return;
   await persistAndAnnounce({
     tenantId: args.tenantId,
@@ -363,7 +364,7 @@ async function regenPipelineSummary(args: {
         userContent: args.source,
         insightType: 'pipeline-summary',
       })
-    : generateMockPipelineSummary(JSON.parse(args.source));
+    : generateMockPipelineSummary(JSON.parse(args.source), await getOrgSettings(args.tenantId));
   if (!result) return;
   await persistAndAnnounce({
     tenantId: args.tenantId,

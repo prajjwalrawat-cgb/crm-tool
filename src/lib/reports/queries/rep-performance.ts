@@ -2,7 +2,9 @@ import 'server-only';
 
 import { sql } from 'drizzle-orm';
 
+import { formatTenantCurrency } from '@/lib/currency/format';
 import { tenantTransaction } from '@/lib/db-context';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import { listTeammates, type Teammate } from '@/lib/teammates/queries';
 
 import { resolveDateRange } from '../filters';
@@ -198,7 +200,10 @@ export const repPerformanceRunner: ReportRunner<
       totalCount: rows.length,
       headline: {
         label: `${rows.length} reps`,
-        value: `$${Math.round(totalRevenueMinor / 100).toLocaleString('en-US')}`,
+        value: formatTenantCurrency(
+          totalRevenueMinor,
+          await getOrgSettings(tenantId),
+        ),
       },
     },
   };

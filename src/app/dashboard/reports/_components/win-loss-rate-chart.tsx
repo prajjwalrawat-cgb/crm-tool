@@ -11,6 +11,10 @@ import {
   YAxis,
 } from 'recharts';
 
+import {
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import { formatNumber } from '@/lib/dates/format';
 import type { WinLossRateRow } from '@/lib/reports/queries/win-loss-rate';
 
@@ -27,9 +31,11 @@ const STAGE_COLORS: Record<'won' | 'lost', string> = {
 export function WinLossRateChart({
   rows,
   mode,
+  currency,
 }: {
   rows: WinLossRateRow[];
   mode: 'count' | 'amount';
+  currency: TenantCurrencyContext;
 }) {
   const data = rows.map((r) => ({
     stage: r.stage === 'won' ? 'Won' : 'Lost',
@@ -56,7 +62,7 @@ export function WinLossRateChart({
             axisLine={false}
             fontSize={11}
             tickFormatter={(v: number) =>
-              mode === 'amount' ? `$${formatNumber(v)}` : formatNumber(v)
+              mode === 'amount' ? formatTenantCurrency(v * 100, currency) : formatNumber(v)
             }
           />
           <Tooltip
@@ -69,7 +75,7 @@ export function WinLossRateChart({
             formatter={(value) => {
               const num = typeof value === 'number' ? value : Number(value ?? 0);
               return mode === 'amount'
-                ? [`$${formatNumber(num)}`, 'Revenue']
+                ? [formatTenantCurrency(num * 100, currency), 'Revenue']
                 : [formatNumber(num), 'Deals'];
             }}
           />

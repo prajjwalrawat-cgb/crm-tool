@@ -2,8 +2,10 @@ import { Sparkles } from 'lucide-react';
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { getAIMode } from '@/lib/ai/config';
+import { formatCompactTenantCurrency, formatTenantCurrency } from '@/lib/currency/format';
 import { formatDate, formatNumber } from '@/lib/dates/format';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import {
   getDailyExecInsight,
   getRecommendationInsight,
@@ -59,6 +61,11 @@ export default async function ExecutiveDashboardPage() {
 
     const today = new Date().toISOString().slice(0, 10);
     const aiMode = getAIMode();
+    const settings = await getOrgSettings(tenant.id);
+    const money = (amountMinor: number) =>
+      settings.compactNumbers
+        ? formatCompactTenantCurrency(amountMinor, settings)
+        : formatTenantCurrency(amountMinor, settings);
     const [
       pipeline,
       winLoss,
@@ -140,7 +147,7 @@ export default async function ExecutiveDashboardPage() {
               <DashboardGridCell span={3}>
                 <InsightCard
                   label="Won revenue"
-                  value={`$${formatNumber(Math.round(wonRevenueMinor / 100))}`}
+                  value={money(wonRevenueMinor)}
                   hint={`From ${pipeline.rows.find((r) => r.stage === 'won')?.count ?? 0} closed deals (90d)`}
                   tone="success"
                   href="/dashboard/reports/win-loss-rate"
@@ -149,7 +156,7 @@ export default async function ExecutiveDashboardPage() {
               <DashboardGridCell span={3}>
                 <InsightCard
                   label="Likely forecast"
-                  value={`$${formatNumber(Math.round((forecast.extras?.totalLikelyMinor ?? 0) / 100))}`}
+                  value={money(forecast.extras?.totalLikelyMinor ?? 0)}
                   hint={`${forecast.extras?.totalDeals ?? 0} open deals · ${Math.round((forecast.extras?.avgConfidence ?? 0) * 100)}% avg confidence`}
                   tone="info"
                   href="/dashboard/reports/revenue-forecast"
@@ -158,7 +165,7 @@ export default async function ExecutiveDashboardPage() {
               <DashboardGridCell span={3}>
                 <InsightCard
                   label="Best case"
-                  value={`$${formatNumber(Math.round((forecast.extras?.totalBestCaseMinor ?? 0) / 100))}`}
+                  value={money(forecast.extras?.totalBestCaseMinor ?? 0)}
                   hint="If every open deal closes"
                   tone="success"
                 />
@@ -190,7 +197,7 @@ export default async function ExecutiveDashboardPage() {
               <DashboardGridCell span={4}>
                 <MetricCard
                   label="Pipeline value"
-                  value={`$${formatNumber(Math.round(totalPipelineMinor / 100))}`}
+                  value={money(totalPipelineMinor)}
                   hint={`Across ${pipeline.rows
                     .filter((r) => r.stage !== 'won' && r.stage !== 'lost')
                     .reduce((s, r) => s + r.count, 0)} active deals`}
@@ -204,7 +211,7 @@ export default async function ExecutiveDashboardPage() {
                     <MetricCard
                       label={row.stageLabel}
                       value={formatNumber(row.count)}
-                      hint={`$${formatNumber(Math.round(row.totalAmountMinor / 100))} in this stage`}
+                      hint={`${money(row.totalAmountMinor)} in this stage`}
                       tone="neutral"
                     />
                   </DashboardGridCell>
@@ -234,7 +241,7 @@ export default async function ExecutiveDashboardPage() {
                             </span>
                           }
                           detail={`${rep.wonCount} won · ${rep.lostCount} lost · ${Math.round(rep.winRate * 100)}% win rate`}
-                          meta={`$${formatNumber(Math.round(rep.revenueMinor / 100))}`}
+                          meta={money(rep.revenueMinor)}
                           severity="info"
                         />
                       ))}
@@ -364,7 +371,7 @@ export default async function ExecutiveDashboardPage() {
                           ? ` · ${row.daysSinceStageChange}d in stage`
                           : ''
                       }`}
-                      meta={`$${formatNumber(Math.round(row.amountMinor / 100))}`}
+                      meta={money(row.amountMinor)}
                       severity={
                         row.severity === 'critical'
                           ? 'danger'

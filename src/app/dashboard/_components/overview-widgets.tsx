@@ -9,8 +9,12 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+import {
+  formatCompactTenantCurrency,
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import type { DashboardOverview } from '@/lib/dashboard/queries';
-import { formatCurrency } from '@/lib/deals/currency';
 import { type DealStage, DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { cn } from '@/lib/utils';
 
@@ -19,7 +23,16 @@ import { cn } from '@/lib/utils';
  * active pipeline value, won (30d), lost (30d). Tile content is dense
  * but breathable: small label, big numeric, subtle icon.
  */
-export function KpiStrip({ overview }: { overview: DashboardOverview }) {
+export function KpiStrip({
+  overview,
+  settings,
+}: {
+  overview: DashboardOverview;
+  settings: TenantCurrencyContext & { compactNumbers: boolean };
+}) {
+  const renderMoney = settings.compactNumbers
+    ? formatCompactTenantCurrency
+    : formatTenantCurrency;
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
       <KpiTile
@@ -46,7 +59,7 @@ export function KpiStrip({ overview }: { overview: DashboardOverview }) {
       <KpiTile
         href="/dashboard/deals"
         label="Pipeline value"
-        value={formatCurrency(overview.pipelineMinor, overview.pipelineCurrency)}
+        value={renderMoney(overview.pipelineMinor, settings)}
         icon={<TrendingUp className="h-3.5 w-3.5" aria-hidden />}
         mono
         accent="violet"

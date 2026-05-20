@@ -10,6 +10,10 @@ import {
   YAxis,
 } from 'recharts';
 
+import {
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import { formatNumber } from '@/lib/dates/format';
 import type { RepPerformanceRow } from '@/lib/reports/queries/rep-performance';
 import { cn } from '@/lib/utils';
@@ -24,8 +28,10 @@ import { cn } from '@/lib/utils';
  */
 export function RepPerformanceSection({
   rows,
+  currency,
 }: {
   rows: RepPerformanceRow[];
+  currency: TenantCurrencyContext;
 }) {
   if (rows.length === 0) {
     return (
@@ -69,7 +75,7 @@ export function RepPerformanceSection({
                 tickLine={false}
                 axisLine={false}
                 fontSize={11}
-                tickFormatter={(v: number) => `$${formatNumber(v)}`}
+                tickFormatter={(v: number) => formatTenantCurrency(v * 100, currency)}
               />
               <Tooltip
                 cursor={{ fill: '#f1f5f9' }}
@@ -80,7 +86,7 @@ export function RepPerformanceSection({
                 }}
                 formatter={(value) => {
                   const num = typeof value === 'number' ? value : Number(value ?? 0);
-                  return [`$${formatNumber(num)}`, 'Revenue'];
+                  return [formatTenantCurrency(num * 100, currency), 'Revenue'];
                 }}
                 labelFormatter={(_v, payload) => {
                   const item = payload?.[0]?.payload as
@@ -112,7 +118,12 @@ export function RepPerformanceSection({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((row, idx) => (
-              <RepRow key={row.ownerId} row={row} rank={idx + 1} />
+              <RepRow
+                key={row.ownerId}
+                row={row}
+                rank={idx + 1}
+                currency={currency}
+              />
             ))}
           </tbody>
         </table>
@@ -124,9 +135,11 @@ export function RepPerformanceSection({
 function RepRow({
   row,
   rank,
+  currency,
 }: {
   row: RepPerformanceRow;
   rank: number;
+  currency: TenantCurrencyContext;
 }) {
   const winPct = Math.round(row.winRate * 100);
   return (
@@ -161,7 +174,7 @@ function RepRow({
         </div>
       </td>
       <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-900">
-        ${formatNumber(Math.round(row.revenueMinor / 100))}
+        {formatTenantCurrency(row.revenueMinor, currency)}
       </td>
       <td className="px-3 py-2 text-right font-mono tabular-nums text-emerald-700">
         {row.wonCount}
@@ -186,7 +199,7 @@ function RepRow({
       <td className="hidden px-3 py-2 text-right font-mono tabular-nums text-slate-700 md:table-cell">
         {row.wonCount === 0
           ? '—'
-          : `$${formatNumber(Math.round(row.avgWonAmountMinor / 100))}`}
+          : formatTenantCurrency(row.avgWonAmountMinor, currency)}
       </td>
       <td className="hidden px-3 py-2 text-right font-mono tabular-nums text-slate-700 lg:table-cell">
         {formatNumber(row.activityCount)}

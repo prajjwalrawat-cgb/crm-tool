@@ -1,5 +1,10 @@
 import 'server-only';
 
+import {
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
+
 import type {
   DailyExecSummary,
   DealAiSummary,
@@ -28,18 +33,19 @@ const MOCK_NOTICE = '(mock)';
 
 export function generateMockDailyExec(
   payload: DailyExecSourcePayload,
+  ctx: TenantCurrencyContext,
 ): DailyExecSummary {
   const won = payload.closed.find((c) => c.stage === 'won');
   const lost = payload.closed.find((c) => c.stage === 'lost');
-  const wonTotal = won ? Math.round(won.total / 100) : 0;
+  const money = (minor: number) => formatTenantCurrency(minor, ctx);
   const lostCount = lost?.count ?? 0;
 
   const bullets: string[] = [
-    `Active pipeline: ${payload.activeCount} deals, $${formatNumber(Math.round(payload.pipelineTotal / 100))} total.`,
+    `Active pipeline: ${payload.activeCount} deals, ${money(payload.pipelineTotal)} total.`,
   ];
   if (won) {
     bullets.push(
-      `${won.count} deals won this week — $${formatNumber(wonTotal)} closed revenue.`,
+      `${won.count} deals won this week — ${money(won.total)} closed revenue.`,
     );
   }
   if (lost) {
@@ -56,7 +62,7 @@ export function generateMockDailyExec(
 
   const headline =
     won && won.count > 0
-      ? `Pipeline closed $${formatNumber(wonTotal)} this week.`
+      ? `Pipeline closed ${money(won.total)} this week.`
       : `Pipeline holding at ${payload.activeCount} active deals.`;
 
   return {
@@ -75,15 +81,15 @@ export function generateMockDailyExec(
 
 export function generateMockDealSummary(
   payload: { deal: { stage: string; amount_minor: number; probability: number | null }; activities: unknown[]; emails: unknown[]; tasks: unknown[] },
+  ctx: TenantCurrencyContext,
 ): DealAiSummary {
   const stage = payload.deal.stage;
-  const amount = Math.round(payload.deal.amount_minor / 100);
   const activityCount = payload.activities.length;
   const emailCount = payload.emails.length;
   const taskCount = payload.tasks.length;
 
   return {
-    narrative: `Deal is in ${stage} at $${formatNumber(amount)}. ${activityCount} recent activity events, ${emailCount} emails logged. ${MOCK_NOTICE}`,
+    narrative: `Deal is in ${stage} at ${formatTenantCurrency(payload.deal.amount_minor, ctx)}. ${activityCount} recent activity events, ${emailCount} emails logged. ${MOCK_NOTICE}`,
     risks: activityCount === 0 ? ['No activity logged on this deal yet'] : [],
     nextActions: [
       emailCount === 0 ? 'Send an initial outreach email' : 'Send a follow-up email',
@@ -166,7 +172,9 @@ export function generateMockRecommendations(
 
 export function generateMockPipelineSummary(
   payload: PipelineSummarySourcePayload,
+  ctx: TenantCurrencyContext,
 ): PipelineSummary {
+  const money = (minor: number) => formatTenantCurrency(minor, ctx);
   const active = payload.perStage.filter(
     (s) => s.stage !== 'won' && s.stage !== 'lost',
   );
@@ -191,15 +199,10 @@ export function generateMockPipelineSummary(
   }
 
   return {
-    headline: `${totalActive} active deals worth $${formatNumber(Math.round(totalValueMinor / 100))}.`,
+    headline: `${totalActive} active deals worth ${money(totalValueMinor)}.`,
     bullets: active.map(
-      (s) =>
-        `${s.stage}: ${s.count} deals, $${formatNumber(Math.round(s.totalAmountMinor / 100))}.`,
+      (s) => `${s.stage}: ${s.count} deals, ${money(s.totalAmountMinor)}.`,
     ),
     bottlenecks,
   };
-}
-
-function formatNumber(n: number): string {
-  return n.toLocaleString('en-US');
 }

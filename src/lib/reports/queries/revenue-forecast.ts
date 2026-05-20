@@ -2,7 +2,9 @@ import 'server-only';
 
 import { sql } from 'drizzle-orm';
 
+import { formatTenantCurrency } from '@/lib/currency/format';
 import { tenantTransaction } from '@/lib/db-context';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 
 import { resolveDateRange } from '../filters';
 import type { ReportFilter, ReportRunner } from '../types';
@@ -210,7 +212,7 @@ export const revenueForecastRunner: ReportRunner<
         value:
           totals.deals === 0
             ? '—'
-            : `$${Math.round(totals.likely / 100).toLocaleString('en-US')} likely`,
+            : `${formatTenantCurrency(totals.likely, await getOrgSettings(tenantId))} likely`,
       },
     },
   };

@@ -3,8 +3,10 @@ import 'server-only';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import { deals } from '@/db/schema';
+import { formatTenantCurrency } from '@/lib/currency/format';
 import { tenantTransaction } from '@/lib/db-context';
 import { type DealStage, DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 
 import type { OwnerScope, ReportFilter, ReportRunner } from '../types';
 
@@ -80,6 +82,7 @@ export const pipelineByStageRunner: ReportRunner<
 
   const totalCount = ordered.reduce((s, r) => s + r.count, 0);
   const totalAmountMinor = ordered.reduce((s, r) => s + r.totalAmountMinor, 0);
+  const settings = await getOrgSettings(tenantId);
 
   return {
     rows: ordered,
@@ -89,10 +92,7 @@ export const pipelineByStageRunner: ReportRunner<
       totalCount,
       headline: {
         label: `${totalCount} deals`,
-        // Format in major units, no currency symbol — different currencies
-        // across deals; the headline is a coarse health signal, not a
-        // ledger total. UI can render with locale formatter.
-        value: `$${Math.round(totalAmountMinor / 100).toLocaleString('en-US')}`,
+        value: formatTenantCurrency(totalAmountMinor, settings),
       },
     },
   };

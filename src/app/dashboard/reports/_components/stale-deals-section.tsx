@@ -3,6 +3,10 @@
 import { AlertTriangle, Mail, Workflow, Zap } from 'lucide-react';
 import Link from 'next/link';
 
+import {
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import { formatDateShort, formatNumber } from '@/lib/dates/format';
 import { DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/schema';
 import type {
@@ -34,9 +38,11 @@ const SEVERITY_LABEL: Record<StaleSeverity, string> = {
 export function StaleDealsSection({
   rows,
   extras,
+  currency,
 }: {
   rows: StaleDealsRow[];
   extras: StaleDealsExtras;
+  currency: TenantCurrencyContext;
 }) {
   const buckets: StaleSeverity[] = ['critical', 'stale', 'watch', 'ok'];
 
@@ -122,7 +128,7 @@ export function StaleDealsSection({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((row) => (
-                <StaleDealRow key={row.dealId} row={row} />
+                <StaleDealRow key={row.dealId} row={row} currency={currency} />
               ))}
             </tbody>
           </table>
@@ -132,7 +138,13 @@ export function StaleDealsSection({
   );
 }
 
-function StaleDealRow({ row }: { row: StaleDealsRow }) {
+function StaleDealRow({
+  row,
+  currency,
+}: {
+  row: StaleDealsRow;
+  currency: TenantCurrencyContext;
+}) {
   return (
     <tr className="transition-colors hover:bg-slate-50/70">
       <td className="px-3 py-2">
@@ -157,7 +169,7 @@ function StaleDealRow({ row }: { row: StaleDealsRow }) {
         {DEAL_STAGE_LABELS[row.stage as DealStage] ?? row.stage}
       </td>
       <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-700">
-        ${formatNumber(Math.round(row.amountMinor / 100))}
+        {formatTenantCurrency(row.amountMinor, currency)}
       </td>
       <td className="hidden px-3 py-2 md:table-cell">
         <SignalBadges row={row} />

@@ -3,6 +3,7 @@ import Link from 'next/link';
 
 import { listRecentActivity } from '@/lib/activity/queries';
 import { withTenantSession } from '@/lib/auth-guard';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import {
   getDashboardOverview,
   getPipelineCreatedTrend,
@@ -55,6 +56,7 @@ export default async function DashboardPage() {
       recentWins,
       workflowHealth,
       myTasks,
+      settings,
     ] = await Promise.all([
       currentUser(),
       ensureMembership(),
@@ -70,6 +72,7 @@ export default async function DashboardPage() {
       getRecentWins(tenant.id, 5),
       getWorkflowHealth(tenant.id, 7),
       getMyTasksSummary(tenant.id, userId),
+      getOrgSettings(tenant.id),
     ]);
 
     const canCreate = canManageCompanies(membership?.role ?? null);
@@ -95,7 +98,7 @@ export default async function DashboardPage() {
           </div>
         </header>
 
-        <KpiStrip overview={overview} />
+        <KpiStrip overview={overview} settings={settings} />
 
         <div className="mt-3 grid gap-3 lg:grid-cols-3">
           <div className="lg:col-span-2">

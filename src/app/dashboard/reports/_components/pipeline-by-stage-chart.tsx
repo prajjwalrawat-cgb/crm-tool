@@ -10,8 +10,12 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { PipelineByStageRow } from '@/lib/reports/queries/pipeline-by-stage';
+import {
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import { formatNumber } from '@/lib/dates/format';
+import type { PipelineByStageRow } from '@/lib/reports/queries/pipeline-by-stage';
 
 /**
  * Bar chart for pipeline by stage. Two visual modes selectable by the
@@ -25,9 +29,11 @@ import { formatNumber } from '@/lib/dates/format';
 export function PipelineByStageChart({
   rows,
   mode,
+  currency,
 }: {
   rows: PipelineByStageRow[];
   mode: 'count' | 'amount';
+  currency: TenantCurrencyContext;
 }) {
   const data = rows.map((r) => ({
     stage: r.stageLabel,
@@ -56,7 +62,9 @@ export function PipelineByStageChart({
             axisLine={false}
             fontSize={11}
             tickFormatter={(v: number) =>
-              mode === 'amount' ? `$${formatNumber(v)}` : formatNumber(v)
+              mode === 'amount'
+                ? formatTenantCurrency(v * 100, currency)
+                : formatNumber(v)
             }
           />
           <Tooltip
@@ -69,7 +77,7 @@ export function PipelineByStageChart({
             formatter={(value) => {
               const num = typeof value === 'number' ? value : Number(value ?? 0);
               return mode === 'amount'
-                ? [`$${formatNumber(num)}`, 'Total value']
+                ? [formatTenantCurrency(num * 100, currency), 'Total value']
                 : [formatNumber(num), 'Deal count'];
             }}
           />

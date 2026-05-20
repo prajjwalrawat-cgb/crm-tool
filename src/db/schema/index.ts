@@ -25,3 +25,5 @@ export * from './communication-analytics';
 export * from './agent-observations';
 export * from './agent-patterns';
 export * from './agent-recommendation-feedback';
+export * from './organization-settings';
+export * from './relationship-signals';

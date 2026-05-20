@@ -11,6 +11,10 @@ import {
   YAxis,
 } from 'recharts';
 
+import {
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import { formatNumber } from '@/lib/dates/format';
 import type {
   RevenueForecastExtras,
@@ -33,10 +37,13 @@ import { MetricCard } from '../../_components/metric-card';
 export function RevenueForecastSection({
   rows,
   extras,
+  currency,
 }: {
   rows: RevenueForecastRow[];
   extras: RevenueForecastExtras;
+  currency: TenantCurrencyContext;
 }) {
+  const money = (minor: number) => formatTenantCurrency(minor, currency);
   if (rows.length === 0 || extras.totalDeals === 0) {
     return (
       <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center text-[12.5px] text-slate-500">
@@ -60,19 +67,19 @@ export function RevenueForecastSection({
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard
           label="Likely"
-          value={`$${formatNumber(Math.round(extras.totalLikelyMinor / 100))}`}
+          value={money(extras.totalLikelyMinor)}
           hint="Weighted forecast"
           tone="info"
         />
         <MetricCard
           label="Best case"
-          value={`$${formatNumber(Math.round(extras.totalBestCaseMinor / 100))}`}
+          value={money(extras.totalBestCaseMinor)}
           hint="If every open deal closes"
           tone="success"
         />
         <MetricCard
           label="Worst case"
-          value={`$${formatNumber(Math.round(extras.totalWorstCaseMinor / 100))}`}
+          value={money(extras.totalWorstCaseMinor)}
           hint="Only deals ≥ 50% probability"
           tone="warning"
         />
@@ -113,7 +120,7 @@ export function RevenueForecastSection({
                 tickLine={false}
                 axisLine={false}
                 fontSize={11}
-                tickFormatter={(v: number) => `$${formatNumber(v)}`}
+                tickFormatter={(v: number) => money(v * 100)}
               />
               <Tooltip
                 cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '3 3' }}
@@ -124,7 +131,7 @@ export function RevenueForecastSection({
                 }}
                 formatter={(value, name) => {
                   const num = typeof value === 'number' ? value : Number(value ?? 0);
-                  return [`$${formatNumber(num)}`, String(name)];
+                  return [money(num * 100), String(name)];
                 }}
               />
               <Area
@@ -176,13 +183,13 @@ export function RevenueForecastSection({
                   {row.dealCount}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-900">
-                  ${formatNumber(Math.round(row.likelyMinor / 100))}
+                  {money(row.likelyMinor)}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums text-emerald-700">
-                  ${formatNumber(Math.round(row.bestCaseMinor / 100))}
+                  {money(row.bestCaseMinor)}
                 </td>
                 <td className="hidden px-3 py-2 text-right font-mono tabular-nums text-amber-700 md:table-cell">
-                  ${formatNumber(Math.round(row.worstCaseMinor / 100))}
+                  {money(row.worstCaseMinor)}
                 </td>
               </tr>
             ))}
