@@ -5,6 +5,9 @@ import { notFound } from 'next/navigation';
 import { getAIMode } from '@/lib/ai/config';
 import { getCachedSummary } from '@/lib/ai/summary-queries';
 import { withTenantSession } from '@/lib/auth-guard';
+import { getDealSummaryInsight } from '@/lib/intelligence/runner';
+
+import { LiveDealSummaryCard } from '../../intelligence/_components/live-ai-card';
 import { listCommentsForEntity } from '@/lib/comments/queries';
 import { formatCurrency } from '@/lib/deals/currency';
 import { getDealById } from '@/lib/deals/queries';
@@ -21,6 +24,7 @@ import { CommentsThread } from '../../_components/comments-thread';
 import { ComposeEmailLauncher } from '../../_components/compose-email-launcher';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { EntityTimeline } from '../../_components/entity-timeline';
+import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { StageBadge } from '../_components/stage-badge';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
@@ -45,6 +49,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     const deal = await getDealById(tenant.id, id);
     if (!deal) notFound();
 
+    const aiMode = getAIMode();
     const [
       membership,
       cachedSummary,
@@ -53,6 +58,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       tasks,
       teammates,
       timeline,
+      dealInsight,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -61,6 +67,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       listTasksForEntity(tenant.id, 'deal', deal.id, { limit: 50 }),
       listTeammates(tenant.id, tenant.name),
       getEntityTimeline(tenant.id, 'deal', deal.id, { limit: 150 }),
+      getDealSummaryInsight(tenant.id, userId, deal.id),
     ]);
 
     const canEdit = canManageDeals(membership.role);
@@ -105,6 +112,12 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <EntityViewers
+              tenantId={tenant.id}
+              currentUserId={userId}
+              entityType="deal"
+              entityId={deal.id}
+            />
             <ComposeEmailLauncher
               entityType="deal"
               entityId={deal.id}
@@ -162,11 +175,31 @@ export default async function DealDetailPage({ params }: { params: Params }) {
           </aside>
 
           <section className="space-y-4">
+            <LiveDealSummaryCard
+              tenantId={tenant.id}
+              dealId={deal.id}
+              title="AI deal analysis"
+              subtitle="Structured signal — risks and next actions from your activity log"
+              tone="info"
+              summaryId={null}
+              hideFeedback
+              initial={dealInsight.content}
+              initialState={dealInsight.state}
+              initialGeneratedAt={dealInsight.generatedAt?.toISOString() ?? null}
+              modeOverride={
+                aiMode === 'disabled'
+                  ? 'disabled'
+                  : aiMode === 'mock'
+                    ? 'mock'
+                    : undefined
+              }
+            />
+
             <SummaryCard
               dealId={deal.id}
               initialSummary={cachedSummary?.summary ?? null}
               initialGeneratedAt={cachedSummary?.generatedAt.toISOString() ?? null}
-              aiMode={getAIMode()}
+              aiMode={aiMode}
             />
 
             <EntityTasksPanel

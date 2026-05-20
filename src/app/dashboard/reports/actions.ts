@@ -69,6 +69,14 @@ const REPORT_COLUMNS: Record<ReportId, { key: string; label: string }[]> = {
     { key: 'bestCaseMinor', label: 'Best case (minor units)' },
     { key: 'worstCaseMinor', label: 'Worst case (minor units)' },
   ],
+  'deal-velocity': [
+    { key: 'stage', label: 'Stage' },
+    { key: 'stageLabel', label: 'Label' },
+    { key: 'sampleSize', label: 'Sample size' },
+    { key: 'avgDays', label: 'Avg days' },
+    { key: 'medianDays', label: 'Median days' },
+    { key: 'maxDays', label: 'Max days' },
+  ],
 };
 
 export async function buildReportCsvAction(input: {

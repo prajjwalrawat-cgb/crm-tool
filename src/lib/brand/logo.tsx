@@ -120,7 +120,7 @@ export function SaleinxWordmark({
   return (
     <span
       className={[
-        'inline-block font-semibold tracking-[-0.025em] text-slate-900 dark:text-slate-50',
+        'inline-block font-semibold tracking-[-0.025em] text-slate-900 dark:text-[#FAFAFA]',
         fontSize,
         className,
       ]

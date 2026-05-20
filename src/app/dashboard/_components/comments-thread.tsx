@@ -18,6 +18,7 @@ import {
 } from '@/app/dashboard/comments/actions';
 import type { Comment } from '@/db/schema';
 import { useRealtimeEvents } from '@/hooks/use-realtime-events';
+import { useTypingIndicators } from '@/hooks/use-typing-indicators';
 import {
   formatMentionToken,
   parseMentions,
@@ -68,6 +69,14 @@ export function CommentsThread({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // Per-thread typing indicators. `notifyTyping` is passed down into the
+  // composer; `peers` renders an "X is typing…" strip above the input.
+  const { peers: typingPeers, notifyTyping } = useTypingIndicators({
+    tenantId,
+    currentUserId,
+    thread: { type: 'comment', entityType, entityId },
+  });
 
   // Live merge: when another user posts a comment on this same
   // entity, drop it into the local list. Filters by entity scope
@@ -240,17 +249,38 @@ export function CommentsThread({
         </ol>
       )}
 
+      {typingPeers.length > 0 ? (
+        <div className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-[#A1A1AA]">
+          <span className="relative inline-flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-indigo-500" />
+          </span>
+          {typingLabel(typingPeers)}
+        </div>
+      ) : null}
+
       {canWrite && replyingTo === null && editingId === null ? (
         <CommentComposer
           placeholder="Add a comment — type @ to mention a teammate"
           submitLabel="Comment"
           teammates={teammates}
           onSubmit={(body) => submit(body, null)}
+          onTyping={notifyTyping}
           pending={pending}
         />
       ) : null}
     </section>
   );
+}
+
+function typingLabel(peers: { displayName: string | null }[]): string {
+  const names = peers
+    .map((p) => p.displayName)
+    .filter((n): n is string => Boolean(n));
+  if (names.length === 0) return `${peers.length} person typing…`;
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return `${names[0]} and ${names.length - 1} others are typing…`;
 }
 
 /* ============================================================ */
@@ -575,6 +605,7 @@ function CommentComposer({
   teammates,
   onSubmit,
   onCancel,
+  onTyping,
   pending,
   compact,
   autoFocus,
@@ -585,6 +616,8 @@ function CommentComposer({
   teammates: Teammate[];
   onSubmit: (body: string) => void;
   onCancel?: () => void;
+  /** Called on every keystroke so the parent can publish typing events. */
+  onTyping?: () => void;
   pending: boolean;
   compact?: boolean;
   autoFocus?: boolean;
@@ -678,6 +711,7 @@ function CommentComposer({
         onChange={(e) => {
           setDraft(e.target.value);
           updateMentionState(e.target.value, e.target.selectionStart);
+          onTyping?.();
         }}
         onKeyDown={(e) => {
           if (mentionQuery !== null && filteredTeammates.length > 0) {

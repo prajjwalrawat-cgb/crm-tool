@@ -114,6 +114,128 @@ export type RealtimeEvent =
       entityType: 'deal' | 'company' | 'contact';
       entityId: string;
       comment: SerializedComment;
+    }
+  /* ----- intelligence -----
+   *
+   * Fires after an Inngest job UPSERTs a row in `ai_summaries`. The
+   * client uses `(entityType, entityId)` to swap the matching card
+   * from stale → cached without a page reload.
+   */
+  | {
+      type: 'ai.summary.updated';
+      tenantId: string;
+      /** Insight type from src/lib/intelligence/types.ts. */
+      entityType: string;
+      entityId: string;
+      generatedAt: string;
+    }
+  | {
+      type: 'intelligence.risk.updated';
+      tenantId: string;
+      /** Count of currently-open risks at info/warning/danger. */
+      counts: { info: number; warning: number; danger: number };
+    }
+  | {
+      type: 'intelligence.recommendation.updated';
+      tenantId: string;
+      /** Number of open recommendations across the workspace. */
+      count: number;
+    }
+  /* ----- entity presence + typing -----
+   *
+   * Ephemeral, no DB writes. Clients emit `viewing.started`/`viewing.stopped`
+   * when mounting/unmounting an entity detail view; `typing.started`/
+   * `typing.stopped` when typing in a comment / note / email composer.
+   *
+   * The SSE bus relays them to every listener on the tenant channel; UI
+   * components filter by `(entityType, entityId)` for the room they care
+   * about. Both event families auto-expire client-side so a missed
+   * `stopped` event doesn't leave a ghost in the indicator strip.
+   */
+  | {
+      type: 'viewing.started';
+      tenantId: string;
+      userId: string;
+      displayName: string | null;
+      imageUrl: string | null;
+      entity: { type: 'deal' | 'company' | 'contact'; id: string };
+    }
+  | {
+      type: 'viewing.stopped';
+      tenantId: string;
+      userId: string;
+      entity: { type: 'deal' | 'company' | 'contact'; id: string };
+    }
+  | {
+      type: 'typing.started';
+      tenantId: string;
+      userId: string;
+      displayName: string | null;
+      thread: { type: 'comment' | 'note' | 'email'; entityType: string; entityId: string };
+    }
+  | {
+      type: 'typing.stopped';
+      tenantId: string;
+      userId: string;
+      thread: { type: 'comment' | 'note' | 'email'; entityType: string; entityId: string };
+    }
+  /* ----- communications -----
+   *
+   * Inbox + composer realtime taxonomy (CP#16C-A). The shape mirrors
+   * the existing `comment.created` style: server actions emit these
+   * inside the same transaction as the row write, the inbox client
+   * applies them via the SSE bus, and component-level handlers
+   * filter by `(threadId, messageId, draftId)` for the room they
+   * care about.
+   *
+   * `thread.updated` is a generic "something about this thread
+   * changed" — message count, status, preview, unread. The client
+   * re-fetches the thread row on receipt rather than carrying the
+   * full delta on the wire.
+   *
+   * `draft.updated` fires when the same user has multiple tabs open;
+   * the other tabs re-fetch from the server to converge on the
+   * authoritative version.
+   */
+  | {
+      type: 'communication.thread.updated';
+      tenantId: string;
+      threadId: string;
+      lastMessageAt: string;
+    }
+  | {
+      type: 'communication.message.sent';
+      tenantId: string;
+      threadId: string;
+      messageId: string;
+    }
+  | {
+      type: 'communication.message.failed';
+      tenantId: string;
+      threadId: string;
+      messageId: string;
+      reason: string | null;
+    }
+  | {
+      type: 'communication.draft.updated';
+      tenantId: string;
+      /** Owner of the draft — clients filter by this so other users don't react. */
+      userId: string;
+      draftId: string;
+      version: number;
+    }
+  | {
+      type: 'communication.typing.started';
+      tenantId: string;
+      userId: string;
+      displayName: string | null;
+      threadId: string;
+    }
+  | {
+      type: 'communication.typing.stopped';
+      tenantId: string;
+      userId: string;
+      threadId: string;
     };
 
 export type EventKind = RealtimeEvent['type'];

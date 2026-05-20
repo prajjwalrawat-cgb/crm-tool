@@ -59,6 +59,13 @@ export const emailMessages = pgTable(
     bccRecipients: text('bcc_recipients').array().notNull().default([]),
     entityType: text('entity_type'),
     entityId: uuid('entity_id'),
+    /**
+     * Link into `communication_threads`. Nullable so existing rows
+     * are valid pre-backfill; new sends populate it inline. The
+     * inbox never reads `email_messages` on the hot path — it scans
+     * threads — so this column is mostly for per-message audits.
+     */
+    threadId: uuid('thread_id'),
     providerMessageId: text('provider_message_id'),
     idempotencyKey: text('idempotency_key'),
     error: text('error'),
