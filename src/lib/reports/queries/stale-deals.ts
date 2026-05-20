@@ -3,6 +3,7 @@ import 'server-only';
 import { sql } from 'drizzle-orm';
 
 import { tenantTransaction } from '@/lib/db-context';
+import { UUID_REGEX_LITERAL } from '@/lib/db-sql/safe-uuid';
 import type { DealStage } from '@/lib/deals/schema';
 
 import type { OwnerScope, ReportFilter, ReportRunner } from '../types';
@@ -126,16 +127,23 @@ export const staleDealsRunner: ReportRunner<
   const raw = (await tenantTransaction(async (tx) =>
     tx.execute(sql`
       WITH last_activity AS (
+        -- entity_id is a polymorphic text column; restrict to UUID-shaped
+        -- values before casting so a non-uuid row cannot crash the page.
         SELECT entity_id::uuid AS deal_id, max(created_at) AS at
         FROM activity_logs
-        WHERE tenant_id = ${tenantId}::uuid AND entity_type = 'deal'
+        WHERE tenant_id = ${tenantId}::uuid
+          AND entity_type = 'deal'
+          AND entity_id ~ ${sql.raw(`'${UUID_REGEX_LITERAL}'`)}
         GROUP BY entity_id
       ),
       last_email AS (
+        -- email_messages.entity_id is uuid-typed but we still guard at
+        -- the text level for parity with the other CTEs.
         SELECT entity_id AS deal_id, max(created_at) AS at
         FROM email_messages
         WHERE tenant_id = ${tenantId}::uuid
           AND entity_type = 'deal'
+          AND entity_id IS NOT NULL
           AND direction = 'outbound'
           AND status IN ('sent','delivered')
         GROUP BY entity_id
@@ -146,6 +154,7 @@ export const staleDealsRunner: ReportRunner<
         WHERE tenant_id = ${tenantId}::uuid
           AND entity_type = 'deal'
           AND action = 'stage_changed'
+          AND entity_id ~ ${sql.raw(`'${UUID_REGEX_LITERAL}'`)}
         GROUP BY entity_id
       )
       SELECT

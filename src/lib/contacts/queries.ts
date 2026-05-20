@@ -16,6 +16,7 @@ import {
 import { companies, contacts, type Contact } from '@/db/schema';
 import { type ContactFilters } from '@/lib/contacts/filters';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
+import { UUID_REGEX_LITERAL } from '@/lib/db-sql/safe-uuid';
 
 export type { ContactFilters } from '@/lib/contacts/filters';
 import {
@@ -103,6 +104,7 @@ export async function listContacts(
       SELECT 1 FROM activity_logs al
       WHERE al.tenant_id = ${tenantId}::uuid
         AND al.entity_type = 'contact'
+        AND al.entity_id ~ ${sql.raw(`'${UUID_REGEX_LITERAL}'`)}
         AND al.entity_id::uuid = ${contacts.id}
         AND al.created_at >= NOW() - (${f.recentActivityDays}::int * INTERVAL '1 day')
     )`);
