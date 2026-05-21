@@ -1,7 +1,7 @@
 'use client';
 
 import { TrendingUp } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   Area,
   AreaChart,
@@ -13,6 +13,11 @@ import {
   YAxis,
 } from 'recharts';
 
+import {
+  formatCompactTenantCurrency,
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import type { RevenueTrend } from '@/lib/dashboard/queries';
 import { cn } from '@/lib/utils';
 
@@ -42,7 +47,7 @@ import { cn } from '@/lib/utils';
  */
 export function RevenueTrendChart({
   data,
-  formatCurrency,
+  currency,
   title = 'Revenue trend',
   subtitle,
   className,
@@ -50,7 +55,16 @@ export function RevenueTrendChart({
   totals,
 }: {
   data: RevenueTrend;
-  formatCurrency: (amountMajor: number) => string;
+  /**
+   * Tenant currency context — three serializable scalars
+   * (defaultCurrency, currencyLocale, compactNumbers). We can't pass
+   * a `formatCurrency` *function* from a server component into this
+   * client component because functions don't cross the RSC boundary
+   * unless they're marked 'use server'. Passing the context lets us
+   * construct the formatter inside, using the shared
+   * `formatTenantCurrency` helper.
+   */
+  currency: TenantCurrencyContext;
   title?: string;
   subtitle?: string;
   className?: string;
@@ -65,6 +79,19 @@ export function RevenueTrendChart({
   }>;
 }) {
   void showWeightedLine;
+
+  // `data.points` carries amounts in MAJOR units; the tenant helpers
+  // expect MINOR units, so we multiply by 100 before formatting.
+  // Memoize the formatter so React keeps the same reference for the
+  // chart's useMemo deps.
+  const formatCurrency = useCallback(
+    (amountMajor: number) =>
+      currency.compactNumbers
+        ? formatCompactTenantCurrency(Math.round(amountMajor * 100), currency)
+        : formatTenantCurrency(Math.round(amountMajor * 100), currency),
+    [currency],
+  );
+
   const formatted = useMemo(
     () =>
       data.points.map((p) => ({

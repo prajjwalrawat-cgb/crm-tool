@@ -101,14 +101,12 @@ export async function SalesHome({
 
       {isOnboarding ? <OnboardingBanner firstName={user?.firstName} /> : null}
 
-      {/* Hero: revenue trend chart, scoped to MY deals (90-day window) */}
+      {/* Hero: revenue trend chart, scoped to MY deals (90-day window).
+          We pass the *currency context* (serializable scalars), not a
+          formatter function — functions can't cross the RSC boundary. */}
       <RevenueTrendChart
         data={trend}
-        formatCurrency={(amt) => {
-          // RevenueTrend yields MAJOR units already; tenant formatters
-          // expect MINOR units, so multiply back for the formatter.
-          return money(Math.round(amt * 100));
-        }}
+        currency={settings}
         title="My revenue trend"
         subtitle={`Last 90 days · ${tenantName}`}
       />

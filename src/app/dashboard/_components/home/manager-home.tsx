@@ -237,11 +237,13 @@ export async function ManagerHome({
         />
       </div>
 
-      {/* Hero: revenue trend area chart, scoped to selected view */}
+      {/* Hero: revenue trend area chart, scoped to selected view.
+          Currency CONTEXT (not a formatter function) crosses the RSC
+          boundary cleanly — see RevenueTrendChart for why. */}
       <div className="mt-4">
         <RevenueTrendChart
           data={revenueTrend}
-          formatCurrency={(amt) => money(Math.round(amt * 100))}
+          currency={settings}
           title={view.mode === 'rep' ? `${scopeLabel} · revenue trend` : 'Team revenue trend'}
           subtitle={`Last 90 days · ${tenantName}`}
         />

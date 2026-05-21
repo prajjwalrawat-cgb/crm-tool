@@ -125,11 +125,12 @@ export async function AdminHome({
         <OrgKpi label="Lost · 30d" value={overview.lostRecent.toLocaleString()} tone="rose" />
       </div>
 
-      {/* Hero — org-wide revenue trend chart */}
+      {/* Hero — org-wide revenue trend chart. Currency CONTEXT (not
+          a formatter function) crosses the RSC boundary cleanly. */}
       <div className="mt-5">
         <RevenueTrendChart
           data={trend}
-          formatCurrency={(amt) => money(Math.round(amt * 100))}
+          currency={settings}
           title="Organization revenue trend"
           subtitle={`Last 90 days · ${tenantName}`}
         />
