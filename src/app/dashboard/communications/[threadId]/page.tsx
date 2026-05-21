@@ -9,6 +9,7 @@ import {
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { getAIMode } from '@/lib/ai/config';
 import { withTenantSession } from '@/lib/auth-guard';
 import {
   listEventsForThread,
@@ -16,8 +17,10 @@ import {
 } from '@/lib/communications/threads/messages';
 import { getThreadById } from '@/lib/communications/threads/queries';
 import { formatDateTime, formatRelativeTime } from '@/lib/dates/format';
+import { getThreadSummaryInsight } from '@/lib/intelligence/runner';
 import { cn } from '@/lib/utils';
 
+import { LiveThreadSummaryCard } from '../../intelligence/_components/live-ai-card';
 import { RelationshipHealthCard } from '../../_components/relationship-health-card';
 
 export const metadata = {
@@ -37,13 +40,15 @@ export default async function ThreadDetailPage({
   params: Params;
 }) {
   const { threadId } = await params;
-  return await withTenantSession(async ({ tenant }) => {
+  return await withTenantSession(async ({ tenant, userId }) => {
     const thread = await getThreadById(tenant.id, threadId);
     if (!thread) notFound();
 
-    const [messages, events] = await Promise.all([
+    const aiMode = getAIMode();
+    const [messages, events, threadSummary] = await Promise.all([
       listMessagesForThread(tenant.id, threadId),
       listEventsForThread(tenant.id, threadId, { limit: 30 }),
+      getThreadSummaryInsight(tenant.id, userId, threadId),
     ]);
 
     return (
@@ -91,6 +96,25 @@ export default async function ThreadDetailPage({
           </section>
 
           <aside className="space-y-3">
+            <LiveThreadSummaryCard
+              tenantId={tenant.id}
+              threadId={threadId}
+              title="AI thread summary"
+              subtitle="Narrative, unresolved questions, and next actions"
+              tone="info"
+              summaryId={null}
+              hideFeedback
+              initial={threadSummary.content}
+              initialState={threadSummary.state}
+              initialGeneratedAt={threadSummary.generatedAt?.toISOString() ?? null}
+              modeOverride={
+                aiMode === 'disabled'
+                  ? 'disabled'
+                  : aiMode === 'mock'
+                    ? 'mock'
+                    : undefined
+              }
+            />
             {thread.entityType && thread.entityId ? (
               <RelationshipHealthCard
                 tenantId={tenant.id}

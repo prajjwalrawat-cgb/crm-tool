@@ -19,6 +19,7 @@ import {
   PROMPT_VERSION,
   RECOMMENDATIONS_SYSTEM,
   RISK_FLAGS_SYSTEM,
+  THREAD_SUMMARY_SYSTEM,
 } from './prompts';
 import {
   buildDailyExecSource,
@@ -26,6 +27,7 @@ import {
   buildPipelineSummarySource,
   buildRecommendationSource,
   buildRiskFlagSource,
+  buildThreadSummarySource,
   type RecCandidate,
   type RiskCandidate,
 } from './source';
@@ -36,6 +38,7 @@ import type {
   PipelineSummary,
   Recommendation,
   RiskFlag,
+  ThreadAiSummary,
 } from './types';
 import {
   generateMockDailyExec,
@@ -43,6 +46,7 @@ import {
   generateMockPipelineSummary,
   generateMockRecommendations,
   generateMockRiskFlags,
+  generateMockThreadSummary,
 } from './mock-generators';
 
 /**
@@ -110,6 +114,29 @@ export async function getDealSummaryInsight(
     (err) => console.error('[intelligence] deal-summary regen failed', err),
   );
   return parseCached<DealAiSummary>(cache);
+}
+
+/**
+ * Per-thread AI summary. Read-through; regen fires asynchronously
+ * when the source has changed. The thread detail page subscribes to
+ * `ai.summary.updated` to swap content on completion.
+ */
+export async function getThreadSummaryInsight(
+  tenantId: string,
+  actorUserId: string | null,
+  threadId: string,
+): Promise<ParsedInsight<ThreadAiSummary>> {
+  const built = await buildThreadSummarySource(tenantId, threadId);
+  if (!built) {
+    return { state: 'generating', content: null, generatedAt: null };
+  }
+  const { source } = built;
+  const cache = await readInsight(tenantId, 'thread-summary', threadId, source);
+  if (cache.state === 'cached') return parseCached<ThreadAiSummary>(cache);
+  void regenThreadSummary({ tenantId, actorUserId, threadId, source }).catch(
+    (err) => console.error('[intelligence] thread-summary regen failed', err),
+  );
+  return parseCached<ThreadAiSummary>(cache);
 }
 
 export async function getRiskFlagInsight(
@@ -214,6 +241,32 @@ async function regenDealSummary(args: {
     tenantId: args.tenantId,
     insightType: 'deal-summary',
     entityId: args.dealId,
+    content: JSON.stringify(summary),
+    sourceHash: hashContent(args.source),
+  });
+}
+
+async function regenThreadSummary(args: {
+  tenantId: string;
+  actorUserId: string | null;
+  threadId: string;
+  source: string;
+}): Promise<void> {
+  if (await aboveBudget(args.tenantId)) return;
+  const summary = aiLive()
+    ? await runJsonCompletion<ThreadAiSummary>({
+        tenantId: args.tenantId,
+        actorUserId: args.actorUserId,
+        system: THREAD_SUMMARY_SYSTEM,
+        userContent: args.source,
+        insightType: 'thread-summary',
+      })
+    : generateMockThreadSummary(JSON.parse(args.source));
+  if (!summary) return;
+  await persistAndAnnounce({
+    tenantId: args.tenantId,
+    insightType: 'thread-summary',
+    entityId: args.threadId,
     content: JSON.stringify(summary),
     sourceHash: hashContent(args.source),
   });
@@ -421,7 +474,13 @@ async function runJsonCompletion<T>(args: {
 
 async function persistAndAnnounce(args: {
   tenantId: string;
-  insightType: 'daily-exec' | 'deal-summary' | 'risk-flag-set' | 'recommendation-set' | 'pipeline-summary';
+  insightType:
+    | 'daily-exec'
+    | 'deal-summary'
+    | 'risk-flag-set'
+    | 'recommendation-set'
+    | 'pipeline-summary'
+    | 'thread-summary';
   entityId: string;
   content: string;
   sourceHash: string;

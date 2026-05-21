@@ -529,6 +529,104 @@ export type PipelineSummarySourcePayload = {
 };
 
 /**
+ * Source for a per-thread AI summary. Pulls the thread row + its
+ * messages + the last events so the model has the context to write
+ * a narrative + extract unresolved / next-action / risk bullets.
+ *
+ * Source hash includes message ids + timestamps + the latest event id,
+ * so a new message naturally invalidates the cache without an explicit
+ * flush.
+ */
+export async function buildThreadSummarySource(
+  tenantId: string,
+  threadId: string,
+): Promise<{ source: string; threadSubject: string } | null> {
+  type ThreadRow = {
+    id: string;
+    subject_raw: string;
+    last_message_at: string;
+    message_count: number;
+    failed_count: number;
+    entity_type: string | null;
+    entity_id: string | null;
+  };
+  const threadRows = (await tenantTransaction(async (tx) =>
+    tx.execute(sql`
+      SELECT id::text, subject_raw, last_message_at::text, message_count,
+             failed_count, entity_type, entity_id::text AS entity_id
+      FROM communication_threads
+      WHERE tenant_id = ${tenantId}::uuid AND id = ${threadId}::uuid
+      LIMIT 1
+    `),
+  )) as unknown as ThreadRow[];
+  const thread = threadRows[0];
+  if (!thread) return null;
+
+  type MsgRow = {
+    id: string;
+    sender: string;
+    to_recipients: string[];
+    subject: string;
+    text_body: string;
+    status: string;
+    created_at: string;
+  };
+  const messageRows = (await tenantTransaction(async (tx) =>
+    tx.execute(sql`
+      SELECT id::text, sender, to_recipients, subject, text_body,
+             status, created_at::text
+      FROM email_messages
+      WHERE tenant_id = ${tenantId}::uuid AND thread_id = ${threadId}::uuid
+      ORDER BY created_at ASC
+      LIMIT 40
+    `),
+  )) as unknown as MsgRow[];
+
+  type EventRow = { event_kind: string; created_at: string };
+  const eventRows = (await tenantTransaction(async (tx) =>
+    tx.execute(sql`
+      SELECT event_kind, created_at::text
+      FROM communication_events
+      WHERE tenant_id = ${tenantId}::uuid AND thread_id = ${threadId}::uuid
+      ORDER BY created_at DESC
+      LIMIT 20
+    `),
+  )) as unknown as EventRow[];
+
+  const payload = {
+    thread: {
+      id: thread.id,
+      subject: thread.subject_raw,
+      messageCount: thread.message_count,
+      failedCount: thread.failed_count,
+      entityType: thread.entity_type,
+      entityId: thread.entity_id,
+      // Truncate timestamp to second to avoid micro-noise invalidation.
+      lastMessageAt: thread.last_message_at.slice(0, 19),
+    },
+    messages: messageRows.map((m) => ({
+      id: m.id,
+      sender: m.sender,
+      to: m.to_recipients,
+      subject: m.subject,
+      // Cap body so the prompt budget stays bounded.
+      preview: (m.text_body ?? '').slice(0, 600),
+      status: m.status,
+      at: m.created_at.slice(0, 19),
+    })),
+    events: eventRows.map((e) => ({
+      kind: e.event_kind,
+      at: e.created_at.slice(0, 19),
+    })),
+  };
+
+  return {
+    source: stableStringify(payload),
+    threadSubject: thread.subject_raw,
+  };
+}
+
+/**
  * Deterministic JSON stringifier. Sorts object keys at every level so
  * we get the same output for the same logical content even when builder
  * code constructs objects in a different key order.

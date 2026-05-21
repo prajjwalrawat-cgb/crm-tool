@@ -9,6 +9,7 @@ import type {
   Recommendation,
   RiskFlag,
   RiskSeverity,
+  ThreadAiSummary,
 } from '@/lib/intelligence/types';
 
 /**
@@ -335,3 +336,89 @@ function EmptyBody({ label }: { label: string }) {
     </div>
   );
 }
+
+export function ThreadSummaryBody({ data }: { data: ThreadAiSummary | null }) {
+  if (!data) {
+    return <EmptyBody label="No summary yet. Generates as the thread grows." />;
+  }
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            'inline-flex items-center rounded-full px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide',
+            sentimentChip[data.sentiment],
+          )}
+        >
+          {data.sentiment}
+        </span>
+        <span className="font-mono text-[10px] tabular-nums text-slate-400 dark:text-[#71717A]">
+          {Math.round(data.confidence * 100)}% confidence
+        </span>
+      </div>
+      <p className="text-[12.5px] leading-snug text-slate-700 dark:text-[#A1A1AA]">
+        {data.narrative}
+      </p>
+      {data.unresolved.length > 0 ? (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            Unresolved
+          </div>
+          <ul className="mt-0.5 space-y-0.5 text-[11.5px] text-slate-600 dark:text-[#A1A1AA]">
+            {data.unresolved.map((u, i) => (
+              <li key={i} className="flex items-start gap-1.5">
+                <span
+                  className="mt-1 inline-block h-1 w-1 flex-shrink-0 rounded-full bg-amber-500"
+                  aria-hidden
+                />
+                <span>{u}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {data.nextActions.length > 0 ? (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+            Next actions
+          </div>
+          <ul className="mt-0.5 space-y-0.5 text-[11.5px] text-slate-600 dark:text-[#A1A1AA]">
+            {data.nextActions.map((a, i) => (
+              <li key={i} className="flex items-start gap-1.5">
+                <span
+                  className="mt-1 inline-block h-1 w-1 flex-shrink-0 rounded-full bg-emerald-500"
+                  aria-hidden
+                />
+                <span>{a}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {data.riskNotes.length > 0 ? (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-300">
+            Risks
+          </div>
+          <ul className="mt-0.5 space-y-0.5 text-[11.5px] text-slate-600 dark:text-[#A1A1AA]">
+            {data.riskNotes.map((r, i) => (
+              <li key={i} className="flex items-start gap-1.5">
+                <span
+                  className="mt-1 inline-block h-1 w-1 flex-shrink-0 rounded-full bg-rose-500"
+                  aria-hidden
+                />
+                <span>{r}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const sentimentChip: Record<ThreadAiSummary['sentiment'], string> = {
+  positive: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+  neutral: 'bg-slate-100 text-slate-700 dark:bg-[#181818] dark:text-[#A1A1AA]',
+  negative: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+};

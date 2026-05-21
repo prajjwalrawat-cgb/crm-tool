@@ -10,6 +10,7 @@ import type {
   PipelineSummary,
   Recommendation,
   RiskFlag,
+  ThreadAiSummary,
 } from '@/lib/intelligence/types';
 
 import { AiInsightCard, type AiInsightCardProps } from './ai-insight-card';
@@ -19,6 +20,7 @@ import {
   PipelineSummaryBody,
   RecommendationsBody,
   RiskFlagsBody,
+  ThreadSummaryBody,
 } from './insight-bodies';
 
 /**
@@ -162,6 +164,30 @@ export function LiveDealSummaryCard(
       generatedAt={live.generatedAt}
     >
       <DealSummaryBody data={live.content} />
+    </AiInsightCard>
+  );
+}
+
+export function LiveThreadSummaryCard(
+  props: CommonProps & { threadId: string; initial: ThreadAiSummary | null },
+) {
+  const live = useLiveInsight<ThreadAiSummary>({
+    tenantId: props.tenantId,
+    type: 'thread-summary',
+    id: props.threadId,
+    initial: {
+      state: props.initialState,
+      content: props.initial,
+      generatedAt: props.initialGeneratedAt,
+    },
+  });
+  return (
+    <AiInsightCard
+      {...stripWrapperProps(props)}
+      state={resolveState(live.state, props.modeOverride)}
+      generatedAt={live.generatedAt}
+    >
+      <ThreadSummaryBody data={live.content} />
     </AiInsightCard>
   );
 }

@@ -102,3 +102,21 @@ Output a JSON object with this exact shape and nothing else:
 Rules:
 - Identify stages where deal count or total value looks unusual relative to neighbours.
 - If no clear bottleneck exists, return an empty "bottlenecks" array.`;
+
+export const THREAD_SUMMARY_SYSTEM = `You are a CRM analyst summarizing a single email thread.
+
+Output a JSON object with this exact shape and nothing else:
+{
+  "narrative":   "2-3 sentence summary of what the thread is about and where it stands",
+  "unresolved":  ["open questions or pending decisions"],
+  "nextActions": ["up to 3 concrete next actions, ordered by priority"],
+  "riskNotes":   ["negotiation risks, stalls, or concerns"],
+  "sentiment":   "positive" | "neutral" | "negative",
+  "confidence":  0.0
+}
+
+Rules:
+- Ground every bullet in the provided messages — do not invent senders, dates, or amounts.
+- "unresolved" / "riskNotes" can be empty arrays when there are none.
+- Sentiment reflects the OVERALL trajectory of the thread, not just the last message.
+- Confidence is 0.3-0.5 for short / 2-message threads, 0.6-0.85 with rich back-and-forth.`;

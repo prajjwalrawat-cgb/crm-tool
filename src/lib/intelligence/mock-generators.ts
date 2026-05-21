@@ -11,6 +11,7 @@ import type {
   PipelineSummary,
   Recommendation,
   RiskFlag,
+  ThreadAiSummary,
 } from './types';
 import type {
   DailyExecSourcePayload,
@@ -204,5 +205,75 @@ export function generateMockPipelineSummary(
       (s) => `${s.stage}: ${s.count} deals, ${money(s.totalAmountMinor)}.`,
     ),
     bottlenecks,
+  };
+}
+
+/**
+ * Mock thread summary. Deterministic — derives narrative + lists from
+ * structural payload features (message count, failed deliveries, time
+ * since last activity). Same input → same output.
+ */
+export function generateMockThreadSummary(payload: {
+  thread: {
+    messageCount: number;
+    failedCount: number;
+    subject: string;
+    lastMessageAt: string;
+  };
+  messages: Array<{ sender: string; preview: string; at: string; status: string }>;
+  events: Array<{ kind: string; at: string }>;
+}): ThreadAiSummary {
+  const { thread, messages, events } = payload;
+  const lastMessage = messages[messages.length - 1];
+  const lastSender = lastMessage?.sender ?? 'someone';
+  const replyEvents = events.filter((e) => e.kind === 'replied').length;
+  const failed = thread.failedCount;
+  const hasFails = failed > 0;
+
+  const narrative =
+    messages.length === 0
+      ? `No messages on this thread yet. ${MOCK_NOTICE}`
+      : `Thread "${thread.subject || 'no subject'}" has ${thread.messageCount} message${thread.messageCount === 1 ? '' : 's'}. Latest from ${lastSender}. ${MOCK_NOTICE}`;
+
+  const unresolved: string[] = [];
+  if (messages.length > 1 && replyEvents === 0) {
+    unresolved.push('No recorded replies yet — last outbound may need a follow-up.');
+  }
+
+  const nextActions: string[] = [];
+  if (messages.length === 0) {
+    nextActions.push('Start an outbound message to kick off the conversation.');
+  } else if (replyEvents === 0 && thread.messageCount >= 2) {
+    nextActions.push('Send a follow-up to nudge a reply.');
+  } else {
+    nextActions.push('Continue the conversation when there\'s a clear next step.');
+  }
+  if (hasFails) {
+    nextActions.push(`Retry the ${failed} failed delivery${failed === 1 ? '' : 's'}.`);
+  }
+
+  const riskNotes: string[] = [];
+  if (hasFails) {
+    riskNotes.push(
+      `${failed} message${failed === 1 ? '' : 's'} failed to deliver — check the sender setup.`,
+    );
+  }
+  // Sentiment: positive if recent reply, negative if failed, neutral otherwise.
+  const sentiment: ThreadAiSummary['sentiment'] = hasFails
+    ? 'negative'
+    : replyEvents > 0
+      ? 'positive'
+      : 'neutral';
+
+  // Confidence rises with message volume; clamped at 0.85.
+  const confidence = Math.min(0.85, 0.3 + messages.length * 0.05);
+
+  return {
+    narrative,
+    unresolved,
+    nextActions,
+    riskNotes,
+    sentiment,
+    confidence,
   };
 }

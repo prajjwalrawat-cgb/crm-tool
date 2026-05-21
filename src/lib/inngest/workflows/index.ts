@@ -9,6 +9,7 @@
  */
 import { registerLocalHandler } from '../local-dispatcher';
 
+import { communicationAnalyticsRollup } from './communication-analytics-rollup';
 import { dealLost, dealLostHandler } from './deal-lost';
 import { dealWon, dealWonHandler } from './deal-won';
 import {
@@ -20,6 +21,7 @@ import {
   regenerateEmbeddingHandler,
 } from './regenerate-embedding';
 import { notificationsRetention } from './notifications-retention';
+import { relationshipSignalsDerive } from './relationship-signals-derive';
 import { staleDealsScan } from './stale-deals-scan';
 import { workflowRunsRetention } from './workflow-runs-retention';
 
@@ -34,11 +36,13 @@ registerLocalHandler('crm/ai.embed_entity', regenerateEmbeddingHandler);
 registerLocalHandler('crm/member.invited', newMemberOnboardingHandler);
 
 export {
+  communicationAnalyticsRollup,
   dealLost,
   dealWon,
   newMemberOnboarding,
   notificationsRetention,
   regenerateEmbedding,
+  relationshipSignalsDerive,
   staleDealsScan,
   workflowRunsRetention,
 };

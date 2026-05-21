@@ -18,8 +18,31 @@ export const INSIGHT_TYPES = [
   'recommendation-set',
   'pipeline-summary',
   'activity-summary',
+  'thread-summary',
 ] as const;
 export type InsightType = (typeof INSIGHT_TYPES)[number];
+
+/**
+ * Per-thread AI summary output. Surfaces on the thread detail page +
+ * (eventually) the inbox preview row when a thread has unread messages.
+ *
+ * The shape is deliberately compact: narrative + 3 lists. Anything
+ * richer (chart, embedded media) should be a separate insight type,
+ * not a bigger thread summary.
+ */
+export type ThreadAiSummary = {
+  /** 2-3 sentence summary of what the thread is about + current state. */
+  narrative: string;
+  /** Open questions / pending decisions the model spotted. */
+  unresolved: string[];
+  /** Up to 3 suggested next actions, ordered by priority. */
+  nextActions: string[];
+  /** Negotiation risks, stalls, or concerns. */
+  riskNotes: string[];
+  /** Overall sentiment: positive / neutral / negative — drives the chrome tint. */
+  sentiment: 'positive' | 'neutral' | 'negative';
+  confidence: number;
+};
 
 /**
  * State a card can be in. Drives the visible badge + skeleton + enable

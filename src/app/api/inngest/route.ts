@@ -2,11 +2,13 @@ import { serve } from 'inngest/next';
 
 import { inngest } from '@/lib/inngest/client';
 import {
+  communicationAnalyticsRollup,
   dealLost,
   dealWon,
   newMemberOnboarding,
   notificationsRetention,
   regenerateEmbedding,
+  relationshipSignalsDerive,
   staleDealsScan,
   workflowRunsRetention,
 } from '@/lib/inngest/workflows';
@@ -20,11 +22,13 @@ import {
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
+    communicationAnalyticsRollup,
     dealLost,
     dealWon,
     newMemberOnboarding,
     notificationsRetention,
     regenerateEmbedding,
+    relationshipSignalsDerive,
     staleDealsScan,
     workflowRunsRetention,
   ],

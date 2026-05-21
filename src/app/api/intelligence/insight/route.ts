@@ -7,6 +7,7 @@ import {
   getPipelineSummaryInsight,
   getRecommendationInsight,
   getRiskFlagInsight,
+  getThreadSummaryInsight,
 } from '@/lib/intelligence/runner';
 import {
   INSIGHT_TYPES,
@@ -60,6 +61,9 @@ export async function GET(request: NextRequest): Promise<Response> {
         break;
       case 'pipeline-summary':
         payload = await getPipelineSummaryInsight(tenant.id, userId);
+        break;
+      case 'thread-summary':
+        payload = await getThreadSummaryInsight(tenant.id, userId, id);
         break;
       case 'activity-summary':
         // Not implemented yet — placeholder for CP#16C.
