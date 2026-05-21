@@ -9,6 +9,7 @@ import {
   Inbox,
   LayoutDashboard,
   Mail,
+  Radar,
   Settings as SettingsIcon,
   Sparkles,
   Trash2,
@@ -29,6 +30,7 @@ export type NavItem = {
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/dashboard/executive', label: 'Executive', icon: Sparkles },
+  { href: '/dashboard/command-center', label: 'Command Center', icon: Radar },
   { href: '/dashboard/intelligence', label: 'Intelligence', icon: Brain },
   { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
   { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
