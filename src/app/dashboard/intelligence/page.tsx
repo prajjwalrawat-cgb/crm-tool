@@ -8,6 +8,7 @@ import {
   getRecommendationInsight,
   getRiskFlagInsight,
 } from '@/lib/intelligence/runner';
+import { requirePersonas } from '@/lib/personas/guards';
 
 import {
   LiveDailyExecCard,
@@ -32,6 +33,7 @@ export const metadata = {
  * (CP#16B); for now the user sees fresh content on next navigation.
  */
 export default async function IntelligenceDashboardPage() {
+  await requirePersonas(['manager', 'admin']);
   const aiMode = getAIMode();
   const today = new Date().toISOString().slice(0, 10);
 

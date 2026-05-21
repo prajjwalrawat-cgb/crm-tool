@@ -3,6 +3,7 @@ import { listDeletedCompanies } from '@/lib/companies/queries';
 import { listDeletedContacts } from '@/lib/contacts/queries';
 import { listDeletedDeals } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
+import { requirePersonas } from '@/lib/personas/guards';
 
 import { RecentlyDeletedView } from './_components/recently-deleted-view';
 
@@ -11,6 +12,7 @@ export const metadata = {
 };
 
 export default async function RecentlyDeletedPage() {
+  await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant }) => {
     // Recently-deleted views read up to one cursor page each (default
     // 50 rows per entity type). At our retention windows the table

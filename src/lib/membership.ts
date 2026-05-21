@@ -21,6 +21,7 @@ import { ensureTenant, getCurrentTenant } from './tenant';
 const KNOWN_ROLES: ReadonlySet<MembershipRole> = new Set([
   'owner',
   'admin',
+  'manager',
   'member',
   'viewer',
 ]);

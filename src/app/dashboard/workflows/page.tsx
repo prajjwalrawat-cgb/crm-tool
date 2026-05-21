@@ -1,5 +1,6 @@
 ﻿import { withTenantSession } from '@/lib/auth-guard';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
+import { requirePersonas } from '@/lib/personas/guards';
 import { listWorkflowRuns } from '@/lib/workflows/queries';
 
 import { PaginationControls } from '../_components/pagination-controls';
@@ -19,6 +20,7 @@ export default async function WorkflowsPage({
 }: {
   searchParams: SearchParams;
 }) {
+  await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant }) => {
     const sp = await searchParams;
     const cursor = parseCursorParam(sp.cursor);

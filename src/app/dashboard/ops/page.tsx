@@ -1,8 +1,5 @@
-﻿import { redirect } from 'next/navigation';
-
-import { getAIMode } from '@/lib/ai/config';
+﻿import { getAIMode } from '@/lib/ai/config';
 import { withTenantSession } from '@/lib/auth-guard';
-import { requireMembership } from '@/lib/membership';
 import {
   getAiInvocationStats,
   getEmailDeliveryStats,
@@ -16,7 +13,7 @@ import {
 } from '@/lib/email/providers/factory';
 import { validateEnv } from '@/lib/env';
 import { recentErrors, recentLogs, snapshotMetrics } from '@/lib/observability';
-import { can } from '@/lib/rbac';
+import { requirePersonas } from '@/lib/personas/guards';
 
 import { AiSection } from './_components/ai-section';
 import { AutomationHealthSection } from './_components/automation-health-section';
@@ -40,15 +37,8 @@ export const metadata = { title: 'Operations' };
 export const dynamic = 'force-dynamic';
 
 export default async function OpsPage() {
+  await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant }) => {
-    const membership = await requireMembership();
-    // Ops is admin/owner-only. Members shouldn't see cross-cutting
-    // platform health (other tenants' aggregate counts via the in-memory
-    // metrics surface).
-    if (!can(membership.role, 'manageMembers')) {
-      redirect('/dashboard');
-    }
-
     const [aiStats, recentAi, runStats, recentRuns, emailStats] =
       await Promise.all([
         getAiInvocationStats(tenant.id, 24),

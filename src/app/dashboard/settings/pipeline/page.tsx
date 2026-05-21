@@ -1,5 +1,6 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import { requirePersonas } from '@/lib/personas/guards';
 
 import { PipelineForm } from './_components/pipeline-form';
 
@@ -8,6 +9,7 @@ export const metadata = {
 };
 
 export default async function PipelineSettingsPage() {
+  await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant }) => {
     const settings = await getOrgSettings(tenant.id);
     return (

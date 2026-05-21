@@ -1,5 +1,6 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import { requirePersonas } from '@/lib/personas/guards';
 
 import { OrganizationForm } from './_components/organization-form';
 
@@ -24,6 +25,7 @@ const COMMON_TIMEZONES = [
 ];
 
 export default async function OrganizationSettingsPage() {
+  await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant }) => {
     const settings = await getOrgSettings(tenant.id);
     return (

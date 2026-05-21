@@ -9,6 +9,7 @@ import {
 } from '@/lib/currency/format';
 import { formatDateTime, formatNumber } from '@/lib/dates/format';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import { requirePersonas } from '@/lib/personas/guards';
 import {
   getReport,
   type ReportId,
@@ -77,6 +78,7 @@ export default async function ReportDetailPage({
   params: Params;
   searchParams: SearchParams;
 }) {
+  await requirePersonas(['manager', 'admin']);
   const { reportId } = await params;
   const report = getReport(reportId);
   if (!report) notFound();

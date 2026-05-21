@@ -2,6 +2,7 @@ import { ArrowRight, BarChart3, Briefcase, MailOpen, Users, Zap } from 'lucide-r
 import Link from 'next/link';
 
 import { withTenantSession } from '@/lib/auth-guard';
+import { requirePersonas } from '@/lib/personas/guards';
 import { REPORTS, type ReportRegistration } from '@/lib/reports/registry';
 import type { ReportCategory } from '@/lib/reports/types';
 import { cn } from '@/lib/utils';
@@ -30,6 +31,7 @@ const CATEGORY_META: Record<
  * with Suspense). Don't optimize prematurely.
  */
 export default async function ReportsPage() {
+  await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant, userId }) => {
     const cards = await Promise.all(
       Object.values(REPORTS).map(async (report) => {

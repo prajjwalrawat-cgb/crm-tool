@@ -28,6 +28,7 @@ import {
 } from '@/lib/intelligence/runner';
 import { readIntelligenceTimeline } from '@/lib/intelligence/timeline';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import { requirePersonas } from '@/lib/personas/guards';
 import { getTopPredictionsForTenant } from '@/lib/predictions/runner';
 import type { Prediction, PredictionKind } from '@/lib/predictions/types';
 import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
@@ -56,6 +57,7 @@ export const metadata = {
  * lookups for the timeline are folded into the SQL UNION.
  */
 export default async function CommandCenterPage() {
+  await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant, userId }) => {
     const filter = { range: 'last_90d', owner: { type: 'all' } } as const;
     const ctx = { currentUserId: userId };

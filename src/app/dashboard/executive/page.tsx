@@ -6,6 +6,7 @@ import { formatCompactTenantCurrency, formatTenantCurrency } from '@/lib/currenc
 import { formatDate, formatNumber } from '@/lib/dates/format';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import { requirePersonas } from '@/lib/personas/guards';
 import {
   getDailyExecInsight,
   getRecommendationInsight,
@@ -55,6 +56,7 @@ export const metadata = {
  * lands in a follow-up alongside the AI mode work.
  */
 export default async function ExecutiveDashboardPage() {
+  await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant, userId }) => {
     const filter = { range: 'last_90d', owner: { type: 'all' } } as const;
     const ctx = { currentUserId: userId };

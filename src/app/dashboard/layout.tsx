@@ -21,6 +21,7 @@ export default async function DashboardLayout({
   // Page-level data fetches enter their own context via withTenantSession.
   const tenant = await ensureTenant();
   const membership = await ensureMembership();
+  const persona = personaOf(membership?.role ?? null);
 
   if (!tenant) {
     // The middleware should have redirected to /select-org before reaching
@@ -40,8 +41,6 @@ export default async function DashboardLayout({
         listNotificationsForUser(tenant.id, userId, { limit: 30 }),
       )
     : [];
-
-  const persona = personaOf(membership?.role ?? null);
 
   return (
     <DashboardShell

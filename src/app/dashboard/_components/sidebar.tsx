@@ -8,11 +8,7 @@ import { SaleinxIcon, SaleinxWordmark } from '@/lib/brand/logo';
 import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
-import {
-  isNavActive,
-  SIDEBARS_BY_PERSONA,
-  type NavItem,
-} from './nav-config';
+import { isNavActive, navItemsForPersona } from './nav-config';
 
 type Props = {
   mobileOpen: boolean;
@@ -29,18 +25,17 @@ export function Sidebar({
   onToggleCollapsed,
   persona,
 }: Props) {
-  const items = SIDEBARS_BY_PERSONA[persona];
   return (
     <>
       <DesktopSidebar
         collapsed={collapsed}
         onToggle={onToggleCollapsed}
-        items={items}
+        persona={persona}
       />
       <MobileSidebar
         open={mobileOpen}
         onClose={onMobileClose}
-        items={items}
+        persona={persona}
       />
     </>
   );
@@ -49,11 +44,11 @@ export function Sidebar({
 function DesktopSidebar({
   collapsed,
   onToggle,
-  items,
+  persona,
 }: {
   collapsed: boolean;
   onToggle: () => void;
-  items: readonly NavItem[];
+  persona: Persona;
 }) {
   const pathname = usePathname();
   return (
@@ -64,7 +59,7 @@ function DesktopSidebar({
       )}
     >
       <Brand collapsed={collapsed} />
-      <NavList items={items} pathname={pathname} collapsed={collapsed} />
+      <NavList pathname={pathname} collapsed={collapsed} persona={persona} />
       <CollapseToggle collapsed={collapsed} onToggle={onToggle} />
     </aside>
   );
@@ -105,11 +100,11 @@ function CollapseToggle({
 function MobileSidebar({
   open,
   onClose,
-  items,
+  persona,
 }: {
   open: boolean;
   onClose: () => void;
-  items: readonly NavItem[];
+  persona: Persona;
 }) {
   const pathname = usePathname();
 
@@ -148,7 +143,7 @@ function MobileSidebar({
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <NavList items={items} pathname={pathname} onLinkClick={onClose} />
+        <NavList pathname={pathname} onLinkClick={onClose} persona={persona} />
       </aside>
     </div>
   );
@@ -180,47 +175,23 @@ function Brand({
 }
 
 function NavList({
-  items,
   pathname,
   collapsed = false,
   onLinkClick,
+  persona,
 }: {
-  items: readonly NavItem[];
   pathname: string;
   collapsed?: boolean;
   onLinkClick?: () => void;
+  persona: Persona;
 }) {
+  const items = navItemsForPersona(persona);
   return (
     <nav className={cn('flex-1 py-2', collapsed ? 'px-1.5' : 'px-2')}>
       <ul className="flex flex-col gap-0.5">
         {items.map((item) => {
           const active = isNavActive(item.href, pathname);
           const Icon = item.icon;
-
-          if (item.comingSoon) {
-            return (
-              <li key={item.href}>
-                <span
-                  aria-disabled
-                  title={collapsed ? `${item.label} (soon)` : undefined}
-                  className={cn(
-                    'flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-slate-400 dark:text-[#A1A1AA]',
-                    collapsed && 'justify-center px-2',
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                  {!collapsed ? (
-                    <>
-                      <span className="flex-1">{item.label}</span>
-                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:bg-[#181818] dark:text-[#A1A1AA]">
-                        Soon
-                      </span>
-                    </>
-                  ) : null}
-                </span>
-              </li>
-            );
-          }
 
           return (
             <li key={item.href}>

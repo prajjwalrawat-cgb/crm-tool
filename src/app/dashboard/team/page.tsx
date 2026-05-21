@@ -2,6 +2,7 @@
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { requireMembership } from '@/lib/membership';
+import { requirePersonas } from '@/lib/personas/guards';
 import { listPendingInvitations, listTeamMembers } from '@/lib/team/queries';
 
 import { TeamView } from './_components/team-view';
@@ -11,6 +12,7 @@ export const metadata = {
 };
 
 export default async function TeamPage() {
+  await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant }) => {
     const { userId, orgId } = await auth();
 

@@ -1,6 +1,7 @@
 import { getAIMode } from '@/lib/ai/config';
 import { withTenantSession } from '@/lib/auth-guard';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import { requirePersonas } from '@/lib/personas/guards';
 
 import { AiForm } from './_components/ai-form';
 
@@ -9,6 +10,7 @@ export const metadata = {
 };
 
 export default async function AiSettingsPage() {
+  await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant }) => {
     const settings = await getOrgSettings(tenant.id);
     const aiMode = getAIMode();

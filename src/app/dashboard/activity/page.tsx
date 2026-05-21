@@ -1,6 +1,7 @@
 ﻿import { listRecentActivity } from '@/lib/activity/queries';
 import { withTenantSession } from '@/lib/auth-guard';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
+import { requirePersonas } from '@/lib/personas/guards';
 
 import { LiveActivityFeed } from './_components/live-activity-feed';
 
@@ -18,6 +19,7 @@ export default async function ActivityPage({
 }: {
   searchParams: SearchParams;
 }) {
+  await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant }) => {
     const sp = await searchParams;
     const cursor = parseCursorParam(sp.cursor);
