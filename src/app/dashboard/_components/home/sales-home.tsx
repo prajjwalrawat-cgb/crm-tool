@@ -17,6 +17,7 @@ import {
 } from '@/lib/currency/format';
 import {
   getRecentWins,
+  getRevenueTrend,
   getStaleDeals,
   getUpcomingFollowUps,
 } from '@/lib/dashboard/queries';
@@ -24,7 +25,8 @@ import { getOrgSettings } from '@/lib/org-settings/queries';
 import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
 import { getMyTasksSummary } from '@/lib/tasks/queries';
 
-import { RevenueFunnel } from '../revenue-funnel';
+import { RevenueTrendChart } from '../revenue-trend-chart';
+import { StageConversionBars } from '../stage-conversion-bars';
 import { StageDonut } from '../stage-donut';
 import {
   MyTasksCard,
@@ -54,7 +56,7 @@ export async function SalesHome({
   tenantName: string;
   userId: string;
 }) {
-  const [user, settings, pipeline, myTasks, followUps, stale, wins] =
+  const [user, settings, pipeline, trend, myTasks, followUps, stale, wins] =
     await Promise.all([
       currentUser(),
       getOrgSettings(tenantId),
@@ -63,6 +65,7 @@ export async function SalesHome({
         { range: 'last_90d', owner: { type: 'mine' } },
         { currentUserId: userId },
       ),
+      getRevenueTrend(tenantId, { days: 90, ownerId: userId }),
       getMyTasksSummary(tenantId, userId),
       getUpcomingFollowUps(tenantId, { lookAheadDays: 14, limit: 6 }),
       getStaleDeals(tenantId, { staleDays: 14, limit: 5 }),
@@ -98,22 +101,41 @@ export async function SalesHome({
 
       {isOnboarding ? <OnboardingBanner firstName={user?.firstName} /> : null}
 
-      {/* Hero: revenue-weighted funnel scoped to MY deals */}
-      <RevenueFunnel rows={pipeline.rows} formatCurrency={money} />
+      {/* Hero: revenue trend chart, scoped to MY deals (90-day window) */}
+      <RevenueTrendChart
+        data={trend}
+        formatCurrency={(amt) => {
+          // RevenueTrend yields MAJOR units already; tenant formatters
+          // expect MINOR units, so multiply back for the formatter.
+          return money(Math.round(amt * 100));
+        }}
+        title="My revenue trend"
+        subtitle={`Last 90 days · ${tenantName}`}
+      />
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <StageDonut
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <StageConversionBars
           rows={pipeline.rows}
+          formatCurrency={money}
           className="lg:col-span-2"
-          title="My deal distribution"
-          subtitle="Where my deals sit by count — the other half of the funnel"
+          title="My pipeline by stage"
+          subtitle="Revenue-weighted bars · stage-to-stage conversion"
         />
         <MyTasksCard summary={myTasks} />
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <StageDonut
+          rows={pipeline.rows}
+          className="lg:col-span-1"
+          title="My deal distribution"
+          subtitle="How many deals sit in each stage"
+        />
         <UpcomingFollowUpsCard rows={followUps} />
         <StaleDealsCard rows={stale} staleDays={14} />
+      </div>
+
+      <div className="mt-4">
         <RecentWinsCard rows={wins} />
       </div>
 

@@ -17,6 +17,7 @@ import {
 } from '@/lib/currency/format';
 import {
   getPipelineCreatedTrend,
+  getRevenueTrend,
   getStaleDeals,
 } from '@/lib/dashboard/queries';
 import { getRecommendationInsight } from '@/lib/intelligence/runner';
@@ -31,7 +32,8 @@ import { listTeammates } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 import { StaleDealsCard } from '../intel-widgets';
-import { RevenueFunnel } from '../revenue-funnel';
+import { RevenueTrendChart } from '../revenue-trend-chart';
+import { StageConversionBars } from '../stage-conversion-bars';
 import { StageDonut } from '../stage-donut';
 
 import { Greeting } from './greeting';
@@ -84,6 +86,7 @@ export async function ManagerHome({
     velocity,
     predictions,
     pipelineTrend,
+    revenueTrend,
   ] = await Promise.all([
     currentUser(),
     getOrgSettings(tenantId),
@@ -113,6 +116,12 @@ export async function ManagerHome({
     ),
     getTopPredictionsForTenant(tenantId, { limit: 30 }),
     getPipelineCreatedTrend(tenantId, 14),
+    getRevenueTrend(tenantId, {
+      days: 90,
+      // ?view=rep:<id> scopes the trend to that rep; ?view=team (default)
+      // leaves it whole-team.
+      ownerId: view.mode === 'rep' ? view.userId : null,
+    }),
   ]);
 
   const money = (m: number) =>
@@ -228,27 +237,34 @@ export async function ManagerHome({
         />
       </div>
 
-      <div className="mt-3">
-        <PipelineTrendStrip trend={pipelineTrend} />
-      </div>
-
-      {/* Hero funnel — switches between team-wide and per-rep */}
-      <div className="mt-5">
-        <FunnelScopeBadge scopeLabel={scopeLabel} />
-        <div className="mt-2">
-          <RevenueFunnel rows={pipeline.rows} formatCurrency={money} />
-        </div>
+      {/* Hero: revenue trend area chart, scoped to selected view */}
+      <div className="mt-4">
+        <RevenueTrendChart
+          data={revenueTrend}
+          formatCurrency={(amt) => money(Math.round(amt * 100))}
+          title={view.mode === 'rep' ? `${scopeLabel} · revenue trend` : 'Team revenue trend'}
+          subtitle={`Last 90 days · ${tenantName}`}
+        />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <StageConversionBars
+          rows={pipeline.rows}
+          formatCurrency={money}
+          className="lg:col-span-2"
+          title={view.mode === 'rep' ? `${scopeLabel} pipeline by stage` : 'Team pipeline by stage'}
+          subtitle="Revenue-weighted bars · stage-to-stage conversion"
+        />
         <StageDonut
           rows={pipeline.rows}
           className="lg:col-span-1"
           title={view.mode === 'rep' ? `${scopeLabel} — deals` : 'Team — deals'}
-          subtitle="Where deals sit by count"
+          subtitle="How many deals sit in each stage"
         />
+      </div>
 
-        {/* Rep leaderboard — links to per-rep view */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <PipelineTrendStrip trend={pipelineTrend} className="lg:col-span-1" />
         <RepLeaderboard
           rows={reps.rows.slice(0, 6)}
           formatCurrency={money}
@@ -309,14 +325,6 @@ function ViewToggle({
           {focusedRepName}
         </span>
       ) : null}
-    </div>
-  );
-}
-
-function FunnelScopeBadge({ scopeLabel }: { scopeLabel: string }) {
-  return (
-    <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-[#A1A1AA]">
-      Funnel scope · <span className="text-slate-900 dark:text-[#FAFAFA]">{scopeLabel}</span>
     </div>
   );
 }
@@ -554,8 +562,10 @@ function CommunicationResponsivenessCard({
 
 function PipelineTrendStrip({
   trend,
+  className,
 }: {
   trend: Array<{ day: string; n: number }>;
+  className?: string;
 }) {
   // 14 buckets, dense fill so missing days render at zero.
   const today = new Date();
@@ -571,7 +581,12 @@ function PipelineTrendStrip({
   const total = days.reduce((s, d) => s + d.n, 0);
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
+    <section
+      className={cn(
+        'rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
+        className,
+      )}
+    >
       <div className="flex items-baseline justify-between gap-3">
         <div>
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-[#A1A1AA]">

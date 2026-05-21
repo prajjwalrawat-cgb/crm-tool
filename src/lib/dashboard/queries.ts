@@ -210,6 +210,142 @@ export async function getPipelineCreatedTrend(
   );
 }
 
+export type RevenueTrendPoint = {
+  /** ISO date (yyyy-mm-dd) UTC. */
+  day: string;
+  /** Amount in MAJOR units (e.g. INR rupees, USD dollars) so chart libs
+   *  format cleanly. The currency is the tenant's modal currency. */
+  wonRevenue: number;
+  /** Revenue created that day (sum of new-deal amounts in major units). */
+  newPipeline: number;
+  /** Lost revenue on that day (for delta context). */
+  lostRevenue: number;
+};
+
+export type RevenueTrend = {
+  days: number;
+  currency: string;
+  points: RevenueTrendPoint[];
+};
+
+/**
+ * Daily revenue series for the new RevenueTrendChart hero. For each
+ * day in the window we emit:
+ *   - wonRevenue       = sum of deals.amount_minor where stage='won'
+ *                        AND closed_at::date = day
+ *   - newPipeline      = sum of deals.amount_minor where
+ *                        created_at::date = day
+ *   - lostRevenue      = sum of deals.amount_minor where stage='lost'
+ *                        AND closed_at::date = day
+ *
+ * Server returns sparse points (no row for days with no activity); the
+ * client densifies to a continuous series before charting so the area
+ * fill doesn't go ragged.
+ *
+ * `ownerId`, when supplied, scopes everything to that user — drives
+ * the SalesHome "my revenue trend" and the ManagerHome per-rep view.
+ * Manager + admin pass `null` (or omit) for whole-team.
+ *
+ * Amounts are projected in MAJOR units (dividing by 100) so Recharts'
+ * default number formatter renders sensibly. The chart's custom
+ * tooltip can re-format to the tenant currency where needed.
+ */
+export async function getRevenueTrend(
+  tenantId: string,
+  options: { days?: number; ownerId?: string | null } = {},
+): Promise<RevenueTrend> {
+  const days = options.days ?? 90;
+  const ownerId = options.ownerId ?? null;
+  return await timeQuery('dashboard.revenueTrend', async () =>
+    tenantTransaction(async (tx) => {
+      // Single query union via CTEs — won + lost + created all in one
+      // round-trip. Each predicate hits the existing
+      // (tenant_id, stage) / (tenant_id, created_at) indexes.
+      const rows = (await tx.execute(sql`
+        WITH won AS (
+          SELECT closed_at::date AS day,
+                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue
+          FROM deals
+          WHERE tenant_id = ${tenantId}::uuid
+            AND deleted_at IS NULL
+            AND stage = 'won'
+            AND closed_at IS NOT NULL
+            AND closed_at >= NOW() - (${days}::int * INTERVAL '1 day')
+            ${ownerId ? sql`AND owner_id = ${ownerId}` : sql``}
+          GROUP BY closed_at::date
+        ),
+        lost AS (
+          SELECT closed_at::date AS day,
+                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue
+          FROM deals
+          WHERE tenant_id = ${tenantId}::uuid
+            AND deleted_at IS NULL
+            AND stage = 'lost'
+            AND closed_at IS NOT NULL
+            AND closed_at >= NOW() - (${days}::int * INTERVAL '1 day')
+            ${ownerId ? sql`AND owner_id = ${ownerId}` : sql``}
+          GROUP BY closed_at::date
+        ),
+        created AS (
+          SELECT created_at::date AS day,
+                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue
+          FROM deals
+          WHERE tenant_id = ${tenantId}::uuid
+            AND deleted_at IS NULL
+            AND created_at >= NOW() - (${days}::int * INTERVAL '1 day')
+            ${ownerId ? sql`AND owner_id = ${ownerId}` : sql``}
+          GROUP BY created_at::date
+        )
+        SELECT
+          d::date AS day,
+          COALESCE(w.revenue, 0)::bigint AS won_revenue,
+          COALESCE(l.revenue, 0)::bigint AS lost_revenue,
+          COALESCE(c.revenue, 0)::bigint AS new_pipeline
+        FROM generate_series(
+          (CURRENT_DATE - (${days - 1}::int * INTERVAL '1 day'))::date,
+          CURRENT_DATE::date,
+          INTERVAL '1 day'
+        ) AS d
+        LEFT JOIN won     w ON w.day = d::date
+        LEFT JOIN lost    l ON l.day = d::date
+        LEFT JOIN created c ON c.day = d::date
+        ORDER BY day ASC
+      `)) as unknown as Array<{
+        day: string;
+        won_revenue: string | number;
+        lost_revenue: string | number;
+        new_pipeline: string | number;
+      }>;
+
+      // The modal currency of forward (open) deals — best guess for the
+      // chart axis label. Falls back to USD when the tenant is empty.
+      const currencyRow = (await tx.execute(
+        sql`SELECT currency, COUNT(*)::int AS n
+            FROM deals
+            WHERE tenant_id = ${tenantId}::uuid
+              AND deleted_at IS NULL
+              ${ownerId ? sql`AND owner_id = ${ownerId}` : sql``}
+            GROUP BY currency
+            ORDER BY n DESC
+            LIMIT 1`,
+      )) as unknown as Array<{ currency: string }>;
+      const currency = currencyRow[0]?.currency ?? 'USD';
+
+      return {
+        days,
+        currency,
+        points: rows.map((r) => ({
+          day: typeof r.day === 'string' ? r.day : new Date(r.day).toISOString().slice(0, 10),
+          // Project minor → major for clean Recharts rendering.
+          wonRevenue: Number(r.won_revenue) / 100,
+          lostRevenue: Number(r.lost_revenue) / 100,
+          newPipeline: Number(r.new_pipeline) / 100,
+        })),
+      };
+    }),
+  );
+}
+
 export type StaleDeal = {
   id: string;
   name: string;

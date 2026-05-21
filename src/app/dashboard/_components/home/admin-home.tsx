@@ -21,6 +21,7 @@ import {
 } from '@/lib/currency/format';
 import {
   getDashboardOverview,
+  getRevenueTrend,
   getWorkflowHealth,
 } from '@/lib/dashboard/queries';
 import {
@@ -36,7 +37,8 @@ import { getOrgSettings } from '@/lib/org-settings/queries';
 import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
 import { cn } from '@/lib/utils';
 
-import { RevenueFunnel } from '../revenue-funnel';
+import { RevenueTrendChart } from '../revenue-trend-chart';
+import { StageConversionBars } from '../stage-conversion-bars';
 import { StageDonut } from '../stage-donut';
 
 import { Greeting } from './greeting';
@@ -65,6 +67,7 @@ export async function AdminHome({
     settings,
     overview,
     pipeline,
+    trend,
     workflowHealth,
     workflowStats,
     aiStats,
@@ -81,6 +84,7 @@ export async function AdminHome({
       { range: 'last_90d', owner: { type: 'all' } },
       { currentUserId: userId },
     ),
+    getRevenueTrend(tenantId, { days: 90, ownerId: null }),
     getWorkflowHealth(tenantId, 7),
     getWorkflowStats(tenantId, 24),
     getAiInvocationStats(tenantId, 24),
@@ -121,19 +125,33 @@ export async function AdminHome({
         <OrgKpi label="Lost · 30d" value={overview.lostRecent.toLocaleString()} tone="rose" />
       </div>
 
-      {/* Hero — org-wide revenue funnel */}
+      {/* Hero — org-wide revenue trend chart */}
       <div className="mt-5">
-        <RevenueFunnel rows={pipeline.rows} formatCurrency={money} />
+        <RevenueTrendChart
+          data={trend}
+          formatCurrency={(amt) => money(Math.round(amt * 100))}
+          title="Organization revenue trend"
+          subtitle={`Last 90 days · ${tenantName}`}
+        />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <StageConversionBars
+          rows={pipeline.rows}
+          formatCurrency={money}
+          className="lg:col-span-2"
+          title="Organization pipeline by stage"
+          subtitle="Revenue-weighted bars · stage-to-stage conversion"
+        />
         <StageDonut
           rows={pipeline.rows}
           className="lg:col-span-1"
           title="Organization-wide"
           subtitle="Deal-count distribution across all owners"
         />
+      </div>
 
+      <div className="mt-4">
         <OpsHealthCard
           workflowStats={workflowStats}
           workflowHealth={workflowHealth}
@@ -141,7 +159,6 @@ export async function AdminHome({
           aiErrorRate={aiErrorRate}
           emailStats={emailStats}
           inbox={inbox}
-          className="lg:col-span-2"
         />
       </div>
 
