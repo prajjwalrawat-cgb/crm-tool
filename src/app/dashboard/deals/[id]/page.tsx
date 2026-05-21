@@ -26,7 +26,9 @@ import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { EntityTimeline } from '../../_components/entity-timeline';
 import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
+import { RelationshipHealthCard } from '../../_components/relationship-health-card';
 import { StageBadge } from '../_components/stage-badge';
+import { DealInlineHeader } from './_components/deal-inline-header';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { SummaryCard } from './_components/summary-card';
 
@@ -99,40 +101,46 @@ export default async function DealDetailPage({ params }: { params: Params }) {
           All deals
         </Link>
 
-        <header className="mt-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-slate-200 pb-5">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-              {deal.name}
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              {DEAL_STAGE_LABELS[deal.stage]} ·{' '}
-              <span className="font-mono">
-                {formatCurrency(deal.amountMinor, deal.currency)}
-              </span>
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <EntityViewers
-              tenantId={tenant.id}
-              currentUserId={userId}
-              entityType="deal"
-              entityId={deal.id}
-            />
-            <ComposeEmailLauncher
-              entityType="deal"
-              entityId={deal.id}
-              entityLabel={deal.name}
-              defaultRecipients={
-                deal.contactEmail ? [deal.contactEmail] : []
-              }
-              canSend={canEdit}
-            />
-            <StageBadge stage={deal.stage} />
-          </div>
-        </header>
+        <DealInlineHeader
+          initial={{
+            name: deal.name,
+            stage: deal.stage,
+            amountMajor: (deal.amountMinor / 100).toFixed(2),
+            currency: deal.currency,
+            expectedCloseDate: deal.expectedCloseDate ?? null,
+          }}
+          dealId={deal.id}
+          companyId={deal.companyId ?? null}
+          contactId={deal.contactId ?? null}
+          canEdit={canEdit}
+          tenantId={tenant.id}
+        />
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <EntityViewers
+            tenantId={tenant.id}
+            currentUserId={userId}
+            entityType="deal"
+            entityId={deal.id}
+          />
+          <ComposeEmailLauncher
+            entityType="deal"
+            entityId={deal.id}
+            entityLabel={deal.name}
+            defaultRecipients={
+              deal.contactEmail ? [deal.contactEmail] : []
+            }
+            canSend={canEdit}
+          />
+        </div>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">
           <aside className="flex flex-col gap-3">
+            <RelationshipHealthCard
+              tenantId={tenant.id}
+              entityType="deal"
+              entityId={deal.id}
+            />
             <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
             <DetailCard
               label="Amount"

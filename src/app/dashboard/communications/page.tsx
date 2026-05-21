@@ -14,6 +14,7 @@ import { formatRelativeTime } from '@/lib/dates/format';
 import type { ThreadStatus } from '@/db/schema';
 import { cn } from '@/lib/utils';
 
+import { InboxLiveRefresh } from './_components/inbox-live-refresh';
 import { QuickComposer } from './_components/quick-composer';
 
 export const metadata = {
@@ -91,6 +92,7 @@ export default async function CommunicationsPage({
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
+        <InboxLiveRefresh tenantId={tenant.id} />
         <header className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4 dark:border-[#1F1F1F]">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">

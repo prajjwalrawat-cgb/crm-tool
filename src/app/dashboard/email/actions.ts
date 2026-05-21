@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { emailMessages, type EmailMessage } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
+import { attachOutboundMessageToThread } from '@/lib/communications/send-integration';
 import {
   runWithTenantContext,
   tenantTransaction,
@@ -176,6 +177,33 @@ export async function sendEmailAction(
           )
           .limit(1),
       );
+
+      // Wire the message into the communication graph + agent
+      // learning loop. Threading, event ledger, relationship counters,
+      // observation, and realtime fan-out all happen here. Wrapped in
+      // a try/catch so a side-effect failure cannot mask the
+      // user-facing send outcome — the email was already delivered (or
+      // not) by `deliverEmail()` above.
+      if (finalRow) {
+        try {
+          await attachOutboundMessageToThread({
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            message: finalRow,
+            delivery: {
+              status: outcome.status === 'sent' ? 'sent' : 'failed',
+              providerName: outcome.providerName ?? null,
+              reason: outcome.status === 'failed' ? outcome.reason : null,
+            },
+          });
+        } catch (err) {
+          console.error(
+            '[communications] thread attach failed for message',
+            finalRow.id,
+            err,
+          );
+        }
+      }
 
       revalidatePath(
         PATH_FOR[parsed.data.entityType](parsed.data.entityId),
