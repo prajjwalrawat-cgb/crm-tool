@@ -4,6 +4,7 @@ import { listContactOptions } from '@/lib/contacts/queries';
 import { listDealOptions } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
+import { personaOf } from '@/lib/personas';
 import { parseTaskFilters } from '@/lib/tasks/filters';
 import { listTasks } from '@/lib/tasks/queries';
 import { listTeammates } from '@/lib/teammates/queries';
@@ -33,27 +34,26 @@ export default async function TasksPage({
     );
     const filters = parseTaskFilters(sp);
 
-    const [
-      membership,
-      page,
-      companyOptions,
-      contactOptions,
-      dealOptions,
-      teammates,
-    ] = await Promise.all([
-      requireMembership(),
-      listTasks(tenant.id, {
-        search,
-        cursor,
-        size,
-        filters,
-        currentUserId: userId,
-      }),
-      listCompanyOptions(tenant.id),
-      listContactOptions(tenant.id),
-      listDealOptions(tenant.id),
-      listTeammates(tenant.id, tenant.name),
-    ]);
+    const membership = await requireMembership();
+    const persona = personaOf(membership.role);
+    const restrictToAssigneeOrUnassigned =
+      persona === 'sales' ? userId : undefined;
+
+    const [page, companyOptions, contactOptions, dealOptions, teammates] =
+      await Promise.all([
+        listTasks(tenant.id, {
+          search,
+          cursor,
+          size,
+          filters,
+          currentUserId: userId,
+          restrictToAssigneeOrUnassigned,
+        }),
+        listCompanyOptions(tenant.id),
+        listContactOptions(tenant.id),
+        listDealOptions(tenant.id),
+        listTeammates(tenant.id, tenant.name),
+      ]);
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">

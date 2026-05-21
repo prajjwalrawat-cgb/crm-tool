@@ -1,4 +1,5 @@
 import { auth } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import { getAIMode } from '@/lib/ai/config';
@@ -24,12 +25,9 @@ export default async function DashboardLayout({
   const persona = personaOf(membership?.role ?? null);
 
   if (!tenant) {
-    // The middleware should have redirected to /select-org before reaching
-    // here, but if a race left us tenant-less, surface a hard error rather
-    // than render a broken shell.
-    throw new Error(
-      'No active tenant. Pick or create an organization in /select-org.',
-    );
+    // The middleware should have caught this, but if a race left us
+    // tenant-less, take the user to the selector instead of crashing.
+    redirect('/select-org');
   }
 
   const { userId } = await auth();

@@ -9,7 +9,13 @@ import type {
   PendingInvitationRow,
   TeamMemberRow,
 } from '@/lib/team/queries';
-import { type InviteRole, INVITE_ROLES } from '@/lib/team/schema';
+import {
+  CHANGE_ROLE_LABELS,
+  CHANGE_ROLES,
+  type ChangeRole,
+  type InviteRole,
+  INVITE_ROLES,
+} from '@/lib/team/schema';
 import { cn } from '@/lib/utils';
 
 import {
@@ -20,6 +26,7 @@ import {
 } from '../actions';
 import { EmptyState } from './empty-state';
 import { InviteForm } from './invite-form';
+import { RemoveMemberDialog } from './remove-member-dialog';
 
 type OptimisticInvite = PendingInvitationRow & { __pending?: boolean };
 
@@ -46,11 +53,13 @@ export function TeamView({
   pendingInvitations,
   currentRole,
   currentUserId,
+  tenantName,
 }: {
   members: TeamMemberRow[];
   pendingInvitations: PendingInvitationRow[];
   currentRole: MembershipRole;
   currentUserId: string;
+  tenantName: string;
 }) {
   const canInvite = canInviteMembers(currentRole);
   const canManageRolesUI = canManageRoles(currentRole);
@@ -122,6 +131,7 @@ export function TeamView({
             currentUserId={currentUserId}
             canManageRoles={canManageRolesUI}
             canRemove={canRemove}
+            tenantName={tenantName}
             onActionError={setActionError}
           />
         )}
@@ -157,14 +167,23 @@ function MembersTable({
   currentUserId,
   canManageRoles,
   canRemove,
+  tenantName,
   onActionError,
 }: {
   members: TeamMemberRow[];
   currentUserId: string;
   canManageRoles: boolean;
   canRemove: boolean;
+  tenantName: string;
   onActionError: (msg: string | null) => void;
 }) {
+  // Count surviving admins/owners so we can block "remove the last
+  // admin" at the UI layer. Server-side action also rejects this; the
+  // client check exists so the dialog can show an explanatory message
+  // before the user even tries.
+  const adminCount = members.filter(
+    (m) => m.role === 'owner' || m.role === 'admin',
+  ).length;
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
@@ -200,16 +219,22 @@ function MembersTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {members.map((m) => (
-              <MemberRow
-                key={m.id}
-                member={m}
-                isSelf={m.userId === currentUserId}
-                canManageRoles={canManageRoles}
-                canRemove={canRemove}
-                onActionError={onActionError}
-              />
-            ))}
+            {members.map((m) => {
+              const isAdminOrOwner = m.role === 'owner' || m.role === 'admin';
+              const isLastAdmin = isAdminOrOwner && adminCount <= 1;
+              return (
+                <MemberRow
+                  key={m.id}
+                  member={m}
+                  isSelf={m.userId === currentUserId}
+                  canManageRoles={canManageRoles}
+                  canRemove={canRemove}
+                  tenantName={tenantName}
+                  isLastAdmin={isLastAdmin}
+                  onActionError={onActionError}
+                />
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -222,12 +247,16 @@ function MemberRow({
   isSelf,
   canManageRoles,
   canRemove,
+  tenantName,
+  isLastAdmin,
   onActionError,
 }: {
   member: TeamMemberRow;
   isSelf: boolean;
   canManageRoles: boolean;
   canRemove: boolean;
+  tenantName: string;
+  isLastAdmin: boolean;
   onActionError: (msg: string | null) => void;
 }) {
   const [rolePending, startRoleTransition] = useTransition();
@@ -236,17 +265,20 @@ function MemberRow({
 
   // Owners are protected from inline role changes — Clerk has no native owner
   // concept, so reassigning would silently downgrade them. Demoting an owner
-  // is a deliberate, separate operation we'll add when needed.
+  // is a deliberate, separate operation we'll add when needed. Admins,
+  // managers, and members can all be reassigned to one another.
   const showRoleSelect =
     canManageRoles &&
     !isSelf &&
     member.role !== 'owner' &&
-    (member.role === 'admin' || member.role === 'member');
+    (member.role === 'admin' ||
+      member.role === 'manager' ||
+      member.role === 'member');
 
   const showRemove = canRemove && !isSelf && member.role !== 'owner';
   const showActionsCell = canManageRoles || canRemove;
 
-  function handleRoleChange(nextRole: InviteRole) {
+  function handleRoleChange(nextRole: ChangeRole) {
     onActionError(null);
     const formData = new FormData();
     formData.set('userId', member.userId);
@@ -263,8 +295,8 @@ function MemberRow({
       const result = await removeMemberAction(member.userId);
       if (!result.ok) {
         onActionError(result.message);
-        setConfirmingRemove(false);
       }
+      setConfirmingRemove(false);
     });
   }
 
@@ -293,16 +325,16 @@ function MemberRow({
           <select
             defaultValue={member.role}
             disabled={rolePending}
-            onChange={(e) => handleRoleChange(e.target.value as InviteRole)}
+            onChange={(e) => handleRoleChange(e.target.value as ChangeRole)}
             aria-label={`Change role for ${displayName(member)}`}
             className={cn(
               'rounded-md border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20',
               rolePending && 'opacity-60',
             )}
           >
-            {INVITE_ROLES.map((r) => (
+            {CHANGE_ROLES.map((r) => (
               <option key={r} value={r}>
-                {r === 'admin' ? 'Admin' : 'Member'}
+                {CHANGE_ROLE_LABELS[r]}
               </option>
             ))}
           </select>
@@ -319,42 +351,29 @@ function MemberRow({
       {showActionsCell ? (
         <td className="whitespace-nowrap px-4 py-3 text-right">
           {showRemove ? (
-            confirmingRemove ? (
-              <span className="inline-flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleRemove}
-                  disabled={removePending}
-                  className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
-                >
-                  {removePending ? (
-                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                  ) : null}
-                  Confirm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmingRemove(false)}
-                  disabled={removePending}
-                  className="rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirmingRemove(true)}
-                aria-label={`Remove ${displayName(member)}`}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-red-50 hover:text-red-700"
-              >
-                <Trash2 className="h-3 w-3" aria-hidden />
-                Remove
-              </button>
-            )
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(true)}
+              aria-label={`Remove ${displayName(member)}`}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-red-50 hover:text-red-700"
+            >
+              <Trash2 className="h-3 w-3" aria-hidden />
+              Remove
+            </button>
           ) : null}
         </td>
       ) : null}
+      <RemoveMemberDialog
+        open={confirmingRemove}
+        onClose={() => setConfirmingRemove(false)}
+        onConfirm={handleRemove}
+        pending={removePending}
+        memberName={displayName(member)}
+        memberEmail={member.email}
+        memberRole={member.role}
+        tenantName={tenantName}
+        isLastAdmin={isLastAdmin}
+      />
     </tr>
   );
 }

@@ -57,7 +57,7 @@ export type RealtimeEvent =
       type: 'member.invited';
       tenantId: string;
       email: string;
-      role: 'admin' | 'member';
+      role: 'admin' | 'manager' | 'member';
       invitationId: string;
     }
   | {

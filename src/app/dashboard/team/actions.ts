@@ -1,14 +1,20 @@
 'use server';
 
 import { auth, clerkClient } from '@clerk/nextjs/server';
+import { and, eq, inArray } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
+import { memberships } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
+import {
+  deletePendingRoleIntent,
+  upsertPendingRoleIntent,
+} from '@/lib/team/role-intents';
 import { type InviteRole } from '@/lib/team/schema';
 import {
   changeRoleSchema,
@@ -26,13 +32,52 @@ type ActionResult =
     };
 
 function clerkRoleFor(role: InviteRole): 'org:admin' | 'org:member' {
+  // Clerk's built-in org roles are admin and member only. Both
+  // 'manager' and 'member' map to org:member at the Clerk level —
+  // the manager distinction is carried via invitation publicMetadata
+  // and resolved locally on acceptance.
   return role === 'admin' ? 'org:admin' : 'org:member';
 }
 
+/**
+ * Clerk error codes related to "the invited email already exists in
+ * Clerk's user space or in some organization". Without further info
+ * these are ambiguous — Clerk doesn't always disclose whether the
+ * conflict is in THIS org or another. We rewrite them to a single
+ * neutral message that doesn't leak which tenant the user belongs to.
+ *
+ * The phrasing is informative enough to be actionable ("they're in
+ * another workspace, ask them to leave or use a different email")
+ * without confirming which workspace.
+ */
+const LEAKY_CLERK_CODES = new Set([
+  'user_already_belongs_to_organization',
+  'identifier_already_exists',
+  'duplicate_record',
+]);
+
+/**
+ * Codes that specifically mean "this email is already a member of
+ * THIS org" (per Clerk's API). When we can tell from the code that
+ * the conflict is in-tenant, we say so directly — that's not a leak.
+ */
+const SAME_ORG_DUPLICATE_CODES = new Set([
+  'duplicate_organization_membership',
+]);
+
+type ClerkErrorEntry = { code?: string; message?: string };
+
 function describeClerkError(err: unknown, fallback: string): string {
   if (typeof err === 'object' && err !== null) {
-    const maybeErrors = (err as { errors?: Array<{ message?: string }> }).errors;
-    if (maybeErrors?.[0]?.message) return maybeErrors[0].message;
+    const errors = (err as { errors?: ClerkErrorEntry[] }).errors;
+    const first = errors?.[0];
+    if (first?.code && SAME_ORG_DUPLICATE_CODES.has(first.code)) {
+      return 'This person is already a member of this workspace.';
+    }
+    if (first?.code && LEAKY_CLERK_CODES.has(first.code)) {
+      return 'User already belongs to another workspace, or has already been invited here.';
+    }
+    if (first?.message) return first.message;
     const maybeMessage = (err as { message?: string }).message;
     if (maybeMessage) return maybeMessage;
   }
@@ -74,6 +119,10 @@ export async function inviteMemberAction(formData: FormData): Promise<ActionResu
           emailAddress: parsed.data.email,
           role: clerkRoleFor(parsed.data.role),
           inviterUserId: userId,
+          // Carry the app-level role (manager) through Clerk's
+          // invitation as a defense-in-depth signal — the actual
+          // source of truth is `pending_role_intents` written below.
+          publicMetadata: { appRole: parsed.data.role },
         });
         invitationId = invitation.id;
       } catch (err) {
@@ -84,6 +133,18 @@ export async function inviteMemberAction(formData: FormData): Promise<ActionResu
       }
 
       const finalInvitationId = invitationId ?? parsed.data.email;
+
+      // Persist the app-role intent BEFORE recording activity / firing
+      // realtime so the invitee's first dashboard load can read it
+      // even if every other downstream write failed.
+      await upsertPendingRoleIntent({
+        tenantId: gate.tenant.id,
+        email: parsed.data.email,
+        appRole: parsed.data.role,
+        inviterUserId: userId,
+        invitationId,
+      });
+
       await tenantTransaction(async (tx) => {
         await recordActivity(tx, {
           tenantId: gate.tenant.id,
@@ -227,7 +288,34 @@ export async function removeMemberAction(targetUserId: string): Promise<ActionRe
         }
       }
 
+      // Last-admin protection — never let the workspace end up with
+      // zero owners/admins. Counts both 'owner' and 'admin' rows in
+      // the local memberships table; if the target is one of them and
+      // would leave the count at zero, reject.
+      const adminsOwners = await tenantTransaction(async (tx) =>
+        tx
+          .select({ userId: memberships.userId, role: memberships.role })
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.tenantId, gate.tenant.id),
+              inArray(memberships.role, ['owner', 'admin']),
+            ),
+          ),
+      );
+      const targetIsAdminOrOwner = adminsOwners.some(
+        (m) => m.userId === idCheck.data,
+      );
+      if (targetIsAdminOrOwner && adminsOwners.length <= 1) {
+        return {
+          ok: false,
+          message:
+            'Cannot remove the last admin or owner. Promote another member first.',
+        };
+      }
+
       let targetName: string | null = null;
+      let targetEmail: string | null = null;
       try {
         const client = await clerkClient();
         try {
@@ -236,6 +324,7 @@ export async function removeMemberAction(targetUserId: string): Promise<ActionRe
           targetName = parts.length
             ? parts.join(' ')
             : target.primaryEmailAddress?.emailAddress ?? null;
+          targetEmail = target.primaryEmailAddress?.emailAddress ?? null;
         } catch {
           targetName = null;
         }
@@ -250,7 +339,33 @@ export async function removeMemberAction(targetUserId: string): Promise<ActionRe
         };
       }
 
+      // Clear any stale pending-role intent for this email so a
+      // re-invite at a different role isn't shadowed by a leftover row.
+      if (targetEmail) {
+        try {
+          await deletePendingRoleIntent({
+            tenantId: gate.tenant.id,
+            email: targetEmail,
+          });
+        } catch {
+          // Non-fatal — the intent table is consumed-on-read anyway.
+        }
+      }
+
       await tenantTransaction(async (tx) => {
+        // Delete the local memberships row directly. The Clerk webhook
+        // would normally fire `organizationMembership.deleted` and our
+        // handler would clean up, but webhooks may be slow or absent
+        // in dev/local — making the row stale and the admin UI show
+        // the removed user. Direct delete eliminates that drift.
+        await tx
+          .delete(memberships)
+          .where(
+            and(
+              eq(memberships.tenantId, gate.tenant.id),
+              eq(memberships.userId, idCheck.data),
+            ),
+          );
         await recordActivity(tx, {
           tenantId: gate.tenant.id,
           actorUserId: userId,
@@ -270,6 +385,7 @@ export async function removeMemberAction(targetUserId: string): Promise<ActionRe
         });
       });
 
+      revalidatePath('/dashboard');
       revalidatePath('/dashboard/team');
       revalidatePath('/dashboard/activity');
       return { ok: true };
@@ -320,10 +436,17 @@ export async function changeMemberRoleAction(
         } catch {
           targetName = null;
         }
+        // Manager is an app-level role only — Clerk's built-in org
+        // roles are admin/member. Set Clerk to "member" for manager;
+        // our local memberships table is the source of truth for the
+        // manager bit.
+        const clerkRole = clerkRoleFor(
+          parsed.data.role === 'manager' ? 'member' : parsed.data.role,
+        );
         await client.organizations.updateOrganizationMembership({
           organizationId: orgId,
           userId: parsed.data.userId,
-          role: clerkRoleFor(parsed.data.role),
+          role: clerkRole,
         });
       } catch (err) {
         return {
@@ -332,7 +455,22 @@ export async function changeMemberRoleAction(
         };
       }
 
+      // Persist the role to our memberships table directly. For
+      // admin/member the Clerk webhook would also write this — but
+      // calling it explicitly avoids a "stale until webhook fires"
+      // window. For manager the webhook would write "member" (since
+      // that's what Clerk sees), so this direct write is the ONLY
+      // source of truth.
       await tenantTransaction(async (tx) => {
+        await tx
+          .update(memberships)
+          .set({ role: parsed.data.role })
+          .where(
+            and(
+              eq(memberships.tenantId, gate.tenant.id),
+              eq(memberships.userId, parsed.data.userId),
+            ),
+          );
         await recordActivity(tx, {
           tenantId: gate.tenant.id,
           actorUserId: userId,
@@ -354,6 +492,10 @@ export async function changeMemberRoleAction(
         });
       });
 
+      // Bust the dashboard cache too so the target user's next nav
+      // picks up their new persona (sidebar tree, dashboard switcher)
+      // without a session refresh.
+      revalidatePath('/dashboard');
       revalidatePath('/dashboard/team');
       revalidatePath('/dashboard/activity');
       return { ok: true };

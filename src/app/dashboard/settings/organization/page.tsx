@@ -25,7 +25,7 @@ const COMMON_TIMEZONES = [
 ];
 
 export default async function OrganizationSettingsPage() {
-  await requirePersonas(['admin']);
+  await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant }) => {
     const settings = await getOrgSettings(tenant.id);
     return (

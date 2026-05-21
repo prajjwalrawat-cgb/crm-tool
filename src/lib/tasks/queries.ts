@@ -48,6 +48,11 @@ export type ListTasksOptions = {
   filters?: TaskFilters;
   /** Required when `filters.assignedToMe` is set. */
   currentUserId?: string;
+  /**
+   * Hard-restrict to tasks assigned to this user OR unassigned. Used
+   * by sales-persona pages to enforce member visibility at SSR.
+   */
+  restrictToAssigneeOrUnassigned?: string;
 };
 
 /**
@@ -82,6 +87,12 @@ export async function listTasks(
   }
   if (f.unassigned) {
     conditions.push(isNull(tasks.assignedUserId));
+  }
+  if (options.restrictToAssigneeOrUnassigned) {
+    const me = options.restrictToAssigneeOrUnassigned;
+    conditions.push(
+      sql`(${tasks.assignedUserId} = ${me} OR ${tasks.assignedUserId} IS NULL)`,
+    );
   }
   if (typeof f.dueWithinDays === 'number') {
     conditions.push(

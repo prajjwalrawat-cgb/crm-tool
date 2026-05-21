@@ -69,6 +69,11 @@ export type ListContactsOptions = {
   filters?: ContactFilters;
   /** Required for `filters.mine` to resolve "owner == me". */
   currentUserId?: string;
+  /**
+   * Hard-restrict to contacts owned by this user OR unassigned. Used
+   * by sales-persona pages to enforce member visibility at SSR.
+   */
+  restrictToOwnerOrUnassigned?: string;
 };
 
 export async function listContacts(
@@ -119,6 +124,12 @@ export async function listContacts(
   }
   if (f.unassigned) {
     conditions.push(isNull(contacts.ownerId));
+  }
+  if (options.restrictToOwnerOrUnassigned) {
+    const me = options.restrictToOwnerOrUnassigned;
+    conditions.push(
+      sql`(${contacts.ownerId} = ${me} OR ${contacts.ownerId} IS NULL)`,
+    );
   }
   if (options.cursor) {
     conditions.push(

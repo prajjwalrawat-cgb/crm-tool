@@ -5,6 +5,7 @@ import { parseDealFilters } from '@/lib/deals/filters';
 import { listDeals } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
+import { personaOf } from '@/lib/personas';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import { DealsView } from './_components/deals-view';
@@ -27,16 +28,24 @@ export default async function DealsPage({
     const cursor = parseCursorParam(typeof sp.cursor === 'string' ? sp.cursor : undefined);
     const size = parsePageSize(typeof sp.size === 'string' ? sp.size : undefined);
     const filters = parseDealFilters(sp);
+    // Resolve persona BEFORE the parallel fetch so we can clamp the
+    // deals query to "mine or unassigned" for sales personas. The
+    // restriction is server-enforced — URL params can narrow further
+    // (by stage/amount) but cannot widen scope.
+    const membership = await requireMembership();
+    const persona = personaOf(membership.role);
+    const restrictToOwnerOrUnassigned =
+      persona === 'sales' ? userId : undefined;
 
-    const [membership, page, companyOptions, contactOptions, teammates] =
+    const [page, companyOptions, contactOptions, teammates] =
       await Promise.all([
-        requireMembership(),
         listDeals(tenant.id, {
           search,
           cursor,
           size,
           filters,
           currentUserId: userId,
+          restrictToOwnerOrUnassigned,
         }),
         listCompanyOptions(tenant.id),
         listContactOptions(tenant.id),

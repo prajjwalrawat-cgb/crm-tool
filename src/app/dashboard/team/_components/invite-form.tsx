@@ -3,8 +3,14 @@
 import { Loader2, Send } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
-import { INVITE_ROLES } from '@/lib/team/schema';
+import { INVITE_ROLE_LABELS, INVITE_ROLES } from '@/lib/team/schema';
 import { cn } from '@/lib/utils';
+
+const ROLE_DESCRIPTIONS: Record<(typeof INVITE_ROLES)[number], string> = {
+  admin: 'manage CRM + members',
+  manager: 'team analytics + assign deals',
+  member: 'read/write CRM',
+};
 
 type Props = {
   onSubmit: (formData: FormData) => void;
@@ -60,7 +66,7 @@ export function InviteForm({
       >
         {INVITE_ROLES.map((r) => (
           <option key={r} value={r}>
-            {r === 'admin' ? 'Admin — manage CRM + members' : 'Member — read/write CRM'}
+            {`${INVITE_ROLE_LABELS[r]} — ${ROLE_DESCRIPTIONS[r]}`}
           </option>
         ))}
       </SelectField>

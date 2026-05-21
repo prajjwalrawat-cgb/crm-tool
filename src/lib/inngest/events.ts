@@ -42,7 +42,7 @@ export type WorkflowEvents = {
   'crm/member.invited': {
     tenantId: string;
     email: string;
-    role: 'admin' | 'member';
+    role: 'admin' | 'manager' | 'member';
     invitationId: string;
     inviterUserId: string;
   };

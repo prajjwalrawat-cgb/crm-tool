@@ -97,7 +97,17 @@ export function DashboardShell({
   }, [mobileOpen]);
 
   return (
-    <div className="flex min-h-screen bg-slate-50 dark:bg-black">
+    // Pin the chrome (sidebar + header) and scroll content separately.
+    // Outer is exactly the viewport (h-screen + overflow-hidden); the
+    // sidebar takes its natural width and full height (no scroll on
+    // page itself); the right column flexes to fill, with the content
+    // div being the lone scroll container. This matches the layout
+    // pattern in Linear / HubSpot / Attio / Notion.
+    //
+    // h-screen = 100vh, fine for desktop. On mobile the sidebar is a
+    // fixed-position drawer (Sidebar component handles that), so the
+    // viewport math doesn't affect the small-screen flow.
+    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-black">
       <Sidebar
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
@@ -128,8 +138,11 @@ export function DashboardShell({
           CopilotPanel) keep their state across tenant switches. Anything
           tenant-scoped at that layer is keyed individually at its render
           site (PresenceIndicator inside Header, CopilotPanel below).
+
+          `overflow-y-auto` makes THIS the scroll container — the
+          sidebar and header stay pinned while the page content scrolls.
         */}
-        <div key={tenantId} className="flex-1">
+        <div key={tenantId} className="flex-1 overflow-y-auto">
           {children}
         </div>
       </div>

@@ -8,7 +8,7 @@ import { SaleinxIcon, SaleinxWordmark } from '@/lib/brand/logo';
 import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
-import { isNavActive, navItemsForPersona } from './nav-config';
+import { isNavActive, navGroupsForPersona } from './nav-config';
 
 type Props = {
   mobileOpen: boolean;
@@ -185,40 +185,56 @@ function NavList({
   onLinkClick?: () => void;
   persona: Persona;
 }) {
-  const items = navItemsForPersona(persona);
+  const groups = navGroupsForPersona(persona);
   return (
-    <nav className={cn('flex-1 py-2', collapsed ? 'px-1.5' : 'px-2')}>
-      <ul className="flex flex-col gap-0.5">
-        {items.map((item) => {
-          const active = isNavActive(item.href, pathname);
-          const Icon = item.icon;
-
-          return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                onClick={onLinkClick}
-                aria-current={active ? 'page' : undefined}
-                title={collapsed ? item.label : undefined}
-                className={cn(
-                  // Linear/Attio-style nav: subtle tinted surface for
-                  // active, calm hover for idle. No more solid-black
-                  // pill — that read as "developer console" rather
-                  // than "SaaS product".
-                  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition',
-                  active
-                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-[#A1A1AA] dark:hover:bg-slate-800/60 dark:hover:text-slate-100',
-                  collapsed && 'justify-center px-2',
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                {!collapsed ? <span>{item.label}</span> : null}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
+    <nav
+      className={cn(
+        'flex-1 overflow-y-auto py-2',
+        collapsed ? 'px-1.5' : 'px-2',
+      )}
+    >
+      <div className="flex flex-col gap-3">
+        {groups.map((group, idx) => (
+          <div key={group.id} className="flex flex-col gap-0.5">
+            {!collapsed ? (
+              <h3 className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-[#71717A]">
+                {group.label}
+              </h3>
+            ) : idx > 0 ? (
+              <div
+                className="mx-2 mb-0.5 border-t border-slate-200/70 dark:border-[#1F1F1F]"
+                aria-hidden
+              />
+            ) : null}
+            <ul className="flex flex-col gap-0.5">
+              {group.items.map((item) => {
+                const active = isNavActive(item.href, pathname);
+                const Icon = item.icon;
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      onClick={onLinkClick}
+                      aria-current={active ? 'page' : undefined}
+                      title={collapsed ? item.label : undefined}
+                      className={cn(
+                        'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition',
+                        active
+                          ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-[#A1A1AA] dark:hover:bg-slate-800/60 dark:hover:text-slate-100',
+                        collapsed && 'justify-center px-2',
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                      {!collapsed ? <span>{item.label}</span> : null}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
     </nav>
   );
 }

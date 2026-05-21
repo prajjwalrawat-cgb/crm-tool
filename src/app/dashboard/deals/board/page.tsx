@@ -1,6 +1,7 @@
 ﻿import { withTenantSession } from '@/lib/auth-guard';
 import { listDealsForBoard } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
+import { personaOf } from '@/lib/personas';
 
 import { DealViewTabs } from '../_components/deal-view-tabs';
 import { BoardView } from './_components/board-view';
@@ -10,11 +11,14 @@ export const metadata = {
 };
 
 export default async function DealsBoardPage() {
-  return await withTenantSession(async ({ tenant }) => {
-    const [membership, summary] = await Promise.all([
-      requireMembership(),
-      listDealsForBoard(tenant.id),
-    ]);
+  return await withTenantSession(async ({ tenant, userId }) => {
+    const membership = await requireMembership();
+    const persona = personaOf(membership.role);
+    const restrictToOwnerOrUnassigned =
+      persona === 'sales' ? userId : undefined;
+    const summary = await listDealsForBoard(tenant.id, {
+      restrictToOwnerOrUnassigned,
+    });
 
     const cappedNotice = summary.capped
       ? 'Showing the 50 most recent per stage; switch to the list view for the full pipeline.'

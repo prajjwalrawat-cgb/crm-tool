@@ -39,6 +39,11 @@ export type ListCompaniesOptions = {
   filters?: CompanyFilters;
   /** Required for `filters.mine` to resolve "owner == me". */
   currentUserId?: string;
+  /**
+   * Hard-restrict to companies owned by this user OR unassigned. Used
+   * by sales-persona pages to enforce member visibility at SSR.
+   */
+  restrictToOwnerOrUnassigned?: string;
 };
 
 /**
@@ -105,6 +110,12 @@ export async function listCompanies(
   }
   if (f.unassigned) {
     conditions.push(isNull(companies.ownerId));
+  }
+  if (options.restrictToOwnerOrUnassigned) {
+    const me = options.restrictToOwnerOrUnassigned;
+    conditions.push(
+      sql`(${companies.ownerId} = ${me} OR ${companies.ownerId} IS NULL)`,
+    );
   }
 
   if (options.cursor) {

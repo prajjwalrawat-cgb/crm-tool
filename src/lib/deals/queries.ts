@@ -66,6 +66,14 @@ export type ListDealsOptions = {
   filters?: DealFilters;
   /** Required for `filters.mine` to resolve "owner == me". */
   currentUserId?: string;
+  /**
+   * Hard-restrict results to deals owned by this user OR unassigned.
+   * Applied as a non-overridable WHERE clause so URL params can't
+   * widen the scope. Used to enforce member visibility at SSR —
+   * sales-persona pages set this; manager/admin pages leave it
+   * undefined for full-team visibility.
+   */
+  restrictToOwnerOrUnassigned?: string;
 };
 
 type RawJoinedRow = {
@@ -178,6 +186,13 @@ export async function listDeals(
   if (f.ownerId) {
     conditions.push(eq(deals.ownerId, f.ownerId));
   }
+  // Hard scope: members see only their deals + unassigned. URL params
+  // cannot widen this — they're additive within the allowed set.
+  if (options.restrictToOwnerOrUnassigned) {
+    const me = options.restrictToOwnerOrUnassigned;
+    const scoped = sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`;
+    conditions.push(scoped);
+  }
 
   if (options.cursor) {
     conditions.push(
@@ -289,6 +304,7 @@ export type DealBoardSummary = {
  */
 export async function listDealsForBoard(
   tenantId: string,
+  options: { restrictToOwnerOrUnassigned?: string } = {},
 ): Promise<DealBoardSummary> {
   const STAGES: DealStage[] = [
     'lead',
@@ -319,18 +335,23 @@ export async function listDealsForBoard(
 
       const stageResults = await Promise.all(
         STAGES.map(async (stage) => {
+          const whereConds: SQL[] = [
+            eq(deals.tenantId, tenantId),
+            eq(deals.stage, stage),
+            isNull(deals.deletedAt),
+          ];
+          if (options.restrictToOwnerOrUnassigned) {
+            const me = options.restrictToOwnerOrUnassigned;
+            whereConds.push(
+              sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`,
+            );
+          }
           const rows = await tx
             .select(DEALS_PROJECTION)
             .from(deals)
             .leftJoin(companies, eq(deals.companyId, companies.id))
             .leftJoin(contacts, eq(deals.contactId, contacts.id))
-            .where(
-              and(
-                eq(deals.tenantId, tenantId),
-                eq(deals.stage, stage),
-                isNull(deals.deletedAt),
-              ),
-            )
+            .where(and(...whereConds))
             .orderBy(desc(deals.updatedAt), desc(deals.id))
             .limit(BOARD_PER_STAGE_LIMIT);
           return { stage, rows: rows.map(shapeDealRow) };
@@ -340,15 +361,23 @@ export async function listDealsForBoard(
         board[stage] = rows;
       }
 
+      const totalsConds: SQL[] = [
+        eq(deals.tenantId, tenantId),
+        isNull(deals.deletedAt),
+      ];
+      if (options.restrictToOwnerOrUnassigned) {
+        const me = options.restrictToOwnerOrUnassigned;
+        totalsConds.push(
+          sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`,
+        );
+      }
       const totals = await tx
         .select({
           stage: deals.stage,
           n: sql<number>`count(*)::int`,
         })
         .from(deals)
-        .where(
-          and(eq(deals.tenantId, tenantId), isNull(deals.deletedAt)),
-        )
+        .where(and(...totalsConds))
         .groupBy(deals.stage);
       for (const t of totals) {
         counts[t.stage as DealStage] = t.n;

@@ -14,42 +14,57 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
 /**
- * Settings sidebar nav. Each entry maps a sub-route under
- * `/dashboard/settings`. Every section here is functional — the
- * "Soon" placeholder pattern from CP#15 is gone.
+ * Settings sidebar nav. Per-section persona visibility:
+ *   - everyone           profile, appearance, notifications
+ *   - manager + admin    organization, pipeline, currency
+ *   - admin only         email, AI infrastructure
+ *
+ * Drives BOTH which sections appear in the settings rail and the
+ * order they're grouped. Page-level `requirePersonas()` guards are
+ * the actual gate — this is curation.
  */
+
+type Visibility = 'all' | 'managerOrAdmin' | 'adminOnly';
 
 type SettingsItem = {
   href: string;
   label: string;
   icon: LucideIcon;
-  /** Optional group header rendered above this item. */
   group?: string;
+  visibility: Visibility;
 };
 
 const ITEMS: readonly SettingsItem[] = [
-  { href: '/dashboard/settings/profile', label: 'Profile', icon: User, group: 'Account' },
-  { href: '/dashboard/settings/appearance', label: 'Appearance', icon: Palette },
-  { href: '/dashboard/settings/notifications', label: 'Notifications', icon: Bell },
-  { href: '/dashboard/settings/organization', label: 'Organization', icon: Building2, group: 'Workspace' },
-  { href: '/dashboard/settings/email', label: 'Email', icon: Mail },
-  { href: '/dashboard/settings/pipeline', label: 'Pipeline', icon: GitBranch },
-  { href: '/dashboard/settings/currency', label: 'Currency & Locale', icon: Banknote },
-  { href: '/dashboard/settings/ai', label: 'AI', icon: Brain },
+  { href: '/dashboard/settings/profile', label: 'Profile', icon: User, group: 'Account', visibility: 'all' },
+  { href: '/dashboard/settings/appearance', label: 'Appearance', icon: Palette, visibility: 'all' },
+  { href: '/dashboard/settings/notifications', label: 'Notifications', icon: Bell, visibility: 'all' },
+  { href: '/dashboard/settings/organization', label: 'Organization', icon: Building2, group: 'Workspace', visibility: 'managerOrAdmin' },
+  { href: '/dashboard/settings/pipeline', label: 'Pipeline', icon: GitBranch, visibility: 'managerOrAdmin' },
+  { href: '/dashboard/settings/currency', label: 'Currency & Locale', icon: Banknote, visibility: 'managerOrAdmin' },
+  { href: '/dashboard/settings/email', label: 'Email', icon: Mail, group: 'Infrastructure', visibility: 'adminOnly' },
+  { href: '/dashboard/settings/ai', label: 'AI', icon: Brain, visibility: 'adminOnly' },
 ];
 
-export function SettingsNav() {
+function isVisible(v: Visibility, persona: Persona): boolean {
+  if (v === 'all') return true;
+  if (v === 'managerOrAdmin') return persona === 'manager' || persona === 'admin';
+  return persona === 'admin';
+}
+
+export function SettingsNav({ persona }: { persona: Persona }) {
   const pathname = usePathname();
+  const items = ITEMS.filter((i) => isVisible(i.visibility, persona));
 
   return (
     <nav aria-label="Settings sections" className="flex flex-col gap-0.5">
-      {ITEMS.map((item, i) => {
+      {items.map((item, i) => {
         const active = pathname === item.href;
         const Icon = item.icon;
-        const showGroup = item.group && (i === 0 || ITEMS[i - 1].group !== item.group);
+        const showGroup = item.group && (i === 0 || items[i - 1].group !== item.group);
 
         return (
           <div key={item.href}>

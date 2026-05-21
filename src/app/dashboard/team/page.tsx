@@ -40,6 +40,7 @@ export default async function TeamPage() {
           pendingInvitations={pendingInvitations}
           currentRole={currentMembership.role}
           currentUserId={userId}
+          tenantName={tenant.name}
         />
       </main>
     );

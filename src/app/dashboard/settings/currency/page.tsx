@@ -9,7 +9,7 @@ export const metadata = {
 };
 
 export default async function CurrencySettingsPage() {
-  await requirePersonas(['admin']);
+  await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant }) => {
     const settings = await getOrgSettings(tenant.id);
     return (
