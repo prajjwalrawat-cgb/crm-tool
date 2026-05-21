@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import type { Notification } from '@/db/schema';
 import type { AIMode } from '@/lib/ai/config';
+import type { Persona } from '@/lib/personas';
 
 import { CommandPalette } from './command-palette';
 import { CopilotPanel } from './copilot-panel';
@@ -19,12 +20,14 @@ export function DashboardShell({
   currentUserId,
   initialNotifications,
   aiMode,
+  persona,
 }: {
   children: ReactNode;
   tenantId: string;
   currentUserId: string;
   initialNotifications: Notification[];
   aiMode: AIMode;
+  persona: Persona;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -100,6 +103,7 @@ export function DashboardShell({
         onMobileClose={() => setMobileOpen(false)}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={toggleSidebarCollapsed}
+        persona={persona}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header

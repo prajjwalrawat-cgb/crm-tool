@@ -5,15 +5,21 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import { SaleinxIcon, SaleinxWordmark } from '@/lib/brand/logo';
+import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
-import { isNavActive, NAV_ITEMS } from './nav-config';
+import {
+  isNavActive,
+  SIDEBARS_BY_PERSONA,
+  type NavItem,
+} from './nav-config';
 
 type Props = {
   mobileOpen: boolean;
   onMobileClose: () => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  persona: Persona;
 };
 
 export function Sidebar({
@@ -21,11 +27,21 @@ export function Sidebar({
   onMobileClose,
   collapsed,
   onToggleCollapsed,
+  persona,
 }: Props) {
+  const items = SIDEBARS_BY_PERSONA[persona];
   return (
     <>
-      <DesktopSidebar collapsed={collapsed} onToggle={onToggleCollapsed} />
-      <MobileSidebar open={mobileOpen} onClose={onMobileClose} />
+      <DesktopSidebar
+        collapsed={collapsed}
+        onToggle={onToggleCollapsed}
+        items={items}
+      />
+      <MobileSidebar
+        open={mobileOpen}
+        onClose={onMobileClose}
+        items={items}
+      />
     </>
   );
 }
@@ -33,9 +49,11 @@ export function Sidebar({
 function DesktopSidebar({
   collapsed,
   onToggle,
+  items,
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  items: readonly NavItem[];
 }) {
   const pathname = usePathname();
   return (
@@ -46,7 +64,7 @@ function DesktopSidebar({
       )}
     >
       <Brand collapsed={collapsed} />
-      <NavList pathname={pathname} collapsed={collapsed} />
+      <NavList items={items} pathname={pathname} collapsed={collapsed} />
       <CollapseToggle collapsed={collapsed} onToggle={onToggle} />
     </aside>
   );
@@ -87,9 +105,11 @@ function CollapseToggle({
 function MobileSidebar({
   open,
   onClose,
+  items,
 }: {
   open: boolean;
   onClose: () => void;
+  items: readonly NavItem[];
 }) {
   const pathname = usePathname();
 
@@ -128,7 +148,7 @@ function MobileSidebar({
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <NavList pathname={pathname} onLinkClick={onClose} />
+        <NavList items={items} pathname={pathname} onLinkClick={onClose} />
       </aside>
     </div>
   );
@@ -160,10 +180,12 @@ function Brand({
 }
 
 function NavList({
+  items,
   pathname,
   collapsed = false,
   onLinkClick,
 }: {
+  items: readonly NavItem[];
   pathname: string;
   collapsed?: boolean;
   onLinkClick?: () => void;
@@ -171,7 +193,7 @@ function NavList({
   return (
     <nav className={cn('flex-1 py-2', collapsed ? 'px-1.5' : 'px-2')}>
       <ul className="flex flex-col gap-0.5">
-        {NAV_ITEMS.map((item) => {
+        {items.map((item) => {
           const active = isNavActive(item.href, pathname);
           const Icon = item.icon;
 

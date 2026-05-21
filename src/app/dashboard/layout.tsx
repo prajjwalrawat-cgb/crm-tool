@@ -5,6 +5,7 @@ import { getAIMode } from '@/lib/ai/config';
 import { runWithTenantContext } from '@/lib/db-context';
 import { ensureMembership } from '@/lib/membership';
 import { listNotificationsForUser } from '@/lib/notifications/queries';
+import { personaOf } from '@/lib/personas';
 import { ensureTenant } from '@/lib/tenant';
 
 import { DashboardShell } from './_components/dashboard-shell';
@@ -19,7 +20,7 @@ export default async function DashboardLayout({
   // writes (memberships table) — the layout doesn't need to wrap them.
   // Page-level data fetches enter their own context via withTenantSession.
   const tenant = await ensureTenant();
-  await ensureMembership();
+  const membership = await ensureMembership();
 
   if (!tenant) {
     // The middleware should have redirected to /select-org before reaching
@@ -40,12 +41,15 @@ export default async function DashboardLayout({
       )
     : [];
 
+  const persona = personaOf(membership?.role ?? null);
+
   return (
     <DashboardShell
       tenantId={tenant.id}
       currentUserId={userId ?? ''}
       initialNotifications={initialNotifications}
       aiMode={getAIMode()}
+      persona={persona}
     >
       {children}
     </DashboardShell>

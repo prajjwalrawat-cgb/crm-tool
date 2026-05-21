@@ -525,6 +525,7 @@ function Avatar({ member }: { member: TeamMemberRow }) {
 const ROLE_STYLES: Record<MembershipRole, string> = {
   owner: 'bg-amber-100 text-amber-800',
   admin: 'bg-indigo-100 text-indigo-700',
+  manager: 'bg-violet-100 text-violet-700',
   member: 'bg-slate-100 text-slate-700',
   viewer: 'bg-slate-100 text-slate-700',
 };

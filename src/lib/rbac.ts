@@ -9,18 +9,21 @@ import type { MembershipRole } from '@/db/schema';
  *   - owner: everything, including managing roles and removing other owners.
  *   - admin: CRM management + member management (invite/remove). Cannot
  *     change roles to/from owner.
+ *   - manager: team-visibility tier — sees reports, team performance, can
+ *     invite members, but cannot edit infrastructure (workflows / AI /
+ *     org settings).
  *   - member: read/write basic CRM data. No destructive admin operations.
  *   - viewer: read-only (reserved; not in any write permission).
  */
 const PERMISSIONS = {
   manageMembers: ['owner', 'admin'],
-  inviteMembers: ['owner', 'admin'],
+  inviteMembers: ['owner', 'admin', 'manager'],
   revokeInvitations: ['owner', 'admin'],
   removeMembers: ['owner', 'admin'],
   /** Only owners may promote/demote roles. Admins cannot mint new admins. */
   manageRoles: ['owner'],
 
-  manageCompanies: ['owner', 'admin', 'member'],
+  manageCompanies: ['owner', 'admin', 'manager', 'member'],
   deleteCompanies: ['owner', 'admin'],
   // Restore mirrors delete: anyone authorized to soft-delete may
   // recover their own (or a peer's) action. Without this, admins
@@ -29,12 +32,12 @@ const PERMISSIONS = {
   // Permanent delete is destructive and irreversible — owner only.
   hardDeleteCompanies: ['owner'],
 
-  manageContacts: ['owner', 'admin', 'member'],
+  manageContacts: ['owner', 'admin', 'manager', 'member'],
   deleteContacts: ['owner', 'admin'],
   restoreContacts: ['owner', 'admin'],
   hardDeleteContacts: ['owner'],
 
-  manageDeals: ['owner', 'admin', 'member'],
+  manageDeals: ['owner', 'admin', 'manager', 'member'],
   deleteDeals: ['owner', 'admin'],
   restoreDeals: ['owner', 'admin'],
   hardDeleteDeals: ['owner'],
@@ -101,6 +104,7 @@ export const canHardDeleteAnything = (role: RoleArg) =>
 const RANK: Record<MembershipRole, number> = {
   owner: 30,
   admin: 20,
+  manager: 15,
   member: 10,
   viewer: 5,
 };
