@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+import { CHART_KEY_REVENUE_TREND } from '@/lib/chart-studio/config';
+import { readDefaultChartView } from '@/lib/chart-studio/queries';
 import { getInboxCounts } from '@/lib/communications/threads/queries';
 import {
   formatCompactTenantCurrency,
@@ -87,6 +89,7 @@ export async function ManagerHome({
     predictions,
     pipelineTrend,
     revenueTrend,
+    savedChartView,
   ] = await Promise.all([
     currentUser(),
     getOrgSettings(tenantId),
@@ -121,6 +124,11 @@ export async function ManagerHome({
       // ?view=rep:<id> scopes the trend to that rep; ?view=team (default)
       // leaves it whole-team.
       ownerId: view.mode === 'rep' ? view.userId : null,
+    }),
+    readDefaultChartView({
+      tenantId,
+      userId,
+      chartKey: CHART_KEY_REVENUE_TREND,
     }),
   ]);
 
@@ -246,6 +254,9 @@ export async function ManagerHome({
           currency={settings}
           title={view.mode === 'rep' ? `${scopeLabel} · revenue trend` : 'Team revenue trend'}
           subtitle={`Last 90 days · ${tenantName}`}
+          initialConfig={savedChartView?.config ?? null}
+          initialTitleOverride={savedChartView?.title ?? null}
+          persona="manager"
         />
       </div>
 

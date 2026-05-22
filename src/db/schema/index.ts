@@ -2,6 +2,7 @@ export * from './enums';
 export * from './tenants';
 export * from './memberships';
 export * from './pending-role-intents';
+export * from './chart-views';
 export * from './companies';
 export * from './contacts';
 export * from './deals';

@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+import { CHART_KEY_REVENUE_TREND } from '@/lib/chart-studio/config';
+import { readDefaultChartView } from '@/lib/chart-studio/queries';
 import {
   formatCompactTenantCurrency,
   formatTenantCurrency,
@@ -56,21 +58,35 @@ export async function SalesHome({
   tenantName: string;
   userId: string;
 }) {
-  const [user, settings, pipeline, trend, myTasks, followUps, stale, wins] =
-    await Promise.all([
-      currentUser(),
-      getOrgSettings(tenantId),
-      pipelineByStageRunner(
-        tenantId,
-        { range: 'last_90d', owner: { type: 'mine' } },
-        { currentUserId: userId },
-      ),
-      getRevenueTrend(tenantId, { days: 90, ownerId: userId }),
-      getMyTasksSummary(tenantId, userId),
-      getUpcomingFollowUps(tenantId, { lookAheadDays: 14, limit: 6 }),
-      getStaleDeals(tenantId, { staleDays: 14, limit: 5 }),
-      getRecentWins(tenantId, 5),
-    ]);
+  const [
+    user,
+    settings,
+    pipeline,
+    trend,
+    myTasks,
+    followUps,
+    stale,
+    wins,
+    savedChartView,
+  ] = await Promise.all([
+    currentUser(),
+    getOrgSettings(tenantId),
+    pipelineByStageRunner(
+      tenantId,
+      { range: 'last_90d', owner: { type: 'mine' } },
+      { currentUserId: userId },
+    ),
+    getRevenueTrend(tenantId, { days: 90, ownerId: userId }),
+    getMyTasksSummary(tenantId, userId),
+    getUpcomingFollowUps(tenantId, { lookAheadDays: 14, limit: 6 }),
+    getStaleDeals(tenantId, { staleDays: 14, limit: 5 }),
+    getRecentWins(tenantId, 5),
+    readDefaultChartView({
+      tenantId,
+      userId,
+      chartKey: CHART_KEY_REVENUE_TREND,
+    }),
+  ]);
 
   const money = (m: number) =>
     settings.compactNumbers
@@ -109,6 +125,9 @@ export async function SalesHome({
         currency={settings}
         title="My revenue trend"
         subtitle={`Last 90 days · ${tenantName}`}
+        initialConfig={savedChartView?.config ?? null}
+        initialTitleOverride={savedChartView?.title ?? null}
+        persona="sales"
       />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">

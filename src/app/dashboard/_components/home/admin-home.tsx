@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+import { CHART_KEY_REVENUE_TREND } from '@/lib/chart-studio/config';
+import { readDefaultChartView } from '@/lib/chart-studio/queries';
 import { getInboxCounts } from '@/lib/communications/threads/queries';
 import {
   formatCompactTenantCurrency,
@@ -75,6 +77,7 @@ export async function AdminHome({
     inbox,
     recs,
     risks,
+    savedChartView,
   ] = await Promise.all([
     currentUser(),
     getOrgSettings(tenantId),
@@ -92,6 +95,11 @@ export async function AdminHome({
     getInboxCounts(tenantId),
     getRecommendationInsight(tenantId, userId),
     getRiskFlagInsight(tenantId, userId),
+    readDefaultChartView({
+      tenantId,
+      userId,
+      chartKey: CHART_KEY_REVENUE_TREND,
+    }),
   ]);
 
   const money = (m: number) =>
@@ -133,6 +141,9 @@ export async function AdminHome({
           currency={settings}
           title="Organization revenue trend"
           subtitle={`Last 90 days · ${tenantName}`}
+          initialConfig={savedChartView?.config ?? null}
+          initialTitleOverride={savedChartView?.title ?? null}
+          persona="admin"
         />
       </div>
 
