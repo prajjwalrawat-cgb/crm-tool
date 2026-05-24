@@ -1,114 +1,90 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 /**
- * Dashboard Edit Mode — global on/off toggle exposed via React
- * context. The provider lives at the dashboard layout level so every
- * widget on the page can read the same flag and adapt its chrome
- * (drag-handle affordance, delete/duplicate buttons, grid overlay).
+ * Studio-open tracker. Each chart that opens its Chart Studio
+ * registers via `useStudioRegistration(open)`; the count is exposed
+ * so other UI (CopilotPanel) can hide while ANY chart is being
+ * customized.
  *
- * Activation:
- *   - Cmd/Ctrl + Shift + E    toggle from anywhere on the page
- *   - Escape                  exits when active
- *   - Click the X on the
- *     bottom-right pill       exits when active
- *
- * Why not URL-state: we deliberately avoid persisting "I'm in edit
- * mode" across reloads. It's a transient, intentional mode — a fresh
- * dashboard load should always start in view mode so users don't
- * accidentally see drag handles after closing and reopening the tab.
- *
- * Why not server-state: same reason. Plus, edit mode is per-tab
- * (you might be reading on one tab and editing on another).
+ * Historical note: this file briefly hosted a global "Dashboard Edit
+ * Mode" toggled by Cmd/Ctrl+Shift+E with drag/resize chrome. That
+ * surface was rolled back to last-known-stable; the studio-tracking
+ * bits are what survived because the Copilot auto-hide depends on
+ * them. If a real layout-editing engine returns, it should live in
+ * its own dedicated context — not piggyback on this one.
  */
 
-type EditModeContextValue = {
-  editMode: boolean;
-  toggle: () => void;
-  enter: () => void;
-  exit: () => void;
+type ChartStudioContextValue = {
+  studioOpenCount: number;
+  registerStudioOpen: () => () => void;
+  /** True if any chart Studio is currently open. */
+  anyEditingActive: boolean;
 };
 
-const EditModeContext = createContext<EditModeContextValue | null>(null);
+const ChartStudioContext = createContext<ChartStudioContextValue | null>(null);
 
 export function EditModeProvider({ children }: { children: ReactNode }) {
-  const [editMode, setEditMode] = useState(false);
+  const [studioOpenCount, setStudioOpenCount] = useState(0);
 
-  // Cmd/Ctrl + Shift + E toggles globally. We capture at the window
-  // level (not inside any chart-frame) because edit mode is
-  // page-scoped, not chart-scoped.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      // Toggle: Cmd/Ctrl + Shift + E
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        (e.key === 'e' || e.key === 'E')
-      ) {
-        const target = e.target as HTMLElement | null;
-        if (target?.isContentEditable) return;
-        if (
-          target &&
-          (target.tagName === 'INPUT' ||
-            target.tagName === 'TEXTAREA' ||
-            target.tagName === 'SELECT')
-        ) {
-          return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        setEditMode((prev) => !prev);
-        return;
-      }
-      // Escape exits when active.
-      if (e.key === 'Escape' && editMode) {
-        // Don't steal Escape if a dialog/modal is also listening —
-        // only handle when no other interactive element is focused
-        // inside an input-like target.
-        const target = e.target as HTMLElement | null;
-        if (
-          target?.isContentEditable ||
-          target?.tagName === 'INPUT' ||
-          target?.tagName === 'TEXTAREA'
-        ) {
-          return;
-        }
-        setEditMode(false);
-      }
-    }
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [editMode]);
+  const registerStudioOpen = useCallback(() => {
+    setStudioOpenCount((n) => n + 1);
+    return () => setStudioOpenCount((n) => Math.max(0, n - 1));
+  }, []);
 
-  const value: EditModeContextValue = {
-    editMode,
-    toggle: () => setEditMode((prev) => !prev),
-    enter: () => setEditMode(true),
-    exit: () => setEditMode(false),
+  const value: ChartStudioContextValue = {
+    studioOpenCount,
+    registerStudioOpen,
+    anyEditingActive: studioOpenCount > 0,
   };
 
   return (
-    <EditModeContext.Provider value={value}>
+    <ChartStudioContext.Provider value={value}>
       {children}
-    </EditModeContext.Provider>
+    </ChartStudioContext.Provider>
   );
 }
 
 /**
- * Safe getter: returns the view-mode default when called outside an
- * EditModeProvider so legacy callers don't crash. Edit mode is
- * additive — the rest of the app continues to work without it.
+ * Safe getter: returns the inactive default when called outside a
+ * provider so legacy callers don't crash.
  */
-export function useEditMode(): EditModeContextValue {
-  const ctx = useContext(EditModeContext);
+export function useEditMode(): ChartStudioContextValue {
+  const ctx = useContext(ChartStudioContext);
   if (!ctx) {
     return {
-      editMode: false,
-      toggle: () => {},
-      enter: () => {},
-      exit: () => {},
+      studioOpenCount: 0,
+      registerStudioOpen: () => () => {},
+      anyEditingActive: false,
     };
   }
   return ctx;
+}
+
+/**
+ * Hook used by chart studios — call with the panel's open state.
+ * Increments the global counter on open, decrements on close /
+ * unmount. Drives the CopilotPanel auto-hide.
+ */
+export function useStudioRegistration(open: boolean): void {
+  const { registerStudioOpen } = useEditMode();
+  const cleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (open) {
+      cleanupRef.current = registerStudioOpen();
+      return () => {
+        cleanupRef.current?.();
+        cleanupRef.current = null;
+      };
+    }
+  }, [open, registerStudioOpen]);
 }

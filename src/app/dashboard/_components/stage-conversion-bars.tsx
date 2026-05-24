@@ -39,7 +39,7 @@ import {
   StudioShell,
   StudioToggleRow,
 } from './chart-studio/studio-shell';
-import { ChartEditChrome } from './edit-mode/chart-edit-chrome';
+import { useStudioRegistration } from './edit-mode/edit-mode-context';
 
 /**
  * Stage Conversion chart — pipeline-by-stage breakdown rendered as
@@ -150,6 +150,8 @@ export function StageConversionBars({
   const [studioOpen, setStudioOpen] = useState(false);
   const [chartFocused, setChartFocused] = useState(false);
 
+  useStudioRegistration(studioOpen);
+
   // Focus-gated Cmd/Ctrl+E — same pattern as the other editable charts.
   // ⌘K is reserved for the dashboard's global command palette; ⌘+Shift+E
   // is reserved for dashboard-wide edit mode.
@@ -230,7 +232,6 @@ export function StageConversionBars({
           className,
         )}
       >
-        <ChartEditChrome kind="builtin" />
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-[#1F1F1F]">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">

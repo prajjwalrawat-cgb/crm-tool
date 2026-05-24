@@ -42,7 +42,7 @@ import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
 import { ChartStudioPanel } from './chart-studio/chart-studio-panel';
-import { ChartEditChrome } from './edit-mode/chart-edit-chrome';
+import { useStudioRegistration } from './edit-mode/edit-mode-context';
 
 /**
  * Revenue Trend Chart — premium hero with hidden Chart Studio. The
@@ -100,6 +100,10 @@ export function RevenueTrendChart({
   );
   const [studioOpen, setStudioOpen] = useState(false);
   const [chartFocused, setChartFocused] = useState(false);
+
+  // Register with EditModeContext so the CopilotPanel auto-hides
+  // while this chart's Studio is open.
+  useStudioRegistration(studioOpen);
 
   // Cmd/Ctrl+E toggles Studio when the chart is the active region.
   // Moved off ⌘K because that's the conventional global-search /
@@ -197,7 +201,6 @@ export function RevenueTrendChart({
           className,
         )}
       >
-        <ChartEditChrome kind="builtin" />
         <header
           className={cn(
             'flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 dark:border-[#1F1F1F]',

@@ -10,10 +10,6 @@ import type { Persona } from '@/lib/personas';
 import { CommandPalette } from './command-palette';
 import { CopilotPanel } from './copilot-panel';
 import { EditModeProvider } from './edit-mode/edit-mode-context';
-import {
-  EditModeGridOverlay,
-  EditModeIndicator,
-} from './edit-mode/edit-mode-indicator';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
 
@@ -138,16 +134,9 @@ export function DashboardShell({
 
             `overflow-y-auto` makes THIS the scroll container — the
             sidebar and header stay pinned while the page content scrolls.
-
-            Inner `relative` wrapper hosts the edit-mode dotted grid
-            overlay (z-index 0) under the page content so the layout
-            canvas feel surfaces when Cmd/Ctrl+Shift+E is active.
           */}
           <div key={tenantId} className="flex-1 overflow-y-auto">
-            <div className="relative min-h-full">
-              <EditModeGridOverlay />
-              <div className="relative z-10">{children}</div>
-            </div>
+            {children}
           </div>
         </div>
         <CopilotPanel key={tenantId} aiMode={aiMode} />
@@ -156,7 +145,6 @@ export function DashboardShell({
           open={paletteOpen}
           onOpenChange={setPaletteOpen}
         />
-        <EditModeIndicator />
       </div>
     </EditModeProvider>
   );

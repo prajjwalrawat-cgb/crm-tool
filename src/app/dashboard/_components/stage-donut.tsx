@@ -38,7 +38,7 @@ import {
   StudioShell,
   StudioToggleRow,
 } from './chart-studio/studio-shell';
-import { ChartEditChrome } from './edit-mode/chart-edit-chrome';
+import { useStudioRegistration } from './edit-mode/edit-mode-context';
 
 /**
  * Stage Donut — pipeline breakdown as a donut (default), solid pie,
@@ -107,6 +107,8 @@ export function StageDonut({
   );
   const [studioOpen, setStudioOpen] = useState(false);
   const [chartFocused, setChartFocused] = useState(false);
+
+  useStudioRegistration(studioOpen);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -183,7 +185,6 @@ export function StageDonut({
           className,
         )}
       >
-        <ChartEditChrome kind="builtin" />
         <header className="mb-4 flex items-baseline justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">

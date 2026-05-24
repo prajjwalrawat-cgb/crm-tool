@@ -11,6 +11,8 @@ import {
 
 import { cn } from '@/lib/utils';
 
+import { useEditMode } from './edit-mode/edit-mode-context';
+
 type AIMode = 'live' | 'mock' | 'disabled';
 
 type Reference = {
@@ -60,9 +62,22 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Cmd/Ctrl-K toggles the panel. Esc closes it.
+  // Auto-hide while any editing surface is active — Chart Studio open,
+  // Dashboard Edit Mode on, or (future) Widget Builder open. The
+  // copilot's floating launcher overlaps chart controls and breaks
+  // immersion during editing, so we collapse it entirely (visual
+  // fade + pointer-events:none + force-close if already open).
+  const { anyEditingActive } = useEditMode();
+  useEffect(() => {
+    if (anyEditingActive && open) setOpen(false);
+  }, [anyEditingActive, open]);
+
+  // Cmd/Ctrl-K toggles the panel. Esc closes it. Disabled entirely
+  // while any editing surface is active so ⌘K can't pop the copilot
+  // over an open Chart Studio / Widget Builder / Edit Mode canvas.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (anyEditingActive) return;
       const meta = e.metaKey || e.ctrlKey;
       if (meta && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -75,7 +90,7 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, [open, anyEditingActive]);
 
   // Focus input when opening.
   useEffect(() => {
@@ -244,8 +259,17 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open Copilot"
+        aria-hidden={anyEditingActive}
         title="Open Copilot (⌘K)"
-        className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-3 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm backdrop-blur transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700"
+        className={cn(
+          'fixed bottom-4 right-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-3 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm backdrop-blur transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700',
+          // Smooth fade + slight downward motion when any editing
+          // surface is active so the launcher gets out of the way.
+          anyEditingActive
+            ? 'pointer-events-none translate-y-3 opacity-0'
+            : 'translate-y-0 opacity-100',
+        )}
+        tabIndex={anyEditingActive ? -1 : 0}
       >
         <Sparkles className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
         <span>Copilot</span>
