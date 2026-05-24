@@ -8,6 +8,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
+  type SetStateAction,
 } from 'react';
 import {
   Area,
@@ -24,9 +26,10 @@ import {
 } from 'recharts';
 
 import {
-  CHART_KEY_REVENUE_TREND,
   DEFAULT_REVENUE_TREND_CONFIG,
+  REVENUE_TREND_METRICS,
   type RevenueTrendConfig,
+  type RevenueTrendMetric,
   type RevenueTrendVariant,
 } from '@/lib/chart-studio/config';
 import {
@@ -39,22 +42,26 @@ import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
 import { ChartStudioPanel } from './chart-studio/chart-studio-panel';
+import { ChartEditChrome } from './edit-mode/chart-edit-chrome';
 
 /**
- * Revenue Trend Chart — Stripe/Linear/Attio-style area chart, now
- * with the hidden "Chart Studio" config surface. Normal users see a
- * polished chart with no controls. Power users press Cmd/Ctrl+K
- * while the chart is focused (or click the small icon that appears
- * on hover) to open the Studio.
+ * Revenue Trend Chart — premium hero with hidden Chart Studio. The
+ * chart can render five variants (area · stacked-area · line · bar
+ * · flutter) across four metrics (revenue · deal count · avg deal
+ * size · conversion rate). All changes apply live; the saved view
+ * persists to the chart_views table per user.
  *
- * Stateful: the chart owns its live config so Studio toggles preview
- * instantly. Save persists via server action; Reset restores the
- * baseline default. The `initialConfig` prop carries any DB-saved
- * config the user already had, so the page-load render matches.
+ * Flutter mode: animated flowing curve. Implemented via a layered
+ * area chart + CSS keyframes on a wrapper div that "breathes" the
+ * drop-shadow + a slow horizontal pan on the gradient overlay. Pure
+ * CSS, no Recharts surgery — the chart geometry is identical to
+ * area mode; only the visual treatment differs.
  *
- * Variants: area (default) · stacked-area · line · bar. Display
- * options drive smoothness, animation, lost-line visibility,
- * cumulative view, and KPI band compactness.
+ * Metric semantics:
+ *   revenue        → won / new pipeline / lost (currency, multi-series)
+ *   dealCount      → wonDeals / newDeals / lostDeals (count, multi-series)
+ *   avgDealSize    → won_revenue / won_deals per day (currency, single series)
+ *   conversionRate → cumulative won / (won + lost) ratio (percentage, single series)
  */
 export function RevenueTrendChart({
   data,
@@ -78,18 +85,13 @@ export function RevenueTrendChart({
     accent?: 'emerald' | 'indigo' | 'violet' | 'rose' | 'slate';
     sub?: string;
   }>;
-  /** Saved chart config from DB; null = use defaults. */
   initialConfig?: RevenueTrendConfig | null;
-  /** Saved custom title; null = use default. */
   initialTitleOverride?: string | null;
-  /** Drives scope selector visibility in the Studio. */
   persona: Persona;
 }) {
   const headingId = useId();
   const chartFrameRef = useRef<HTMLElement>(null);
 
-  // Live config — Studio toggles update this for instant preview;
-  // Save persists it. Reset re-initializes from the default.
   const [config, setConfig] = useState<RevenueTrendConfig>(
     initialConfig ?? DEFAULT_REVENUE_TREND_CONFIG,
   );
@@ -97,26 +99,25 @@ export function RevenueTrendChart({
     initialTitleOverride ?? null,
   );
   const [studioOpen, setStudioOpen] = useState(false);
-
-  // Track whether the chart frame has focus — Cmd/Ctrl+K only opens
-  // the studio when the chart is the active region, not whenever the
-  // shortcut fires globally (that's reserved for the command palette).
   const [chartFocused, setChartFocused] = useState(false);
 
-  // Cmd/Ctrl+K → toggle Studio. We capture at the window level so the
-  // shortcut works whether the chart itself has DOM focus or the focus
-  // moved to an inner control (Studio button, axis hover area, etc.)
-  // BUT we gate on `chartFocused` so we don't conflict with the global
-  // ⌘K palette listener in the dashboard shell.
+  // Cmd/Ctrl+E toggles Studio when the chart is the active region.
+  // Moved off ⌘K because that's the conventional global-search /
+  // command-palette shortcut — users hit it to search and accidentally
+  // opened the wrong surface. ⌘E is rarely bound in browsers/CRMs and
+  // reads naturally as "Edit chart".
+  //
+  // Still gated on `chartFocused || studioOpen` so other regions of
+  // the page can use the shortcut for their own purposes without
+  // hijacking the active chart.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'k' && e.key !== 'K') return;
+      if (e.key !== 'e' && e.key !== 'E') return;
       if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.shiftKey) return; // Shift+E reserved for dashboard edit mode.
       if (!chartFocused && !studioOpen) return;
       const target = e.target as HTMLElement | null;
       if (target?.isContentEditable) return;
-      // If focus is inside an input/textarea (e.g. the rename field
-      // inside the open studio), let the user type cmd-arrows etc.
       if (
         target &&
         (target.tagName === 'INPUT' ||
@@ -133,8 +134,8 @@ export function RevenueTrendChart({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [chartFocused, studioOpen]);
 
-  // `data.points` carries amounts in MAJOR units; the tenant helpers
-  // expect MINOR units, so we multiply by 100 before formatting.
+  // Currency formatter — built from tenant context so the chart works
+  // across personas without function props crossing the RSC boundary.
   const formatCurrency = useCallback(
     (amountMajor: number) =>
       currency.compactNumbers
@@ -143,32 +144,30 @@ export function RevenueTrendChart({
     [currency],
   );
 
-  // Pre-shape data per the cumulative toggle. Running totals are
-  // computed on the client to avoid re-fetching from the server.
-  const formatted = useMemo(() => {
-    const base = data.points.map((p) => ({
-      ...p,
-      label: shortDate(p.day),
-    }));
-    if (!config.display.cumulative) return base;
-    let won = 0;
-    let neu = 0;
-    let lost = 0;
-    return base.map((p) => {
-      won += p.wonRevenue;
-      neu += p.newPipeline;
-      lost += p.lostRevenue;
-      return {
-        ...p,
-        wonRevenue: won,
-        newPipeline: neu,
-        lostRevenue: lost,
-      };
-    });
-  }, [data.points, config.display.cumulative]);
+  // Pre-shape the data based on the selected metric. Each metric yields
+  // a different field set on each point so the chart body can render
+  // generically (it reads `seriesA`/`seriesB`/`seriesC` rather than
+  // metric-specific keys).
+  const shaped = useMemo(
+    () => shapeForMetric(data.points, config.metric, config.display.cumulative),
+    [data.points, config.metric, config.display.cumulative],
+  );
 
-  const hasAnyRevenue = formatted.some(
-    (p) => p.wonRevenue > 0 || p.newPipeline > 0 || p.lostRevenue > 0,
+  const formatValue = useCallback(
+    (v: number) => formatMetricValue(v, config.metric, formatCurrency),
+    [config.metric, formatCurrency],
+  );
+
+  const formatAxis = useCallback(
+    (v: number) => formatMetricAxis(v, config.metric, formatCurrency),
+    [config.metric, formatCurrency],
+  );
+
+  const hasAnyData = shaped.points.some(
+    (p) =>
+      (typeof p.seriesA === 'number' && p.seriesA > 0) ||
+      (typeof p.seriesB === 'number' && p.seriesB > 0) ||
+      (typeof p.seriesC === 'number' && p.seriesC > 0),
   );
 
   const title = (titleOverride?.trim() || defaultTitle).trim();
@@ -180,11 +179,8 @@ export function RevenueTrendChart({
         tabIndex={0}
         role="region"
         aria-labelledby={headingId}
-        aria-describedby={undefined}
         onFocus={() => setChartFocused(true)}
         onBlur={(e) => {
-          // Only blur the chart-frame state when focus actually leaves
-          // the section, not when it moves to a descendant.
           if (
             !e.currentTarget.contains(e.relatedTarget as Node | null) &&
             !studioOpen
@@ -193,10 +189,15 @@ export function RevenueTrendChart({
           }
         }}
         className={cn(
-          'group/chart relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)] outline-none transition-shadow focus-within:shadow-[0_0_0_2px_rgba(99,102,241,0.18)] focus-within:ring-1 focus-within:ring-indigo-400/30 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
+          // Focus halo: subtle lift + outer drop-shadow + thin indigo
+          // ring. transform-only animation means no layout shift to
+          // surrounding cards (the ~1cm visual space the spec calls
+          // out is the drop-shadow blur, not actual size).
+          'group/chart relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)] outline-none transition-all duration-200 focus-within:-translate-y-0.5 focus-within:shadow-[0_18px_38px_-18px_rgba(99,102,241,0.45),0_0_0_1px_rgba(99,102,241,0.18)] focus-within:ring-1 focus-within:ring-indigo-400/30 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
           className,
         )}
       >
+        <ChartEditChrome kind="builtin" />
         <header
           className={cn(
             'flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 dark:border-[#1F1F1F]',
@@ -204,9 +205,14 @@ export function RevenueTrendChart({
           )}
         >
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
-              <TrendingUp className="h-3 w-3" aria-hidden />
-              {data.days}-day trend
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                <TrendingUp className="h-3 w-3" aria-hidden />
+                {data.days}-day trend
+              </div>
+              <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 dark:border-[#1F1F1F] dark:text-[#A1A1AA]">
+                {labelForMetric(config.metric)}
+              </div>
             </div>
             <h2
               id={headingId}
@@ -232,14 +238,11 @@ export function RevenueTrendChart({
                   />
                 ))
               : null}
-            {/* Discreet Studio launcher — visible only on hover/focus
-                so the default chrome stays clean. Power users who know
-                the keyboard shortcut never need to see this. */}
             <button
               type="button"
               onClick={() => setStudioOpen(true)}
-              aria-label="Open Chart Studio (Cmd/Ctrl+K)"
-              title="Chart Studio · ⌘K"
+              aria-label="Open Chart Studio (Cmd/Ctrl+E)"
+              title="Chart Studio · ⌘E"
               className="self-start rounded-md border border-transparent p-1 text-slate-400 opacity-0 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 group-hover/chart:opacity-100 group-focus-within/chart:opacity-100 dark:hover:border-[#1F1F1F] dark:hover:bg-[#181818] dark:hover:text-[#FAFAFA]"
             >
               <Settings2 className="h-3.5 w-3.5" aria-hidden />
@@ -247,19 +250,31 @@ export function RevenueTrendChart({
           </div>
         </header>
 
-        <div className={cn(config.display.compact ? 'px-2 py-3' : 'px-2 py-4', 'sm:px-3')}>
-          {!hasAnyRevenue ? (
+        <div
+          className={cn(
+            'sm:px-3',
+            config.display.compact ? 'px-2 py-3' : 'px-2 py-4',
+            // Flutter mode wraps the chart in a "breathing" wrapper —
+            // CSS keyframes handle the subtle glow pulse without any
+            // Recharts-internal surgery. Keyframes are emitted once
+            // below via a <style> tag.
+            config.variant === 'flutter' && 'rtc-flutter-wrap',
+          )}
+        >
+          {!hasAnyData ? (
             <div className="m-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-4 py-12 text-center text-[12px] text-slate-500 dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#A1A1AA]">
-              No revenue activity in the last {data.days} days. Once deals start
-              moving, the trend will fill in here automatically.
+              No {labelForMetric(config.metric).toLowerCase()} activity in the
+              last {data.days} days. Once deals start moving, the trend will
+              fill in here automatically.
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <ChartBody
                 variant={config.variant}
-                data={formatted}
+                shaped={shaped}
                 display={config.display}
-                formatCurrency={formatCurrency}
+                formatValue={formatValue}
+                formatAxis={formatAxis}
               />
             </ResponsiveContainer>
           )}
@@ -267,28 +282,69 @@ export function RevenueTrendChart({
 
         {config.display.showLegend ? (
           <footer className="flex flex-wrap items-center gap-4 border-t border-slate-200 px-5 py-2.5 text-[11px] dark:border-[#1F1F1F]">
-            <Legend dotClassName="bg-emerald-500" label="Won revenue" />
-            <Legend dotClassName="bg-indigo-500" label="New pipeline" />
-            {config.display.showLostLine ? (
-              <Legend dotClassName="bg-rose-500" label="Lost revenue" dashed />
-            ) : null}
+            {shaped.series.map((s) => (
+              <Legend
+                key={s.key}
+                dotClassName={s.dotClass}
+                label={s.label}
+                dashed={s.dashed}
+              />
+            ))}
             <span className="ml-auto hidden text-[10px] text-slate-400 sm:inline dark:text-[#71717A]">
               <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-px font-mono dark:border-[#1F1F1F] dark:bg-[#111111]">
-                ⌘K
+                ⌘E
               </kbd>{' '}
               while focused → Chart Studio
             </span>
           </footer>
         ) : null}
+
+        {/* Flutter keyframes — scoped via class so non-flutter charts
+            don't pay the animation cost. Honors reduced-motion. */}
+        <style>{`
+          @keyframes rtc-flutter-breathe {
+            0%, 100% { filter: drop-shadow(0 6px 16px rgba(99, 102, 241, 0.16)) drop-shadow(0 0 0 rgba(16, 185, 129, 0)); }
+            50%      { filter: drop-shadow(0 10px 22px rgba(99, 102, 241, 0.28)) drop-shadow(0 0 12px rgba(16, 185, 129, 0.25)); }
+          }
+          @keyframes rtc-flutter-shimmer {
+            0%   { transform: translateX(-12%); opacity: 0.18; }
+            50%  { transform: translateX(0%); opacity: 0.30; }
+            100% { transform: translateX(12%); opacity: 0.18; }
+          }
+          .rtc-flutter-wrap {
+            position: relative;
+            animation: rtc-flutter-breathe 4.5s ease-in-out infinite;
+          }
+          .rtc-flutter-wrap::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(
+              100deg,
+              rgba(99, 102, 241, 0) 35%,
+              rgba(99, 102, 241, 0.12) 50%,
+              rgba(16, 185, 129, 0.12) 60%,
+              rgba(16, 185, 129, 0) 75%
+            );
+            animation: rtc-flutter-shimmer 6s ease-in-out infinite;
+            mix-blend-mode: screen;
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .rtc-flutter-wrap,
+            .rtc-flutter-wrap::after {
+              animation: none;
+            }
+          }
+        `}</style>
       </section>
 
       <ChartStudioPanel
-        chartKey={CHART_KEY_REVENUE_TREND}
         chartTitle={defaultTitle}
         open={studioOpen}
         onClose={() => setStudioOpen(false)}
         config={config}
-        onConfigChange={setConfig}
+        onConfigChange={setConfig as Dispatch<SetStateAction<RevenueTrendConfig>>}
         titleOverride={titleOverride}
         onTitleChange={setTitleOverride}
         persona={persona}
@@ -298,30 +354,243 @@ export function RevenueTrendChart({
 }
 
 /* ============================================================ */
-/* Chart body — switches by variant                              */
+/* Data shaping per metric                                       */
 /* ============================================================ */
 
-type ChartBodyDatum = {
+type ShapedSeries = {
+  key: 'seriesA' | 'seriesB' | 'seriesC';
+  label: string;
+  color: string;
+  dotClass: string;
+  dashed?: boolean;
+  /** Set to true to render as a line over the area chart (e.g. lost). */
+  asLineOverride?: boolean;
+};
+
+type ShapedPoint = {
   day: string;
   label: string;
-  wonRevenue: number;
-  newPipeline: number;
-  lostRevenue: number;
+  seriesA: number;
+  seriesB: number;
+  seriesC: number;
 };
+
+type ShapedData = {
+  series: ShapedSeries[];
+  points: ShapedPoint[];
+};
+
+function shapeForMetric(
+  points: Array<{
+    day: string;
+    wonRevenue: number;
+    newPipeline: number;
+    lostRevenue: number;
+    wonDeals: number;
+    newDeals: number;
+    lostDeals: number;
+  }>,
+  metric: RevenueTrendMetric,
+  cumulative: boolean,
+): ShapedData {
+  // Helper: project each input point into a 3-series shape with the
+  // right labels for the chosen metric. seriesA = primary, seriesB =
+  // secondary, seriesC = tertiary (often "lost" for context).
+  let series: ShapedSeries[];
+  let mapper: (p: (typeof points)[number]) => Omit<ShapedPoint, 'day' | 'label'>;
+
+  switch (metric) {
+    case 'dealCount': {
+      series = [
+        {
+          key: 'seriesB',
+          label: 'New deals',
+          color: '#6366f1',
+          dotClass: 'bg-indigo-500',
+        },
+        {
+          key: 'seriesA',
+          label: 'Won deals',
+          color: '#10b981',
+          dotClass: 'bg-emerald-500',
+        },
+        {
+          key: 'seriesC',
+          label: 'Lost deals',
+          color: '#f43f5e',
+          dotClass: 'bg-rose-500',
+          dashed: true,
+          asLineOverride: true,
+        },
+      ];
+      mapper = (p) => ({
+        seriesA: p.wonDeals,
+        seriesB: p.newDeals,
+        seriesC: p.lostDeals,
+      });
+      break;
+    }
+    case 'avgDealSize': {
+      // Single-series — won_revenue / max(won_deals, 1). Daily
+      // resolution. seriesB/C kept as 0 so the chart body's generic
+      // renderer still has all three keys present.
+      series = [
+        {
+          key: 'seriesA',
+          label: 'Avg won deal size',
+          color: '#10b981',
+          dotClass: 'bg-emerald-500',
+        },
+      ];
+      mapper = (p) => ({
+        seriesA: p.wonDeals > 0 ? p.wonRevenue / p.wonDeals : 0,
+        seriesB: 0,
+        seriesC: 0,
+      });
+      break;
+    }
+    case 'conversionRate': {
+      // Single-series, cumulative — running won / (won + lost) ratio.
+      // The cumulative toggle is implied; we always compute running.
+      series = [
+        {
+          key: 'seriesA',
+          label: 'Conversion rate',
+          color: '#10b981',
+          dotClass: 'bg-emerald-500',
+        },
+      ];
+      let cumWon = 0;
+      let cumLost = 0;
+      const shaped = points.map((p) => {
+        cumWon += p.wonDeals;
+        cumLost += p.lostDeals;
+        const denom = cumWon + cumLost;
+        const ratio = denom > 0 ? (cumWon / denom) * 100 : 0;
+        return {
+          day: p.day,
+          label: shortDate(p.day),
+          seriesA: ratio,
+          seriesB: 0,
+          seriesC: 0,
+        };
+      });
+      return { series, points: shaped };
+    }
+    case 'revenue':
+    default: {
+      series = [
+        {
+          key: 'seriesB',
+          label: 'New pipeline',
+          color: '#6366f1',
+          dotClass: 'bg-indigo-500',
+        },
+        {
+          key: 'seriesA',
+          label: 'Won revenue',
+          color: '#10b981',
+          dotClass: 'bg-emerald-500',
+        },
+        {
+          key: 'seriesC',
+          label: 'Lost revenue',
+          color: '#f43f5e',
+          dotClass: 'bg-rose-500',
+          dashed: true,
+          asLineOverride: true,
+        },
+      ];
+      mapper = (p) => ({
+        seriesA: p.wonRevenue,
+        seriesB: p.newPipeline,
+        seriesC: p.lostRevenue,
+      });
+      break;
+    }
+  }
+
+  // Standard mapping (non-conversionRate paths).
+  const mapped = points.map((p) => ({
+    day: p.day,
+    label: shortDate(p.day),
+    ...mapper(p),
+  }));
+
+  if (!cumulative) return { series, points: mapped };
+  // Running totals for revenue / dealCount; n/a for avgDealSize (
+  // running avg would be misleading) — we skip it there.
+  if (metric === 'avgDealSize') return { series, points: mapped };
+
+  let a = 0;
+  let b = 0;
+  let c = 0;
+  return {
+    series,
+    points: mapped.map((p) => {
+      a += p.seriesA;
+      b += p.seriesB;
+      c += p.seriesC;
+      return { ...p, seriesA: a, seriesB: b, seriesC: c };
+    }),
+  };
+}
+
+function labelForMetric(m: RevenueTrendMetric): string {
+  return REVENUE_TREND_METRICS.find((x) => x.value === m)?.label ?? 'Revenue';
+}
+
+function formatMetricValue(
+  v: number,
+  metric: RevenueTrendMetric,
+  formatCurrency: (n: number) => string,
+): string {
+  const meta = REVENUE_TREND_METRICS.find((x) => x.value === metric);
+  if (meta?.isCurrency) return formatCurrency(v);
+  if (meta?.isPercentage) return `${v.toFixed(1)}%`;
+  return Math.round(v).toLocaleString();
+}
+
+function formatMetricAxis(
+  v: number,
+  metric: RevenueTrendMetric,
+  formatCurrency: (n: number) => string,
+): string {
+  const meta = REVENUE_TREND_METRICS.find((x) => x.value === metric);
+  if (meta?.isPercentage) return `${Math.round(v)}%`;
+  if (meta?.isCurrency) {
+    if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
+    if (v === 0) return '0';
+    return formatCurrency(v);
+  }
+  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+  return Math.round(v).toLocaleString();
+}
+
+/* ============================================================ */
+/* Chart body — variant switch                                   */
+/* ============================================================ */
 
 function ChartBody({
   variant,
-  data,
+  shaped,
   display,
-  formatCurrency,
+  formatValue,
+  formatAxis,
 }: {
   variant: RevenueTrendVariant;
-  data: ChartBodyDatum[];
+  shaped: ShapedData;
   display: RevenueTrendConfig['display'];
-  formatCurrency: (n: number) => string;
+  formatValue: (n: number) => string;
+  formatAxis: (n: number) => string;
 }) {
   const curve = display.smoothLines ? 'monotone' : 'linear';
   const isStacked = variant === 'stacked-area';
+  // Flutter uses the area renderer but with stronger gradient stops +
+  // a glowing active dot. The CSS shimmer + breathe wraps it.
+  const isFlutter = variant === 'flutter';
+  const useAreaRenderer = variant === 'area' || isStacked || isFlutter;
 
   const commonAxes = (
     <>
@@ -341,7 +610,7 @@ function ChartBody({
         tick={{ fontSize: 10, fill: '#94a3b8' }}
         tickLine={false}
         axisLine={false}
-        tickFormatter={(v) => formatCompactAxis(Number(v), formatCurrency)}
+        tickFormatter={(v) => formatAxis(Number(v))}
         width={56}
       />
       <Tooltip
@@ -349,7 +618,7 @@ function ChartBody({
         content={(props) => {
           const { active, payload } = props as unknown as {
             active?: boolean;
-            payload?: ReadonlyArray<{ payload?: ChartBodyDatum }>;
+            payload?: ReadonlyArray<{ payload?: ShapedPoint }>;
           };
           if (!active || !payload || payload.length === 0) return null;
           const p = payload[0]?.payload;
@@ -357,8 +626,10 @@ function ChartBody({
           return (
             <TrendTooltip
               datum={p}
-              formatCurrency={formatCurrency}
-              showLost={display.showLostLine}
+              series={shaped.series.filter((s) =>
+                s.key === 'seriesC' ? display.showLostLine : true,
+              )}
+              formatValue={formatValue}
             />
           );
         }}
@@ -366,127 +637,127 @@ function ChartBody({
     </>
   );
 
+  // Series filter — collapse the lost series when the toggle is off.
+  const visibleSeries = shaped.series.filter((s) =>
+    s.key === 'seriesC' ? display.showLostLine : true,
+  );
+
   if (variant === 'line') {
     return (
-      <LineChart data={data} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
+      <LineChart data={shaped.points} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
         {commonAxes}
-        <Line
-          type={curve}
-          dataKey="newPipeline"
-          stroke="#6366f1"
-          strokeWidth={1.75}
-          dot={false}
-          animationDuration={550}
-          animationEasing="ease-out"
-          isAnimationActive={display.animated}
-        />
-        <Line
-          type={curve}
-          dataKey="wonRevenue"
-          stroke="#10b981"
-          strokeWidth={1.75}
-          dot={false}
-          animationDuration={650}
-          animationEasing="ease-out"
-          isAnimationActive={display.animated}
-        />
-        {display.showLostLine ? (
+        {visibleSeries.map((s) => (
           <Line
+            key={s.key}
             type={curve}
-            dataKey="lostRevenue"
-            stroke="#f43f5e"
-            strokeWidth={1.25}
-            strokeDasharray="4 4"
+            dataKey={s.key}
+            stroke={s.color}
+            strokeWidth={s.dashed ? 1.25 : 1.75}
+            strokeDasharray={s.dashed ? '4 4' : undefined}
             dot={false}
-            animationDuration={750}
+            animationDuration={550}
             animationEasing="ease-out"
             isAnimationActive={display.animated}
           />
-        ) : null}
+        ))}
       </LineChart>
     );
   }
 
   if (variant === 'bar') {
     return (
-      <BarChart data={data} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
+      <BarChart data={shaped.points} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
         {commonAxes}
-        <Bar
-          dataKey="newPipeline"
-          fill="#6366f1"
-          fillOpacity={0.7}
-          radius={[2, 2, 0, 0]}
-          isAnimationActive={display.animated}
-        />
-        <Bar
-          dataKey="wonRevenue"
-          fill="#10b981"
-          fillOpacity={0.85}
-          radius={[2, 2, 0, 0]}
-          isAnimationActive={display.animated}
-        />
-        {display.showLostLine ? (
+        {visibleSeries.map((s) => (
           <Bar
-            dataKey="lostRevenue"
-            fill="#f43f5e"
-            fillOpacity={0.55}
+            key={s.key}
+            dataKey={s.key}
+            fill={s.color}
+            fillOpacity={s.key === 'seriesA' ? 0.85 : s.key === 'seriesB' ? 0.7 : 0.55}
             radius={[2, 2, 0, 0]}
             isAnimationActive={display.animated}
           />
-        ) : null}
+        ))}
       </BarChart>
     );
   }
 
-  // area & stacked-area
+  // area / stacked-area / flutter share an AreaChart with subtle
+  // differences in stop opacity (flutter is more saturated to make
+  // the shimmer/glow visible).
+  const flutterBoost = isFlutter ? 1.4 : 1.0;
   return (
-    <AreaChart data={data} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
-      <defs>
-        <linearGradient id="rtc-won" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
-          <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-        </linearGradient>
-        <linearGradient id="rtc-new" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
-          <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-        </linearGradient>
-      </defs>
-      {commonAxes}
-      <Area
-        type={curve}
-        dataKey="newPipeline"
-        stackId={isStacked ? 'rev' : undefined}
-        stroke="#6366f1"
-        strokeWidth={1.75}
-        fill="url(#rtc-new)"
-        animationDuration={550}
-        animationEasing="ease-out"
-        isAnimationActive={display.animated}
-      />
-      <Area
-        type={curve}
-        dataKey="wonRevenue"
-        stackId={isStacked ? 'rev' : undefined}
-        stroke="#10b981"
-        strokeWidth={1.75}
-        fill="url(#rtc-won)"
-        animationDuration={650}
-        animationEasing="ease-out"
-        isAnimationActive={display.animated}
-      />
-      {display.showLostLine ? (
-        <Line
-          type={curve}
-          dataKey="lostRevenue"
-          stroke="#f43f5e"
-          strokeWidth={1.25}
-          strokeDasharray="4 4"
-          dot={false}
-          animationDuration={750}
-          animationEasing="ease-out"
-          isAnimationActive={display.animated}
-        />
+    <AreaChart data={shaped.points} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
+      {useAreaRenderer ? (
+        <defs>
+          {visibleSeries.map((s) => (
+            <linearGradient
+              key={`grad-${s.key}`}
+              id={`rtc-${s.key}`}
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop
+                offset="0%"
+                stopColor={s.color}
+                stopOpacity={Math.min(0.5, 0.32 * flutterBoost)}
+              />
+              <stop offset="100%" stopColor={s.color} stopOpacity={0} />
+            </linearGradient>
+          ))}
+        </defs>
       ) : null}
+      {commonAxes}
+      {visibleSeries.map((s) => {
+        // Lost is rendered as an overlay line even in area mode.
+        if (s.asLineOverride && display.showLostLine) {
+          return (
+            <Line
+              key={s.key}
+              type={curve}
+              dataKey={s.key}
+              stroke={s.color}
+              strokeWidth={1.25}
+              strokeDasharray="4 4"
+              dot={false}
+              animationDuration={750}
+              animationEasing="ease-out"
+              isAnimationActive={display.animated}
+            />
+          );
+        }
+        return (
+          <Area
+            key={s.key}
+            type={curve}
+            dataKey={s.key}
+            stackId={isStacked ? 'rev' : undefined}
+            stroke={s.color}
+            strokeWidth={isFlutter ? 2 : 1.75}
+            fill={`url(#rtc-${s.key})`}
+            // Glow on the active dot — Flutter mode pumps this for
+            // the "premium" look. Other variants keep dots off.
+            activeDot={
+              isFlutter
+                ? {
+                    r: 5,
+                    stroke: s.color,
+                    strokeWidth: 2,
+                    fill: '#ffffff',
+                    style: {
+                      filter: `drop-shadow(0 0 6px ${s.color})`,
+                    },
+                  }
+                : { r: 3 }
+            }
+            animationDuration={isFlutter ? 900 : 550}
+            animationEasing="ease-out"
+            isAnimationActive={display.animated}
+          />
+        );
+      })}
     </AreaChart>
   );
 }
@@ -564,12 +835,12 @@ function Legend({
 
 function TrendTooltip({
   datum,
-  formatCurrency,
-  showLost,
+  series,
+  formatValue,
 }: {
-  datum: ChartBodyDatum;
-  formatCurrency: (n: number) => string;
-  showLost: boolean;
+  datum: ShapedPoint;
+  series: ShapedSeries[];
+  formatValue: (n: number) => string;
 }) {
   return (
     <div
@@ -580,24 +851,15 @@ function TrendTooltip({
         {longDate(datum.day)}
       </div>
       <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums">
-        <TooltipRow
-          label="Won"
-          value={formatCurrency(datum.wonRevenue)}
-          dotClassName="bg-emerald-400"
-        />
-        <TooltipRow
-          label="New pipeline"
-          value={formatCurrency(datum.newPipeline)}
-          dotClassName="bg-indigo-400"
-        />
-        {showLost ? (
+        {series.map((s) => (
           <TooltipRow
-            label="Lost"
-            value={formatCurrency(datum.lostRevenue)}
-            dotClassName="bg-rose-400"
-            dashed
+            key={s.key}
+            label={s.label}
+            value={formatValue(datum[s.key])}
+            dotClassName={s.dotClass}
+            dashed={s.dashed}
           />
-        ) : null}
+        ))}
       </dl>
     </div>
   );
@@ -654,14 +916,4 @@ function longDate(iso: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
-}
-
-function formatCompactAxis(
-  v: number,
-  formatCurrency: (n: number) => string,
-): string {
-  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
-  if (v === 0) return '0';
-  return formatCurrency(v);
 }

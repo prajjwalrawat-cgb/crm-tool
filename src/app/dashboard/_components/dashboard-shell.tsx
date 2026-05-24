@@ -9,6 +9,11 @@ import type { Persona } from '@/lib/personas';
 
 import { CommandPalette } from './command-palette';
 import { CopilotPanel } from './copilot-panel';
+import { EditModeProvider } from './edit-mode/edit-mode-context';
+import {
+  EditModeGridOverlay,
+  EditModeIndicator,
+} from './edit-mode/edit-mode-indicator';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
 
@@ -107,51 +112,52 @@ export function DashboardShell({
     // h-screen = 100vh, fine for desktop. On mobile the sidebar is a
     // fixed-position drawer (Sidebar component handles that), so the
     // viewport math doesn't affect the small-screen flow.
-    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-black">
-      <Sidebar
-        mobileOpen={mobileOpen}
-        onMobileClose={() => setMobileOpen(false)}
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={toggleSidebarCollapsed}
-        persona={persona}
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Header
-          onMobileMenuOpen={() => setMobileOpen(true)}
-          onOpenPalette={() => setPaletteOpen(true)}
-          tenantId={tenantId}
-          currentUserId={currentUserId}
-          initialNotifications={initialNotifications}
+    <EditModeProvider>
+      <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-black">
+        <Sidebar
+          mobileOpen={mobileOpen}
+          onMobileClose={() => setMobileOpen(false)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={toggleSidebarCollapsed}
+          persona={persona}
         />
-        {/*
-          Tenant-scoped invalidation boundary. When the active tenant
-          changes (Clerk org switcher → layout re-render → this prop
-          updates), React unmounts everything inside this div and
-          remounts fresh. That's the single architectural answer to
-          "stale activity rows from the previous tenant survive a
-          switch": every client component below is keyed by the tenant
-          they were mounted under, so their `useState`/`useOptimistic`
-          state is discarded with the old subtree instead of leaking
-          across tenants.
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Header
+            onMobileMenuOpen={() => setMobileOpen(true)}
+            onOpenPalette={() => setPaletteOpen(true)}
+            tenantId={tenantId}
+            currentUserId={currentUserId}
+            initialNotifications={initialNotifications}
+          />
+          {/*
+            Tenant-scoped invalidation boundary. When the active tenant
+            changes (Clerk org switcher → layout re-render → this prop
+            updates), React unmounts everything inside this div and
+            remounts fresh — every client component below is keyed by
+            the tenant they were mounted under.
 
-          Components that live OUTSIDE this div (Sidebar, Header,
-          CopilotPanel) keep their state across tenant switches. Anything
-          tenant-scoped at that layer is keyed individually at its render
-          site (PresenceIndicator inside Header, CopilotPanel below).
+            `overflow-y-auto` makes THIS the scroll container — the
+            sidebar and header stay pinned while the page content scrolls.
 
-          `overflow-y-auto` makes THIS the scroll container — the
-          sidebar and header stay pinned while the page content scrolls.
-        */}
-        <div key={tenantId} className="flex-1 overflow-y-auto">
-          {children}
+            Inner `relative` wrapper hosts the edit-mode dotted grid
+            overlay (z-index 0) under the page content so the layout
+            canvas feel surfaces when Cmd/Ctrl+Shift+E is active.
+          */}
+          <div key={tenantId} className="flex-1 overflow-y-auto">
+            <div className="relative min-h-full">
+              <EditModeGridOverlay />
+              <div className="relative z-10">{children}</div>
+            </div>
+          </div>
         </div>
+        <CopilotPanel key={tenantId} aiMode={aiMode} />
+        <CommandPalette
+          tenantId={tenantId}
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+        />
+        <EditModeIndicator />
       </div>
-      <CopilotPanel key={tenantId} aiMode={aiMode} />
-      <CommandPalette
-        tenantId={tenantId}
-        open={paletteOpen}
-        onOpenChange={setPaletteOpen}
-      />
-    </div>
+    </EditModeProvider>
   );
 }

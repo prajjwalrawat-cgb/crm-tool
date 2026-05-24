@@ -6,25 +6,39 @@ import { chartViews } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
 import {
-  type ChartKey,
+  CHART_KEY_REVENUE_TREND,
+  CHART_KEY_STAGE_CONVERSION,
+  CHART_KEY_STAGE_DONUT,
   parseRevenueTrendConfig,
-  type SavedChartView,
+  parseStageConversionConfig,
+  parseStageDonutConfig,
+  type ChartKey,
+  type RevenueTrendConfig,
+  type StageConversionConfig,
+  type StageDonutConfig,
 } from './config';
 
 /**
- * Read the user's default view for a chart. Falls back to null when
- * there isn't one — the caller renders the chart's hard-coded default
- * config in that case.
+ * Per-chart saved-view readers. Each chart key has its own typed
+ * config parser; the helpers return null when no row exists so the
+ * caller can fall back to the chart's hard-coded default.
  *
- * RLS: runs inside the active tenant context, so the tenant filter
- * here is belt-and-suspenders on top of `app.tenant_id`.
+ * RLS: each helper runs inside the active tenant context. The tenant
+ * filter is belt-and-suspenders on top of `app.tenant_id`.
  */
-export async function readDefaultChartView(args: {
+
+async function readRow(args: {
   tenantId: string;
   userId: string;
   chartKey: ChartKey;
-}): Promise<SavedChartView | null> {
-  const row = await tenantTransaction(async (tx) => {
+}): Promise<{
+  id: string;
+  title: string | null;
+  roleScope: 'user' | 'team' | 'tenant';
+  rawConfig: unknown;
+  isDefault: boolean;
+} | null> {
+  return await tenantTransaction(async (tx) => {
     const [r] = await tx
       .select()
       .from(chartViews)
@@ -38,15 +52,74 @@ export async function readDefaultChartView(args: {
       )
       .orderBy(desc(chartViews.updatedAt))
       .limit(1);
-    return r ?? null;
+    if (!r) return null;
+    return {
+      id: r.id,
+      title: r.title,
+      roleScope: (r.roleScope as 'user' | 'team' | 'tenant') ?? 'user',
+      rawConfig: r.config,
+      isDefault: r.isDefault,
+    };
   });
+}
 
+export async function readRevenueTrendView(args: {
+  tenantId: string;
+  userId: string;
+}): Promise<{
+  title: string | null;
+  config: RevenueTrendConfig;
+} | null> {
+  const row = await readRow({ ...args, chartKey: CHART_KEY_REVENUE_TREND });
+  if (!row) return null;
+  return { title: row.title, config: parseRevenueTrendConfig(row.rawConfig) };
+}
+
+export async function readStageConversionView(args: {
+  tenantId: string;
+  userId: string;
+}): Promise<{
+  title: string | null;
+  config: StageConversionConfig;
+} | null> {
+  const row = await readRow({ ...args, chartKey: CHART_KEY_STAGE_CONVERSION });
+  if (!row) return null;
+  return { title: row.title, config: parseStageConversionConfig(row.rawConfig) };
+}
+
+export async function readStageDonutView(args: {
+  tenantId: string;
+  userId: string;
+}): Promise<{
+  title: string | null;
+  config: StageDonutConfig;
+} | null> {
+  const row = await readRow({ ...args, chartKey: CHART_KEY_STAGE_DONUT });
+  if (!row) return null;
+  return { title: row.title, config: parseStageDonutConfig(row.rawConfig) };
+}
+
+// Back-compat shim used by the three home dashboards before the
+// multi-chart refactor. Routes to the revenue-trend reader. Keep
+// until callers are migrated.
+export async function readDefaultChartView(args: {
+  tenantId: string;
+  userId: string;
+  chartKey: ChartKey;
+}): Promise<{
+  id: string;
+  title: string | null;
+  roleScope: 'user' | 'team' | 'tenant';
+  config: RevenueTrendConfig;
+  isDefault: boolean;
+} | null> {
+  const row = await readRow(args);
   if (!row) return null;
   return {
     id: row.id,
     title: row.title,
-    roleScope: (row.roleScope as 'user' | 'team' | 'tenant') ?? 'user',
-    config: parseRevenueTrendConfig(row.config),
+    roleScope: row.roleScope,
+    config: parseRevenueTrendConfig(row.rawConfig),
     isDefault: row.isDefault,
   };
 }

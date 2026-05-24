@@ -11,8 +11,11 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-import { CHART_KEY_REVENUE_TREND } from '@/lib/chart-studio/config';
-import { readDefaultChartView } from '@/lib/chart-studio/queries';
+import {
+  readRevenueTrendView,
+  readStageConversionView,
+  readStageDonutView,
+} from '@/lib/chart-studio/queries';
 import {
   formatCompactTenantCurrency,
   formatTenantCurrency,
@@ -68,6 +71,8 @@ export async function SalesHome({
     stale,
     wins,
     savedChartView,
+    savedStageConversionView,
+    savedStageDonutView,
   ] = await Promise.all([
     currentUser(),
     getOrgSettings(tenantId),
@@ -81,11 +86,9 @@ export async function SalesHome({
     getUpcomingFollowUps(tenantId, { lookAheadDays: 14, limit: 6 }),
     getStaleDeals(tenantId, { staleDays: 14, limit: 5 }),
     getRecentWins(tenantId, 5),
-    readDefaultChartView({
-      tenantId,
-      userId,
-      chartKey: CHART_KEY_REVENUE_TREND,
-    }),
+    readRevenueTrendView({ tenantId, userId }),
+    readStageConversionView({ tenantId, userId }),
+    readStageDonutView({ tenantId, userId }),
   ]);
 
   const money = (m: number) =>
@@ -133,10 +136,13 @@ export async function SalesHome({
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <StageConversionBars
           rows={pipeline.rows}
-          formatCurrency={money}
+          currency={settings}
           className="lg:col-span-2"
           title="My pipeline by stage"
           subtitle="Revenue-weighted bars · stage-to-stage conversion"
+          initialConfig={savedStageConversionView?.config ?? null}
+          initialTitleOverride={savedStageConversionView?.title ?? null}
+          persona="sales"
         />
         <MyTasksCard summary={myTasks} />
       </div>
@@ -144,9 +150,13 @@ export async function SalesHome({
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <StageDonut
           rows={pipeline.rows}
+          currency={settings}
           className="lg:col-span-1"
           title="My deal distribution"
           subtitle="How many deals sit in each stage"
+          initialConfig={savedStageDonutView?.config ?? null}
+          initialTitleOverride={savedStageDonutView?.title ?? null}
+          persona="sales"
         />
         <UpcomingFollowUpsCard rows={followUps} />
         <StaleDealsCard rows={stale} staleDays={14} />

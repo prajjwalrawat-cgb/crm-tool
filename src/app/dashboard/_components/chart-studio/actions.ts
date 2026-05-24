@@ -12,38 +12,31 @@ import { personaOf } from '@/lib/personas';
 
 import {
   CHART_KEY_REVENUE_TREND,
+  CHART_KEY_STAGE_CONVERSION,
+  CHART_KEY_STAGE_DONUT,
   parseRevenueTrendConfig,
-  REVENUE_TREND_VARIANTS,
+  parseStageConversionConfig,
+  parseStageDonutConfig,
 } from '@/lib/chart-studio/config';
 
 /**
- * Save (upsert) the user's default view for a chart. Persisted in
- * the `chart_views` table; one default per (tenant, user, chart_key)
- * — enforced via a partial unique index.
- *
- * RBAC:
- *   roleScope='user'   — any persona (member/manager/admin)
- *   roleScope='team'   — manager + admin only
- *   roleScope='tenant' — admin only
- *
- * The variant + display config are validated via the chart-specific
- * parser; anything unrecognized falls back to the safe default.
+ * Save / reset chart-view actions. Generalized over chart keys: each
+ * key has its own config validator (re-using the chart-studio
+ * parsers) so an unrecognized config is normalized rather than
+ * stored verbatim.
  */
 
+const SUPPORTED_CHART_KEYS = [
+  CHART_KEY_REVENUE_TREND,
+  CHART_KEY_STAGE_CONVERSION,
+  CHART_KEY_STAGE_DONUT,
+] as const;
+
 const saveSchema = z.object({
-  chartKey: z.literal(CHART_KEY_REVENUE_TREND),
-  variant: z.enum(REVENUE_TREND_VARIANTS.map((v) => v.value) as [
-    string,
-    ...string[],
-  ]),
-  display: z.object({
-    showLegend: z.boolean(),
-    smoothLines: z.boolean(),
-    animated: z.boolean(),
-    showLostLine: z.boolean(),
-    compact: z.boolean(),
-    cumulative: z.boolean(),
-  }),
+  chartKey: z.enum(SUPPORTED_CHART_KEYS),
+  // The full config blob is validated by the chart-specific parser
+  // below — we leave it loose at the schema layer.
+  config: z.record(z.string(), z.unknown()),
   title: z.string().trim().max(80).nullable().optional(),
   roleScope: z.enum(['user', 'team', 'tenant']).default('user'),
 });
@@ -53,6 +46,20 @@ type SaveInput = z.infer<typeof saveSchema>;
 type ActionResult =
   | { ok: true }
   | { ok: false; message: string };
+
+function parseConfigForKey(
+  chartKey: (typeof SUPPORTED_CHART_KEYS)[number],
+  raw: unknown,
+): unknown {
+  switch (chartKey) {
+    case CHART_KEY_REVENUE_TREND:
+      return parseRevenueTrendConfig(raw);
+    case CHART_KEY_STAGE_CONVERSION:
+      return parseStageConversionConfig(raw);
+    case CHART_KEY_STAGE_DONUT:
+      return parseStageDonutConfig(raw);
+  }
+}
 
 export async function saveChartViewAction(
   input: SaveInput,
@@ -70,7 +77,6 @@ export async function saveChartViewAction(
     const membership = await requireMembership();
     const persona = personaOf(membership.role);
 
-    // Persona ↔ scope guard.
     if (data.roleScope === 'team' && persona !== 'manager' && persona !== 'admin') {
       return {
         ok: false,
@@ -84,18 +90,9 @@ export async function saveChartViewAction(
       };
     }
 
-    // Re-parse to drop any extra keys the client might have sent.
-    const safeConfig = parseRevenueTrendConfig({
-      variant: data.variant,
-      display: data.display,
-    });
+    const safeConfig = parseConfigForKey(data.chartKey, data.config);
 
     await tenantTransaction(async (tx) => {
-      // Upsert the user's default by clearing-then-inserting. We don't
-      // use ON CONFLICT here because there's no single PK we can target
-      // (the table allows multiple non-default rows per chart_key); a
-      // delete-then-insert keeps the logic obvious without sacrificing
-      // anything — both queries are tiny.
       await tx
         .delete(chartViews)
         .where(
@@ -112,12 +109,11 @@ export async function saveChartViewAction(
         chartKey: data.chartKey,
         title: data.title ?? null,
         roleScope: data.roleScope,
-        config: safeConfig,
+        config: safeConfig as object,
         isDefault: true,
       });
     });
 
-    // The chart re-reads its config on next dashboard render.
     revalidatePath('/dashboard');
     revalidatePath('/dashboard/my-performance');
     return { ok: true };
@@ -125,7 +121,7 @@ export async function saveChartViewAction(
 }
 
 const resetSchema = z.object({
-  chartKey: z.literal(CHART_KEY_REVENUE_TREND),
+  chartKey: z.enum(SUPPORTED_CHART_KEYS),
 });
 
 export async function resetChartViewAction(input: {

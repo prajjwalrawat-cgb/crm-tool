@@ -220,6 +220,12 @@ export type RevenueTrendPoint = {
   newPipeline: number;
   /** Lost revenue on that day (for delta context). */
   lostRevenue: number;
+  /** Won deal count that day — drives the "deal count" + "avg deal size" metrics. */
+  wonDeals: number;
+  /** Deals created that day. */
+  newDeals: number;
+  /** Lost deal count that day. */
+  lostDeals: number;
 };
 
 export type RevenueTrend = {
@@ -264,7 +270,8 @@ export async function getRevenueTrend(
       const rows = (await tx.execute(sql`
         WITH won AS (
           SELECT closed_at::date AS day,
-                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue
+                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue,
+                 COUNT(*)::int                          AS n
           FROM deals
           WHERE tenant_id = ${tenantId}::uuid
             AND deleted_at IS NULL
@@ -276,7 +283,8 @@ export async function getRevenueTrend(
         ),
         lost AS (
           SELECT closed_at::date AS day,
-                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue
+                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue,
+                 COUNT(*)::int                          AS n
           FROM deals
           WHERE tenant_id = ${tenantId}::uuid
             AND deleted_at IS NULL
@@ -288,7 +296,8 @@ export async function getRevenueTrend(
         ),
         created AS (
           SELECT created_at::date AS day,
-                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue
+                 COALESCE(SUM(amount_minor), 0)::bigint AS revenue,
+                 COUNT(*)::int                          AS n
           FROM deals
           WHERE tenant_id = ${tenantId}::uuid
             AND deleted_at IS NULL
@@ -300,7 +309,10 @@ export async function getRevenueTrend(
           d::date AS day,
           COALESCE(w.revenue, 0)::bigint AS won_revenue,
           COALESCE(l.revenue, 0)::bigint AS lost_revenue,
-          COALESCE(c.revenue, 0)::bigint AS new_pipeline
+          COALESCE(c.revenue, 0)::bigint AS new_pipeline,
+          COALESCE(w.n, 0)::int          AS won_deals,
+          COALESCE(l.n, 0)::int          AS lost_deals,
+          COALESCE(c.n, 0)::int          AS new_deals
         FROM generate_series(
           (CURRENT_DATE - (${days - 1}::int * INTERVAL '1 day'))::date,
           CURRENT_DATE::date,
@@ -315,6 +327,9 @@ export async function getRevenueTrend(
         won_revenue: string | number;
         lost_revenue: string | number;
         new_pipeline: string | number;
+        won_deals: number;
+        lost_deals: number;
+        new_deals: number;
       }>;
 
       // The modal currency of forward (open) deals — best guess for the
@@ -340,6 +355,9 @@ export async function getRevenueTrend(
           wonRevenue: Number(r.won_revenue) / 100,
           lostRevenue: Number(r.lost_revenue) / 100,
           newPipeline: Number(r.new_pipeline) / 100,
+          wonDeals: Number(r.won_deals),
+          lostDeals: Number(r.lost_deals),
+          newDeals: Number(r.new_deals),
         })),
       };
     }),
