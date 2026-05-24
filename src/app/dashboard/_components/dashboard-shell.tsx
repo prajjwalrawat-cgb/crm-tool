@@ -136,7 +136,7 @@ export function DashboardShell({
             sidebar and header stay pinned while the page content scrolls.
           */}
           <div key={tenantId} className="flex-1 overflow-y-auto">
-            {children}
+            <div className="relative min-h-full">{children}</div>
           </div>
         </div>
         <CopilotPanel key={tenantId} aiMode={aiMode} />

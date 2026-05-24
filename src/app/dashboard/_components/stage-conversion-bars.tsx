@@ -153,13 +153,11 @@ export function StageConversionBars({
   useStudioRegistration(studioOpen);
 
   // Focus-gated Cmd/Ctrl+E — same pattern as the other editable charts.
-  // ⌘K is reserved for the dashboard's global command palette; ⌘+Shift+E
-  // is reserved for dashboard-wide edit mode.
+  // ⌘K is reserved for the dashboard's global command palette.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'e' && e.key !== 'E') return;
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.shiftKey) return;
       if (!chartFocused && !studioOpen) return;
       const target = e.target as HTMLElement | null;
       if (target?.isContentEditable) return;

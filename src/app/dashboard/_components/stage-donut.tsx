@@ -114,7 +114,6 @@ export function StageDonut({
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'e' && e.key !== 'E') return;
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.shiftKey) return;
       if (!chartFocused && !studioOpen) return;
       const target = e.target as HTMLElement | null;
       if (target?.isContentEditable) return;
