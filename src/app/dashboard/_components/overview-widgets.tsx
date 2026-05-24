@@ -103,28 +103,31 @@ function KpiTile({
     emerald: 'text-emerald-600 bg-emerald-50',
     rose: 'text-rose-600 bg-rose-50',
   };
+  // `@container` + `clamp()` so the value font scales with the card's
+  // own inline size — long currency strings (e.g. ₹987,654,321) shrink
+  // before they can clip, instead of being truncated.
   return (
     <Link
       href={href}
-      className="group rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.04)] transition hover:border-slate-300"
+      className="group @container overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.04)] transition hover:border-slate-300"
     >
       <div className="flex items-center gap-1.5">
         <div
           className={cn(
-            'flex h-4 w-4 items-center justify-center rounded',
+            'flex h-4 w-4 flex-shrink-0 items-center justify-center rounded',
             accentClass[accent],
           )}
         >
           {icon}
         </div>
-        <div className="text-[10px] font-medium uppercase tracking-[0.06em] text-slate-500">
+        <div className="truncate text-[10px] font-medium uppercase tracking-[0.06em] text-slate-500">
           {label}
         </div>
       </div>
       <div
         className={cn(
-          'mt-1 text-[22px] font-semibold leading-none tabular-nums text-slate-900 transition-colors group-hover:text-indigo-700',
-          mono && 'font-mono text-[15px]',
+          'mt-1 whitespace-nowrap text-[clamp(15px,9cqi,22px)] font-semibold leading-none tabular-nums tracking-tight text-slate-900 transition-colors group-hover:text-indigo-700',
+          mono && 'font-mono text-[clamp(11px,7cqi,15px)]',
         )}
       >
         {value}

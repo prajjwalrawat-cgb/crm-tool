@@ -210,15 +210,17 @@ function OrgKpi({
     emerald: 'text-emerald-700 dark:text-emerald-300',
     rose: 'text-rose-700 dark:text-rose-300',
   }[tone];
+  // Container query + clamp() — value scales with card width so long
+  // currency strings (₹14,541,000, ₹987,654,321) fit without clipping.
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
+    <div className="@container overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
+      <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
         {label}
       </div>
       <div
         className={cn(
-          'mt-1 text-[18px] font-semibold leading-none tabular-nums',
-          mono && 'font-mono text-[14px]',
+          'mt-1 whitespace-nowrap text-[clamp(13px,8cqi,18px)] font-semibold leading-none tabular-nums tracking-tight',
+          mono && 'font-mono text-[clamp(11px,7cqi,14px)]',
           valueClass,
         )}
       >

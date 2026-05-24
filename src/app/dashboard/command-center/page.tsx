@@ -436,19 +436,21 @@ function Kpi({
     neutral: 'border-slate-200 bg-white text-slate-700 dark:border-[#1F1F1F] dark:bg-[#0A0A0A] dark:text-[#FAFAFA]',
   } as const;
 
+  // Container query + clamp() keeps long counts / IDs from clipping
+  // when the grid squeezes each tile.
   return (
     <Link
       href={href}
       className={cn(
-        'flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 transition-shadow hover:shadow-sm',
+        '@container flex items-center justify-between gap-2 overflow-hidden rounded-lg border px-3 py-2.5 transition-shadow hover:shadow-sm',
         toneClass[tone],
       )}
     >
-      <div className="min-w-0">
-        <div className="text-[10px] font-semibold uppercase tracking-wide opacity-75">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[10px] font-semibold uppercase tracking-wide opacity-75">
           {label}
         </div>
-        <div className="mt-0.5 font-mono text-lg font-semibold tabular-nums">
+        <div className="mt-0.5 whitespace-nowrap font-mono text-[clamp(12px,7cqi,17px)] font-semibold tabular-nums tracking-tight">
           {value}
         </div>
       </div>

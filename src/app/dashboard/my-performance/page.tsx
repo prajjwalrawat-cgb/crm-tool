@@ -206,16 +206,18 @@ function Kpi({
     violet: 'bg-violet-500',
     rose: 'bg-rose-500',
   }[accent];
+  // @container + clamp() — value scales with card width so long
+  // currency / count strings never clip or overflow.
   return (
-    <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
+    <div className="@container relative overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
       <span
         className={cn('absolute inset-y-0 left-0 w-0.5', tintBar)}
         aria-hidden
       />
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
+      <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
         {label}
       </div>
-      <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-slate-900 dark:text-[#FAFAFA]">
+      <div className="mt-1 whitespace-nowrap font-mono text-[clamp(12px,7cqi,17px)] font-semibold tabular-nums tracking-tight text-slate-900 dark:text-[#FAFAFA]">
         {value}
       </div>
       {sub ? (
