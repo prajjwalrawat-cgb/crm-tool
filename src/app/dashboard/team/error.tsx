@@ -20,7 +20,8 @@ export default function TeamErrorBoundary({
           Something went wrong loading the team.
         </h2>
         <p className="mt-2 text-sm text-red-800">
-          {error.message || 'An unexpected error occurred.'}
+          We hit an unexpected error. Try again — if it keeps happening,
+          share the reference below with support.
         </p>
         <button
           type="button"
@@ -29,6 +30,11 @@ export default function TeamErrorBoundary({
         >
           Try again
         </button>
+        {error.digest ? (
+          <p className="mt-3 font-mono text-[10.5px] text-red-700/80">
+            ref: {error.digest}
+          </p>
+        ) : null}
       </div>
     </main>
   );

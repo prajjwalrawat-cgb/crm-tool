@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { auth } from '@clerk/nextjs/server';
 import { and, eq } from 'drizzle-orm';
 
 import {
@@ -7,7 +8,12 @@ import {
   type RelationshipSignal,
   type RelationshipStatus,
 } from '@/db/schema';
-import { tenantTransaction } from '@/lib/db-context';
+import {
+  getTenantContext,
+  runWithTenantContext,
+  SYSTEM_ACTOR_ID,
+  tenantTransaction,
+} from '@/lib/db-context';
 
 /**
  * Relationship-health scoring. Statistical, no ML — the formula is
@@ -58,19 +64,37 @@ export async function getRelationshipView(
   entityType: string,
   entityId: string,
 ): Promise<RelationshipView> {
-  const rows = await tenantTransaction(async (tx) =>
-    tx
-      .select()
-      .from(relationshipSignals)
-      .where(
-        and(
-          eq(relationshipSignals.tenantId, tenantId),
-          eq(relationshipSignals.entityType, entityType),
-          eq(relationshipSignals.entityId, entityId),
-        ),
-      )
-      .limit(1),
-  );
+  // Self-establish a tenant context if the caller is rendered outside
+  // one. This function is called from <RelationshipHealthCard>, an
+  // async server component whose rendering Next.js 16 / React 19 may
+  // defer past the parent page's `withTenantSession` callback — by
+  // the time the child runs, the AsyncLocalStorage scope has exited.
+  // Mirrors the self-heal pattern in lib/membership.ts.
+  const run = async () =>
+    tenantTransaction(async (tx) =>
+      tx
+        .select()
+        .from(relationshipSignals)
+        .where(
+          and(
+            eq(relationshipSignals.tenantId, tenantId),
+            eq(relationshipSignals.entityType, entityType),
+            eq(relationshipSignals.entityId, entityId),
+          ),
+        )
+        .limit(1),
+    );
+
+  let rows;
+  if (getTenantContext()) {
+    rows = await run();
+  } else {
+    const { userId } = await auth();
+    rows = await runWithTenantContext(
+      { tenantId, userId: userId ?? SYSTEM_ACTOR_ID },
+      run,
+    );
+  }
 
   const signal = rows[0] ?? null;
   if (!signal) {

@@ -188,8 +188,13 @@ function NavList({
   const groups = navGroupsForPersona(persona);
   return (
     <nav
+      // `min-h-0` is what makes `overflow-y-auto` actually scroll inside
+      // a flex column: without it, flex children default to
+      // `min-height: auto` and won't shrink below their content size,
+      // which pushes the CollapseToggle off-screen when the nav list
+      // exceeds the available height.
       className={cn(
-        'flex-1 overflow-y-auto py-2',
+        'min-h-0 flex-1 overflow-y-auto py-2',
         collapsed ? 'px-1.5' : 'px-2',
       )}
     >

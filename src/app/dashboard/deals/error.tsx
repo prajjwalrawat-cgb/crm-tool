@@ -2,6 +2,11 @@
 
 import { useEffect } from 'react';
 
+// User-facing copy stays generic — internal error messages (DB helper
+// names, table columns, async-context wiring) must not leak into the
+// UI. The raw error still goes to console.error for the dev toolbar
+// and server logs; the digest is the ticket the user can share with
+// support to pull the full trace.
 export default function DealsErrorBoundary({
   error,
   reset,
@@ -20,7 +25,8 @@ export default function DealsErrorBoundary({
           Something went wrong loading deals.
         </h2>
         <p className="mt-2 text-sm text-red-800">
-          {error.message || 'An unexpected error occurred.'}
+          We hit an unexpected error. Try again — if it keeps happening,
+          share the reference below with support.
         </p>
         <button
           type="button"
@@ -29,6 +35,11 @@ export default function DealsErrorBoundary({
         >
           Try again
         </button>
+        {error.digest ? (
+          <p className="mt-3 font-mono text-[10.5px] text-red-700/80">
+            ref: {error.digest}
+          </p>
+        ) : null}
       </div>
     </main>
   );

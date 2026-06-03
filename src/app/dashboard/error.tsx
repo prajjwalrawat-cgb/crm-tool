@@ -4,6 +4,13 @@ import { Building2, Loader2, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
+// Sentinel substrings whose presence in `error.message` indicates a
+// recoverable race we already have a recovery UI for. Everything else
+// is treated as an opaque internal failure — we surface the digest
+// reference but never the raw message, so DB schemas, query helper
+// names, and library internals stay out of user-facing UI.
+const MEMBERSHIP_HINTS = ['MembershipMissingError', 'No active membership'];
+
 /**
  * Dashboard error boundary — owns the recovery UI for the membership-
  * sync failure mode ("Clerk says you're in this org, but our DB has
@@ -27,7 +34,14 @@ export default function DashboardError({
 }) {
   const isMembershipMissing =
     error.name === 'MembershipMissingError' ||
-    error.message.includes('No active membership');
+    MEMBERSHIP_HINTS.some((h) => error.message.includes(h));
+
+  // Always log the raw error to the console so the developer toolbar
+  // and server logs retain the full stack — only the user-facing copy
+  // is sanitized.
+  useEffect(() => {
+    console.error('[dashboard] route error:', error);
+  }, [error]);
 
   // Auto-retry once on mount for membership-missing errors. Webhook
   // races and stale Next.js page caches usually clear in <1s.
@@ -97,7 +111,8 @@ export default function DashboardError({
         Something went wrong.
       </h1>
       <p className="mt-2 max-w-sm text-[12.5px] text-slate-500 dark:text-[#A1A1AA]">
-        {error.message || 'An unexpected error occurred.'}
+        We hit an unexpected error loading this page. Try again — if it
+        keeps happening, share the reference below with support.
       </p>
       <div className="mt-5 flex gap-2">
         <button
