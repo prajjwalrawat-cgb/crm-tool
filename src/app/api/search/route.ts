@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
+import { getCurrentMembership } from '@/lib/membership';
+import { personaOf } from '@/lib/personas';
 import type { SearchHit, SearchResponse } from '@/lib/search/types';
 import { requireTenant } from '@/lib/tenant';
 
@@ -34,6 +36,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const tenant = await requireTenant();
+  const membership = await getCurrentMembership();
+  const persona = personaOf(membership?.role ?? null);
 
   const rawQuery = req.nextUrl.searchParams.get('q') ?? '';
   const query = rawQuery.trim().slice(0, 100);
@@ -46,6 +50,16 @@ export async function GET(req: NextRequest): Promise<Response> {
   // so the user can search for literal underscores in workflow ids.
   const escaped = query.replace(/[%_]/g, '\\$&');
   const pattern = `%${escaped}%`;
+
+  // RBAC: sales persona is scoped to records they own (or unassigned
+  // ones, matching the list-page rules in listDeals/listContacts/etc).
+  // Admin + manager see the full tenant. Bind `mineOnlyId` and
+  // `mineOnly` so a single SQL shape covers both cases without
+  // branching the queries.
+  const mineOnly = persona === 'sales';
+  const mineOnlyId = mineOnly ? userId : null;
+  // Workflows are admin-only — never expose to non-admin personas.
+  const seeWorkflows = persona === 'admin';
 
   const hits = await runWithTenantContext(
     { tenantId: tenant.id, userId },
@@ -66,6 +80,9 @@ export async function GET(req: NextRequest): Promise<Response> {
               WHERE d.tenant_id = ${tenant.id}::uuid
                 AND d.deleted_at IS NULL
                 AND d.name ILIKE ${pattern}
+                AND (${mineOnlyId}::uuid IS NULL
+                     OR d.owner_id = ${mineOnlyId}::uuid
+                     OR d.owner_id IS NULL)
               ORDER BY d.updated_at DESC
               LIMIT ${MAX_PER_BUCKET}
             `) as unknown as Array<{
@@ -80,6 +97,9 @@ export async function GET(req: NextRequest): Promise<Response> {
               WHERE tenant_id = ${tenant.id}::uuid
                 AND deleted_at IS NULL
                 AND (name ILIKE ${pattern} OR domain ILIKE ${pattern})
+                AND (${mineOnlyId}::uuid IS NULL
+                     OR owner_id = ${mineOnlyId}::uuid
+                     OR owner_id IS NULL)
               ORDER BY updated_at DESC
               LIMIT ${MAX_PER_BUCKET}
             `) as unknown as Array<{
@@ -100,6 +120,9 @@ export async function GET(req: NextRequest): Promise<Response> {
                   OR c.last_name ILIKE ${pattern}
                   OR c.email ILIKE ${pattern}
                 )
+                AND (${mineOnlyId}::uuid IS NULL
+                     OR c.owner_id = ${mineOnlyId}::uuid
+                     OR c.owner_id IS NULL)
               ORDER BY c.updated_at DESC
               LIMIT ${MAX_PER_BUCKET}
             `) as unknown as Array<{
@@ -109,25 +132,35 @@ export async function GET(req: NextRequest): Promise<Response> {
               email: string | null;
               company_name: string | null;
             }>,
-            tx.execute(sql`
-              SELECT id, workflow_id, status::text AS status, started_at
-              FROM workflow_runs
-              WHERE tenant_id = ${tenant.id}::uuid
-                AND workflow_id ILIKE ${pattern}
-              ORDER BY started_at DESC
-              LIMIT ${MAX_PER_BUCKET}
-            `) as unknown as Array<{
-              id: string;
-              workflow_id: string;
-              status: string;
-              started_at: Date | string;
-            }>,
+            seeWorkflows
+              ? (tx.execute(sql`
+                  SELECT id, workflow_id, status::text AS status, started_at
+                  FROM workflow_runs
+                  WHERE tenant_id = ${tenant.id}::uuid
+                    AND workflow_id ILIKE ${pattern}
+                  ORDER BY started_at DESC
+                  LIMIT ${MAX_PER_BUCKET}
+                `) as unknown as Promise<Array<{
+                  id: string;
+                  workflow_id: string;
+                  status: string;
+                  started_at: Date | string;
+                }>>)
+              : Promise.resolve([] as Array<{
+                  id: string;
+                  workflow_id: string;
+                  status: string;
+                  started_at: Date | string;
+                }>),
             tx.execute(sql`
               SELECT id, title, status::text AS status, priority::text AS priority, due_date::text AS due_date
               FROM tasks
               WHERE tenant_id = ${tenant.id}::uuid
                 AND deleted_at IS NULL
                 AND title ILIKE ${pattern}
+                AND (${mineOnlyId}::uuid IS NULL
+                     OR assigned_user_id = ${mineOnlyId}::uuid
+                     OR assigned_user_id IS NULL)
               ORDER BY
                 CASE WHEN status IN ('todo','in_progress') THEN 0 ELSE 1 END,
                 updated_at DESC

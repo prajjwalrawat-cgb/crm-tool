@@ -381,12 +381,17 @@ export type StaleDeal = {
  */
 export async function getStaleDeals(
   tenantId: string,
-  options: { staleDays?: number; limit?: number } = {},
+  options: { staleDays?: number; limit?: number; ownerId?: string | null } = {},
 ): Promise<StaleDeal[]> {
   const staleDays = options.staleDays ?? 14;
   const limit = options.limit ?? 5;
+  const ownerId = options.ownerId ?? null;
   return await timeQuery('dashboard.staleDeals', async () =>
     tenantTransaction(async (tx) => {
+      // `ownerId` scopes the query to a single rep — sales-home passes
+      // the current user's id so a member only sees their own stale
+      // deals, never the team's. Admin/manager pass null for tenant-
+      // wide visibility.
       const rows = (await tx.execute(
         sql`SELECT d.id, d.name, d.stage::text AS stage,
                    d.amount_minor::bigint AS amount_minor,
@@ -399,6 +404,7 @@ export async function getStaleDeals(
               AND d.deleted_at IS NULL
               AND d.stage NOT IN ('won','lost')
               AND d.updated_at < NOW() - (${staleDays}::int * INTERVAL '1 day')
+              AND (${ownerId}::uuid IS NULL OR d.owner_id = ${ownerId}::uuid)
             ORDER BY d.updated_at ASC
             LIMIT ${limit}`,
       )) as unknown as Array<{
@@ -442,12 +448,15 @@ export type UpcomingFollowUp = {
  */
 export async function getUpcomingFollowUps(
   tenantId: string,
-  options: { lookAheadDays?: number; limit?: number } = {},
+  options: { lookAheadDays?: number; limit?: number; ownerId?: string | null } = {},
 ): Promise<UpcomingFollowUp[]> {
   const lookAheadDays = options.lookAheadDays ?? 14;
   const limit = options.limit ?? 6;
+  const ownerId = options.ownerId ?? null;
   return await timeQuery('dashboard.upcomingFollowUps', async () =>
     tenantTransaction(async (tx) => {
+      // `ownerId` scopes follow-ups to a single rep when provided —
+      // members must only see their own upcoming closes.
       const rows = (await tx.execute(
         sql`SELECT d.id, d.name, d.stage::text AS stage,
                    d.amount_minor::bigint AS amount_minor,
@@ -462,6 +471,7 @@ export async function getUpcomingFollowUps(
               AND d.stage NOT IN ('won','lost')
               AND d.expected_close_date IS NOT NULL
               AND d.expected_close_date <= CURRENT_DATE + (${lookAheadDays}::int * INTERVAL '1 day')
+              AND (${ownerId}::uuid IS NULL OR d.owner_id = ${ownerId}::uuid)
             ORDER BY d.expected_close_date ASC
             LIMIT ${limit}`,
       )) as unknown as Array<{
@@ -504,9 +514,13 @@ export type RecentWin = {
 export async function getRecentWins(
   tenantId: string,
   limit = 5,
+  options: { ownerId?: string | null } = {},
 ): Promise<RecentWin[]> {
+  const ownerId = options.ownerId ?? null;
   return await timeQuery('dashboard.recentWins', async () =>
     tenantTransaction(async (tx) => {
+      // `ownerId` scopes wins to a single rep — sales-home passes the
+      // current user's id so a member sees only their own recent wins.
       const rows = (await tx.execute(
         sql`SELECT d.id, d.name,
                    d.amount_minor::bigint AS amount_minor,
@@ -519,6 +533,7 @@ export async function getRecentWins(
               AND d.deleted_at IS NULL
               AND d.stage = 'won'
               AND d.closed_at IS NOT NULL
+              AND (${ownerId}::uuid IS NULL OR d.owner_id = ${ownerId}::uuid)
             ORDER BY d.closed_at DESC
             LIMIT ${limit}`,
       )) as unknown as Array<{

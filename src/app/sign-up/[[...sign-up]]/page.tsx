@@ -3,6 +3,10 @@ import { SignUp } from '@clerk/nextjs';
 import { SaleinxLogo } from '@/lib/brand/logo';
 import { clerkAppearance } from '@/lib/clerk-theme';
 
+// See sign-in page — same Clerk catchall / Next.js 16 prerender
+// crash. Force-dynamic skips static path generation.
+export const dynamic = 'force-dynamic';
+
 export default function SignUpPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">

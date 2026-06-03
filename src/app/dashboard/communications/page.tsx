@@ -12,6 +12,7 @@ import {
 } from '@/lib/communications/drafts/queries';
 import { formatRelativeTime } from '@/lib/dates/format';
 import type { ThreadStatus } from '@/db/schema';
+import { requirePersonas } from '@/lib/personas/guards';
 import { cn } from '@/lib/utils';
 
 import { InboxLiveRefresh } from './_components/inbox-live-refresh';
@@ -47,6 +48,12 @@ export default async function CommunicationsPage({
 }: {
   searchParams: SearchParams;
 }) {
+  // RBAC: inbox is tenant-shared in the current schema (threads
+  // are keyed by email_address, not user_id), so a member would
+  // see every thread. Until per-user inbox scoping ships, the
+  // route is admin + manager only. Sales personas redirect to
+  // /dashboard. The sidebar config also hides the link for sales.
+  await requirePersonas(['admin', 'manager']);
   const sp = await searchParams;
   const viewParam = typeof sp.view === 'string' ? sp.view : 'inbox';
   const view: View = (VIEWS as readonly string[]).includes(viewParam)

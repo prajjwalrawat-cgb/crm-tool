@@ -83,9 +83,12 @@ export async function SalesHome({
     ),
     getRevenueTrend(tenantId, { days: 90, ownerId: userId }),
     getMyTasksSummary(tenantId, userId),
-    getUpcomingFollowUps(tenantId, { lookAheadDays: 14, limit: 6 }),
-    getStaleDeals(tenantId, { staleDays: 14, limit: 5 }),
-    getRecentWins(tenantId, 5),
+    // Member persona — scope follow-ups / stale / wins to the
+    // current user's owned deals so a rep never sees another rep's
+    // pipeline. Admin/manager homes pass null (tenant-wide).
+    getUpcomingFollowUps(tenantId, { lookAheadDays: 14, limit: 6, ownerId: userId }),
+    getStaleDeals(tenantId, { staleDays: 14, limit: 5, ownerId: userId }),
+    getRecentWins(tenantId, 5, { ownerId: userId }),
     readRevenueTrendView({ tenantId, userId }),
     readStageConversionView({ tenantId, userId }),
     readStageDonutView({ tenantId, userId }),

@@ -18,6 +18,7 @@ import {
 import { getThreadById } from '@/lib/communications/threads/queries';
 import { formatDateTime, formatRelativeTime } from '@/lib/dates/format';
 import { getThreadSummaryInsight } from '@/lib/intelligence/runner';
+import { requirePersonas } from '@/lib/personas/guards';
 import { cn } from '@/lib/utils';
 
 import { LiveThreadSummaryCard } from '../../intelligence/_components/live-ai-card';
@@ -39,6 +40,9 @@ export default async function ThreadDetailPage({
 }: {
   params: Params;
 }) {
+  // Same RBAC story as the inbox list — tenant-shared until
+  // per-user inbox scoping ships.
+  await requirePersonas(['admin', 'manager']);
   const { threadId } = await params;
   return await withTenantSession(async ({ tenant, userId }) => {
     const thread = await getThreadById(tenant.id, threadId);
