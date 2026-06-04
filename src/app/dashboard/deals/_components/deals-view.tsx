@@ -334,6 +334,7 @@ export function DealsView({
         <DealFilterBar
           initialFilters={initialFilters}
           companyOptions={companyOptions}
+          teammates={teammates}
         />
 
         <FilterChips chips={filterChips} />
@@ -873,12 +874,21 @@ function buildDealFilterChips(
       label: `Stale (>${filters.staleDays ?? 14}d)`,
     });
   }
-  if (filters.companyId) {
-    const co = ctx.companyOptions.find((c) => c.id === filters.companyId);
+  if (filters.companyIds && filters.companyIds.length > 0) {
+    const names = filters.companyIds
+      .map(
+        (id) =>
+          ctx.companyOptions.find((c) => c.id === id)?.name ?? 'Unknown',
+      )
+      .slice(0, 3);
+    const suffix =
+      filters.companyIds.length > names.length
+        ? ` +${filters.companyIds.length - names.length}`
+        : '';
     chips.push({
-      id: 'company',
-      keys: ['companyId'],
-      label: `Company: ${co?.name ?? 'Unknown'}`,
+      id: 'companies',
+      keys: ['companyId', 'companyIds'],
+      label: `Company: ${names.join(', ')}${suffix}`,
     });
   }
   if (filters.mine) {
@@ -887,12 +897,22 @@ function buildDealFilterChips(
   if (filters.unassigned) {
     chips.push({ id: 'unassigned', keys: ['unassigned'], label: 'Unassigned' });
   }
-  if (filters.ownerId) {
-    const t = ctx.teammates.find((tt) => tt.id === filters.ownerId);
+  if (filters.ownerIds && filters.ownerIds.length > 0) {
+    const names = filters.ownerIds
+      .map(
+        (id) =>
+          ctx.teammates.find((t) => t.id === id)?.displayName ??
+          id.slice(0, 8),
+      )
+      .slice(0, 3);
+    const suffix =
+      filters.ownerIds.length > names.length
+        ? ` +${filters.ownerIds.length - names.length}`
+        : '';
     chips.push({
-      id: 'owner',
+      id: 'owners',
       keys: ['owner'],
-      label: `Owner: ${t?.displayName ?? filters.ownerId.slice(0, 8)}`,
+      label: `Owner: ${names.join(', ')}${suffix}`,
     });
   }
 

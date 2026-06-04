@@ -16,12 +16,17 @@ import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 
 import type { MembershipRole } from '@/db/schema';
 import { useRealtimeEvents } from '@/hooks/use-realtime-events';
+import type { CompanyOption } from '@/lib/companies/queries';
+import type { DealFilters } from '@/lib/deals/filters';
 import type { DealBoard } from '@/lib/deals/queries';
 import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
 import { canManageDeals } from '@/lib/rbac';
 import { deserializeDeal } from '@/lib/realtime/events';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
+import { DealFilterBar } from '../../_components/deal-filter-bar';
+import { FilterChips, type FilterChip } from '../../../_components/filter-chips';
 import { updateDealStageAction } from '../../actions';
 import { type BoardCard, DealCard } from './deal-card';
 import { BoardColumn } from './board-column';
@@ -34,6 +39,10 @@ type Props = {
   stageCounts: Record<DealStage, number>;
   currentRole: MembershipRole;
   tenantId: string;
+  initialFilters: DealFilters;
+  companyOptions: CompanyOption[];
+  teammates: Teammate[];
+  currentUserId: string;
 };
 
 function isStage(value: string): value is DealStage {
@@ -138,8 +147,60 @@ export function BoardView({
   stageCounts,
   currentRole,
   tenantId,
+  initialFilters,
+  companyOptions,
+  teammates,
+  currentUserId,
 }: Props) {
   const canMove = canManageDeals(currentRole);
+  // Reuse the list view's chip builder shape so the active-filter
+  // strip looks identical between board and list. Built inline (small
+  // and frequently changing); not worth memoizing here.
+  const filterChips: FilterChip[] = [];
+  if (initialFilters.stages && initialFilters.stages.length > 0) {
+    filterChips.push({
+      id: 'stages',
+      keys: ['stage', 'stages'],
+      label: `Stage: ${initialFilters.stages.length} selected`,
+    });
+  }
+  if (
+    initialFilters.companyIds &&
+    initialFilters.companyIds.length > 0
+  ) {
+    filterChips.push({
+      id: 'companies',
+      keys: ['companyId', 'companyIds'],
+      label: `Company: ${initialFilters.companyIds.length} selected`,
+    });
+  }
+  if (initialFilters.ownerIds && initialFilters.ownerIds.length > 0) {
+    filterChips.push({
+      id: 'owners',
+      keys: ['owner'],
+      label: `Owner: ${initialFilters.ownerIds.length} selected`,
+    });
+  }
+  if (initialFilters.mine) {
+    filterChips.push({ id: 'mine', keys: ['mine'], label: 'Mine' });
+  }
+  if (initialFilters.unassigned) {
+    filterChips.push({
+      id: 'unassigned',
+      keys: ['unassigned'],
+      label: 'Unassigned',
+    });
+  }
+  // Don't render the seed `currentUserId` — unused here but kept in the
+  // prop signature so callers stay symmetric with the list view.
+  void currentUserId;
+  // Stage filter on the board hides columns the user didn't select so
+  // the layout collapses to just the relevant lanes — matches the
+  // list view's "stage IN (...)" semantics visually.
+  const visibleStages: readonly DealStage[] =
+    initialFilters.stages && initialFilters.stages.length > 0
+      ? DEAL_STAGES.filter((s) => initialFilters.stages!.includes(s))
+      : DEAL_STAGES;
 
   const [board, setBoard] = useState<LocalBoard>(() => initialBoard);
   const [activeCard, setActiveCard] = useState<BoardCard | null>(null);
@@ -289,7 +350,7 @@ export function BoardView({
 
   const columns = useMemo(
     () =>
-      DEAL_STAGES.map((stage) => (
+      visibleStages.map((stage) => (
         <BoardColumn
           key={stage}
           stage={stage}
@@ -298,11 +359,20 @@ export function BoardView({
           canMove={canMove}
         />
       )),
-    [board, canMove, stageCounts],
+    [board, canMove, stageCounts, visibleStages],
   );
 
   return (
     <div className="flex flex-1 flex-col gap-4">
+      <DealFilterBar
+        initialFilters={initialFilters}
+        companyOptions={companyOptions}
+        teammates={teammates}
+        basePath="/dashboard/deals/board"
+      />
+
+      <FilterChips chips={filterChips} />
+
       {error ? (
         <p
           role="alert"

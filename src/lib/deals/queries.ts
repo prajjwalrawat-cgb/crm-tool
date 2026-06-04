@@ -174,8 +174,8 @@ export async function listDeals(
       sql`${deals.updatedAt} < NOW() - (${days}::int * INTERVAL '1 day')`,
     );
   }
-  if (f.companyId) {
-    conditions.push(eq(deals.companyId, f.companyId));
+  if (f.companyIds && f.companyIds.length > 0) {
+    conditions.push(inArray(deals.companyId, f.companyIds));
   }
   if (f.mine && options.currentUserId) {
     conditions.push(eq(deals.ownerId, options.currentUserId));
@@ -183,8 +183,8 @@ export async function listDeals(
   if (f.unassigned) {
     conditions.push(isNull(deals.ownerId));
   }
-  if (f.ownerId) {
-    conditions.push(eq(deals.ownerId, f.ownerId));
+  if (f.ownerIds && f.ownerIds.length > 0) {
+    conditions.push(inArray(deals.ownerId, f.ownerIds));
   }
   // Hard scope: members see only their deals + unassigned. URL params
   // cannot widen this — they're additive within the allowed set.
@@ -301,10 +301,22 @@ export type DealBoardSummary = {
  * more round trips for an order-of-magnitude smaller result set than
  * the old "fetch everything, group in JS" pattern. A separate cheap
  * COUNT(*) GROUP BY stage powers the "X / Y in <stage>" badges.
+ *
+ * Filters apply the same conditions as `listDeals` so the user's
+ * filter selection from the list view round-trips to the board view
+ * (and vice-versa) — within each stage column we still cap at
+ * BOARD_PER_STAGE_LIMIT. A `stages` filter narrows which columns get
+ * populated; columns excluded by the filter are skipped entirely and
+ * stay empty in the response.
  */
 export async function listDealsForBoard(
   tenantId: string,
-  options: { restrictToOwnerOrUnassigned?: string } = {},
+  options: {
+    restrictToOwnerOrUnassigned?: string;
+    filters?: DealFilters;
+    /** Required for `filters.mine` to resolve "owner == me". */
+    currentUserId?: string;
+  } = {},
 ): Promise<DealBoardSummary> {
   const STAGES: DealStage[] = [
     'lead',
@@ -314,6 +326,7 @@ export async function listDealsForBoard(
     'won',
     'lost',
   ];
+  const f = options.filters ?? {};
   return await timeQuery('deals.board', async () => {
     return await tenantTransaction(async (tx) => {
       const board: DealBoard = {
@@ -333,25 +346,69 @@ export async function listDealsForBoard(
         lost: 0,
       };
 
+      // Conditions shared between the per-stage SELECTs and the
+      // totals GROUP BY. The `stage` filter is excluded here because
+      // the per-stage queries already constrain by stage, and the
+      // totals query needs to see the full breakdown (then the UI
+      // hides stages the user didn't ask for).
+      const sharedConds: SQL[] = [
+        eq(deals.tenantId, tenantId),
+        isNull(deals.deletedAt),
+      ];
+      if (typeof f.amountMinorMin === 'number') {
+        sharedConds.push(gte(deals.amountMinor, f.amountMinorMin));
+      }
+      if (typeof f.amountMinorMax === 'number') {
+        sharedConds.push(lte(deals.amountMinor, f.amountMinorMax));
+      }
+      if (f.expectedCloseFrom) {
+        sharedConds.push(gte(deals.expectedCloseDate, f.expectedCloseFrom));
+      }
+      if (f.expectedCloseTo) {
+        sharedConds.push(lte(deals.expectedCloseDate, f.expectedCloseTo));
+      }
+      if (f.stale) {
+        const days = f.staleDays && f.staleDays > 0 ? f.staleDays : 14;
+        sharedConds.push(
+          sql`${deals.stage} NOT IN ('won','lost')`,
+          sql`${deals.updatedAt} < NOW() - (${days}::int * INTERVAL '1 day')`,
+        );
+      }
+      if (f.companyIds && f.companyIds.length > 0) {
+        sharedConds.push(inArray(deals.companyId, f.companyIds));
+      }
+      if (f.mine && options.currentUserId) {
+        sharedConds.push(eq(deals.ownerId, options.currentUserId));
+      }
+      if (f.unassigned) {
+        sharedConds.push(isNull(deals.ownerId));
+      }
+      if (f.ownerIds && f.ownerIds.length > 0) {
+        sharedConds.push(inArray(deals.ownerId, f.ownerIds));
+      }
+      if (options.restrictToOwnerOrUnassigned) {
+        const me = options.restrictToOwnerOrUnassigned;
+        sharedConds.push(
+          sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`,
+        );
+      }
+
+      // If the user selected specific stages, skip the rest entirely
+      // — keeps the round-trip count down and the empty columns at 0
+      // counts so the board UI can hide them.
+      const stagesToFetch =
+        f.stages && f.stages.length > 0
+          ? STAGES.filter((s) => f.stages!.includes(s))
+          : STAGES;
+
       const stageResults = await Promise.all(
-        STAGES.map(async (stage) => {
-          const whereConds: SQL[] = [
-            eq(deals.tenantId, tenantId),
-            eq(deals.stage, stage),
-            isNull(deals.deletedAt),
-          ];
-          if (options.restrictToOwnerOrUnassigned) {
-            const me = options.restrictToOwnerOrUnassigned;
-            whereConds.push(
-              sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`,
-            );
-          }
+        stagesToFetch.map(async (stage) => {
           const rows = await tx
             .select(DEALS_PROJECTION)
             .from(deals)
             .leftJoin(companies, eq(deals.companyId, companies.id))
             .leftJoin(contacts, eq(deals.contactId, contacts.id))
-            .where(and(...whereConds))
+            .where(and(...sharedConds, eq(deals.stage, stage)))
             .orderBy(desc(deals.updatedAt), desc(deals.id))
             .limit(BOARD_PER_STAGE_LIMIT);
           return { stage, rows: rows.map(shapeDealRow) };
@@ -361,15 +418,9 @@ export async function listDealsForBoard(
         board[stage] = rows;
       }
 
-      const totalsConds: SQL[] = [
-        eq(deals.tenantId, tenantId),
-        isNull(deals.deletedAt),
-      ];
-      if (options.restrictToOwnerOrUnassigned) {
-        const me = options.restrictToOwnerOrUnassigned;
-        totalsConds.push(
-          sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`,
-        );
+      const totalsConds: SQL[] = [...sharedConds];
+      if (f.stages && f.stages.length > 0) {
+        totalsConds.push(inArray(deals.stage, f.stages));
       }
       const totals = await tx
         .select({

@@ -7,11 +7,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CompanyOption } from '@/lib/companies/queries';
 import { formatNumber } from '@/lib/dates/format';
 import {
+  DEAL_FILTER_URL_KEYS,
   type DealFilters,
   dealFiltersToSearchParams,
   hasActiveDealFilters,
 } from '@/lib/deals/filters';
 import { type DealStage, DEAL_STAGES, DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 /**
@@ -30,9 +32,18 @@ import { cn } from '@/lib/utils';
 export function DealFilterBar({
   initialFilters,
   companyOptions,
+  teammates,
+  basePath = '/dashboard/deals',
 }: {
   initialFilters: DealFilters;
   companyOptions: CompanyOption[];
+  teammates?: Teammate[];
+  /**
+   * Route the URL-replace targets. Defaults to the deals list; the
+   * board view passes `/dashboard/deals/board` so filter chips stay
+   * scoped to whichever surface is rendering them.
+   */
+  basePath?: string;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -40,27 +51,18 @@ export function DealFilterBar({
   const pushFilters = useCallback(
     (next: DealFilters) => {
       const merged = new URLSearchParams(params.toString());
-      // Drop all filter keys so we don't carry stale ones.
-      for (const k of [
-        'stage',
-        'stages',
-        'amountMin',
-        'amountMax',
-        'closeFrom',
-        'closeTo',
-        'stale',
-        'staleDays',
-        'companyId',
-        'cursor', // any filter change resets pagination
-      ]) {
-        merged.delete(k);
-      }
+      // Drop every filter key we own so a toggled-off filter (e.g.
+      // unchecking "My deals") actually clears its URL param — the
+      // previous list missed `mine`, `unassigned`, and `owner`, so
+      // those filters were sticky.
+      for (const k of DEAL_FILTER_URL_KEYS) merged.delete(k);
+      merged.delete('cursor'); // any filter change resets pagination
       const filterParams = dealFiltersToSearchParams(next);
       for (const [k, v] of filterParams.entries()) merged.set(k, v);
       const qs = merged.toString();
-      router.replace(`/dashboard/deals${qs ? `?${qs}` : ''}`, { scroll: false });
+      router.replace(`${basePath}${qs ? `?${qs}` : ''}`, { scroll: false });
     },
-    [router, params],
+    [router, params, basePath],
   );
 
   const setStages = useCallback(
@@ -89,9 +91,20 @@ export function DealFilterBar({
     (next: boolean) => pushFilters({ ...initialFilters, stale: next }),
     [initialFilters, pushFilters],
   );
-  const setCompany = useCallback(
-    (id: string | undefined) =>
-      pushFilters({ ...initialFilters, companyId: id }),
+  const setCompanies = useCallback(
+    (ids: string[]) =>
+      pushFilters({
+        ...initialFilters,
+        companyIds: ids.length > 0 ? ids : undefined,
+      }),
+    [initialFilters, pushFilters],
+  );
+  const setOwners = useCallback(
+    (ids: string[]) =>
+      pushFilters({
+        ...initialFilters,
+        ownerIds: ids.length > 0 ? ids : undefined,
+      }),
     [initialFilters, pushFilters],
   );
   const setMine = useCallback(
@@ -149,10 +162,17 @@ export function DealFilterBar({
           onClick={() => setStale(!initialFilters.stale)}
         />
         <CompanyPopover
-          selectedId={initialFilters.companyId}
+          selectedIds={initialFilters.companyIds ?? []}
           options={companyOptions}
-          onChange={setCompany}
+          onChange={setCompanies}
         />
+        {teammates && teammates.length > 0 ? (
+          <OwnerPopover
+            selectedIds={initialFilters.ownerIds ?? []}
+            teammates={teammates}
+            onChange={setOwners}
+          />
+        ) : null}
         {active ? (
           <button
             type="button"
@@ -545,33 +565,53 @@ function DatePopover({
 }
 
 function CompanyPopover({
-  selectedId,
+  selectedIds,
   options,
   onChange,
 }: {
-  selectedId: string | undefined;
+  selectedIds: string[];
   options: CompanyOption[];
-  onChange: (next: string | undefined) => void;
+  onChange: (next: string[]) => void;
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const active = !!selectedId;
-  const selected = options.find((o) => o.id === selectedId);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const active = selectedIds.length > 0;
+
+  // Selected rows first, then matches; cap the visible list so a huge
+  // tenant doesn't melt the popover. Search narrows further.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return options.slice(0, 50);
-    return options.filter((o) => o.name.toLowerCase().includes(q)).slice(0, 50);
+    const matches = q
+      ? options.filter((o) => o.name.toLowerCase().includes(q))
+      : options;
+    return matches.slice(0, 50);
   }, [options, query]);
+
+  const toggle = (id: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange(Array.from(next));
+  };
+
+  const label = active
+    ? `Company: ${
+        selectedIds.length === 1
+          ? options.find((o) => o.id === selectedIds[0])?.name ?? '…'
+          : `${selectedIds.length} selected`
+      }`
+    : 'Company';
 
   return (
     <div className="relative">
       <Chip
         active={active}
         onClick={() => setOpen((v) => !v)}
-        onClear={() => onChange(undefined)}
+        onClear={() => onChange([])}
       >
-        {active ? `Company: ${selected?.name ?? '…'}` : 'Company'}
+        {label}
       </Chip>
       <Popover
         anchorRef={anchorRef}
@@ -593,27 +633,169 @@ function CompanyPopover({
                 No matches
               </li>
             ) : (
-              filtered.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onChange(c.id);
-                      setOpen(false);
-                    }}
-                    className={cn(
-                      'flex w-full items-center justify-between rounded px-2 py-1 text-left text-[12px] transition',
-                      selectedId === c.id
-                        ? 'bg-indigo-50 text-indigo-700'
-                        : 'text-slate-700 hover:bg-slate-50',
-                    )}
-                  >
-                    <span className="truncate">{c.name}</span>
-                  </button>
-                </li>
-              ))
+              filtered.map((c) => {
+                const checked = selectedSet.has(c.id);
+                return (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => toggle(c.id)}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] transition',
+                        checked
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-700 hover:bg-slate-50',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded border',
+                          checked
+                            ? 'border-indigo-500 bg-indigo-500 text-white'
+                            : 'border-slate-300 bg-white',
+                        )}
+                        aria-hidden
+                      >
+                        {checked ? <span className="text-[8px]">✓</span> : null}
+                      </span>
+                      <span className="truncate">{c.name}</span>
+                    </button>
+                  </li>
+                );
+              })
             )}
           </ul>
+          {active ? (
+            <div className="flex justify-end border-t border-slate-100 pt-1">
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="rounded px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
+function OwnerPopover({
+  selectedIds,
+  teammates,
+  onChange,
+}: {
+  selectedIds: string[];
+  teammates: Teammate[];
+  onChange: (next: string[]) => void;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const active = selectedIds.length > 0;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matches = q
+      ? teammates.filter(
+          (t) =>
+            t.displayName.toLowerCase().includes(q) ||
+            (t.email?.toLowerCase().includes(q) ?? false),
+        )
+      : teammates;
+    return matches.slice(0, 50);
+  }, [teammates, query]);
+
+  const toggle = (id: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange(Array.from(next));
+  };
+
+  const label = active
+    ? `Owner: ${
+        selectedIds.length === 1
+          ? teammates.find((t) => t.id === selectedIds[0])?.displayName ?? '…'
+          : `${selectedIds.length} selected`
+      }`
+    : 'Owner';
+
+  return (
+    <div className="relative">
+      <Chip
+        active={active}
+        onClick={() => setOpen((v) => !v)}
+        onClear={() => onChange([])}
+      >
+        {label}
+      </Chip>
+      <Popover
+        anchorRef={anchorRef}
+        open={open}
+        onClose={() => setOpen(false)}
+      >
+        <div className="flex flex-col gap-1 p-1">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search teammates…"
+            className="rounded border border-slate-200 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/20"
+            autoFocus
+          />
+          <ul className="max-h-56 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <li className="px-2 py-2 text-[11px] text-slate-400">
+                No matches
+              </li>
+            ) : (
+              filtered.map((t) => {
+                const checked = selectedSet.has(t.id);
+                return (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      onClick={() => toggle(t.id)}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] transition',
+                        checked
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-700 hover:bg-slate-50',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded border',
+                          checked
+                            ? 'border-indigo-500 bg-indigo-500 text-white'
+                            : 'border-slate-300 bg-white',
+                        )}
+                        aria-hidden
+                      >
+                        {checked ? <span className="text-[8px]">✓</span> : null}
+                      </span>
+                      <span className="truncate">{t.displayName}</span>
+                    </button>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+          {active ? (
+            <div className="flex justify-end border-t border-slate-100 pt-1">
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="rounded px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
         </div>
       </Popover>
     </div>

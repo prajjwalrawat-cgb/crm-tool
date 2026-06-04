@@ -16,7 +16,13 @@ import { type DealStage, DEAL_STAGES } from './schema';
  *   stale=1                    — active deals with updated_at older than
  *                                14 days (or `staleDays`)
  *   staleDays=30               — override the staleness threshold
- *   companyId=<uuid>           — restrict to one company
+ *   companyId=<uuid1>,<uuid2>  — comma list of companies (multi-select)
+ *   owner=<uuid1>,<uuid2>      — comma list of owners (multi-select)
+ *
+ * Within a filter group the SQL is OR (e.g. `stage IN (...)`); between
+ * groups it's AND. Multi-value keys are intentionally comma-joined
+ * rather than repeated (`?stage=a&stage=b`) so URLs stay short and
+ * `new URLSearchParams(qs)` round-trips cleanly.
  *
  * Any unknown key is preserved unchanged by the filter bar — search
  * (`q`) and pagination (`cursor`, `size`) live in the same URL and
@@ -31,13 +37,37 @@ export type DealFilters = {
   expectedCloseTo?: string;
   stale?: boolean;
   staleDays?: number;
-  companyId?: string;
+  companyIds?: string[];
   /** `mine` and `unassigned` are resolved server-side using the current user. */
   mine?: boolean;
   unassigned?: boolean;
-  /** Filter to deals owned by a specific teammate. Mutually exclusive with `mine` and `unassigned`. */
-  ownerId?: string;
+  /** Filter to deals owned by these teammates (OR within the group). */
+  ownerIds?: string[];
 };
+
+const URL_FILTER_KEYS = [
+  'stage',
+  'stages',
+  'amountMin',
+  'amountMax',
+  'closeFrom',
+  'closeTo',
+  'stale',
+  'staleDays',
+  'companyId',
+  'companyIds',
+  'mine',
+  'unassigned',
+  'owner',
+] as const;
+
+/**
+ * Every URL key the filter bar owns. Used by `pushFilters` to clear
+ * stale params before re-serializing the new state — without this list
+ * a toggled-off filter (e.g. unchecking "My deals") would leave its
+ * key sitting in the URL and the next render would re-apply it.
+ */
+export const DEAL_FILTER_URL_KEYS: readonly string[] = URL_FILTER_KEYS;
 
 export function parseDealFilters(
   raw: Partial<Record<string, string | string[] | undefined>>,
@@ -63,6 +93,23 @@ export function parseDealFilters(
   const flag = (v: string | string[] | undefined): boolean =>
     v === '1' || v === 'true';
 
+  // Comma-list parser for multi-id filter groups. Accepts either the
+  // canonical `?key=a,b,c` form or a repeated query param (`?key=a&key=b`)
+  // so URLSearchParams round-trips don't lose data either way.
+  const idList = (v: string | string[] | undefined): string[] => {
+    if (v === undefined) return [];
+    const flat = Array.isArray(v) ? v.join(',') : v;
+    return flat
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  };
+
+  // `companyIds` is the new canonical key; `companyId` is the legacy
+  // single-value alias kept so already-bookmarked URLs still parse.
+  const companyIds = idList(raw.companyIds ?? raw.companyId);
+  const ownerIds = idList(raw.owner);
+
   return {
     stages: stages.length > 0 ? stages : undefined,
     amountMinorMin: num(raw.amountMin),
@@ -74,16 +121,10 @@ export function parseDealFilters(
       typeof raw.staleDays === 'string'
         ? Number(raw.staleDays) || undefined
         : undefined,
-    companyId:
-      typeof raw.companyId === 'string' && raw.companyId.length > 0
-        ? raw.companyId
-        : undefined,
+    companyIds: companyIds.length > 0 ? companyIds : undefined,
     mine: flag(raw.mine),
     unassigned: flag(raw.unassigned),
-    ownerId:
-      typeof raw.owner === 'string' && raw.owner.length > 0
-        ? raw.owner
-        : undefined,
+    ownerIds: ownerIds.length > 0 ? ownerIds : undefined,
   };
 }
 
@@ -112,12 +153,14 @@ export function dealFiltersToSearchParams(
       out.set('staleDays', String(filters.staleDays));
     }
   }
-  if (filters.companyId) {
-    out.set('companyId', filters.companyId);
+  if (filters.companyIds && filters.companyIds.length > 0) {
+    out.set('companyIds', filters.companyIds.join(','));
   }
   if (filters.mine) out.set('mine', '1');
   if (filters.unassigned) out.set('unassigned', '1');
-  if (filters.ownerId) out.set('owner', filters.ownerId);
+  if (filters.ownerIds && filters.ownerIds.length > 0) {
+    out.set('owner', filters.ownerIds.join(','));
+  }
   return out;
 }
 
@@ -129,9 +172,9 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.expectedCloseFrom ||
       filters.expectedCloseTo ||
       filters.stale ||
-      filters.companyId ||
+      (filters.companyIds && filters.companyIds.length > 0) ||
       filters.mine ||
       filters.unassigned ||
-      filters.ownerId,
+      (filters.ownerIds && filters.ownerIds.length > 0),
   );
 }
