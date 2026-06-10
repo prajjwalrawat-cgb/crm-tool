@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "tsx scripts/apply-0024.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "inngest:dev": "npx inngest-cli@latest dev -u http://localhost:3001/api/inngest --no-discovery",
