@@ -82,6 +82,7 @@ type RawJoinedRow = {
   companyId: string | null;
   contactId: string | null;
   name: string;
+  description: string | null;
   stage: DealStage;
   amountMinor: number;
   currency: string;
@@ -105,6 +106,7 @@ const DEALS_PROJECTION = {
   companyId: deals.companyId,
   contactId: deals.contactId,
   name: deals.name,
+  description: deals.description,
   stage: deals.stage,
   amountMinor: deals.amountMinor,
   currency: deals.currency,

@@ -29,6 +29,7 @@ export const deals = pgTable(
       onDelete: 'set null',
     }),
     name: text('name').notNull(),
+    description: text('description'),
     stage: dealStage('stage').notNull().default('lead'),
     // Currency stored as integer minor units (e.g. cents) to avoid float
     // rounding. bigint covers values well past any realistic deal size.

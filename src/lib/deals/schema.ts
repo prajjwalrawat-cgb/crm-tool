@@ -28,6 +28,13 @@ export const createDealSchema = z.object({
     .trim()
     .min(1, 'Name is required')
     .max(200, 'Name must be 200 characters or fewer'),
+  description: z
+    .string()
+    .trim()
+    .max(2000, 'Description must be 2000 characters or fewer')
+    .nullable()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
   stage: z.enum(DEAL_STAGES, { message: 'Pick a valid stage' }),
   // Major units (e.g. dollars). Coerced from the form text. Server converts
   // to integer minor units before persisting.

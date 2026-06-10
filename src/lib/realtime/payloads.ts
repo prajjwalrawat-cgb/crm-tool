@@ -72,6 +72,7 @@ export async function loadSerializedDeal(
       companyId: deals.companyId,
       contactId: deals.contactId,
       name: deals.name,
+      description: deals.description,
       stage: deals.stage,
       amountMinor: deals.amountMinor,
       currency: deals.currency,

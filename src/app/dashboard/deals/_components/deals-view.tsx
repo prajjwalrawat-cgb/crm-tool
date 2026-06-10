@@ -37,6 +37,7 @@ import {
   updateDealAction,
   updateDealStageAction,
 } from '../actions';
+import { BulkUploadButton } from './bulk-upload-button';
 import { CreateDealForm } from './create-deal-form';
 import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
@@ -177,6 +178,8 @@ export function DealsView({
       companyId,
       contactId,
       name: name || base?.name || '(unnamed deal)',
+      description:
+        (String(formData.get('description') ?? '').trim() || base?.description) ?? null,
       stage,
       amountMinor,
       currency,
@@ -308,26 +311,29 @@ export function DealsView({
             ) : null}
           </div>
           {canEdit ? (
-            <CreateDrawer
-              label="New deal"
-              drawerTitle="Create deal"
-              description="Track an opportunity through your pipeline."
-              closeOnSuccessKey={createResetKey}
-            >
-              {() => (
-                <CreateDealForm
-                  onSubmit={handleCreate}
-                  pending={createPending}
-                  error={createError}
-                  fieldErrors={createFieldErrors}
-                  resetKey={createResetKey}
-                  companyOptions={companyOptions}
-                  contactOptions={contactOptions}
-                  teammates={teammates}
-                  currentUserId={currentUserId}
-                />
-              )}
-            </CreateDrawer>
+            <>
+              <BulkUploadButton />
+              <CreateDrawer
+                label="New deal"
+                drawerTitle="Create deal"
+                description="Track an opportunity through your pipeline."
+                closeOnSuccessKey={createResetKey}
+              >
+                {() => (
+                  <CreateDealForm
+                    onSubmit={handleCreate}
+                    pending={createPending}
+                    error={createError}
+                    fieldErrors={createFieldErrors}
+                    resetKey={createResetKey}
+                    companyOptions={companyOptions}
+                    contactOptions={contactOptions}
+                    teammates={teammates}
+                    currentUserId={currentUserId}
+                  />
+                )}
+              </CreateDrawer>
+            </>
           ) : null}
         </div>
 

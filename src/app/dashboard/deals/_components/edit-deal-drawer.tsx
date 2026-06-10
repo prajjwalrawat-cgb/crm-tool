@@ -130,6 +130,14 @@ export function EditDealDrawer({
           errors={fieldErrors.name}
         />
 
+        <TextareaField
+          name="description"
+          label="Description"
+          rows={3}
+          defaultValue={deal?.description ?? ''}
+          errors={fieldErrors.description}
+        />
+
         <Select
           name="stage"
           label="Stage"
@@ -263,6 +271,52 @@ function Field({
             : 'border-slate-200 focus:border-indigo-500 focus:ring-indigo-500/20',
           '',
           hasError ? '' : '',
+        )}
+      />
+      {hasError ? (
+        <p id={errorId} className="text-xs text-red-600">
+          {errors!.join(' ')}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+type TextareaFieldProps = {
+  name: string;
+  label: string;
+  defaultValue: string;
+  rows?: number;
+  errors?: string[];
+};
+
+function TextareaField({
+  name,
+  label,
+  defaultValue,
+  rows = 3,
+  errors,
+}: TextareaFieldProps) {
+  const hasError = Boolean(errors?.length);
+  const errorId = hasError ? `${name}-error` : undefined;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={name} className="text-xs font-medium text-slate-700">
+        {label}
+      </label>
+      <textarea
+        id={name}
+        name={name}
+        rows={rows}
+        defaultValue={defaultValue}
+        aria-invalid={hasError || undefined}
+        aria-describedby={errorId}
+        className={cn(
+          'rounded-md border bg-white px-3 py-1.5 text-sm shadow-sm transition resize-y',
+          'placeholder:text-slate-400 focus:outline-none focus:ring-2',
+          hasError
+            ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+            : 'border-slate-200 focus:border-indigo-500 focus:ring-indigo-500/20',
         )}
       />
       {hasError ? (

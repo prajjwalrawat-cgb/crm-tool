@@ -14,7 +14,13 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
-import { toMinorUnits } from '@/lib/deals/currency';
+import { KNOWN_CURRENCIES, toMinorUnits } from '@/lib/deals/currency';
+import {
+  BULK_UPLOAD_HEADERS,
+  type BulkUploadHeader,
+  normalizeHeader,
+  parseCsv,
+} from '@/lib/deals/bulk-csv';
 import {
   createDealSchema,
   dealIdSchema,
@@ -89,6 +95,7 @@ export async function createDealAction(
     async () => {
       const raw: Record<string, FormDataEntryValue | null> = {
         name: formData.get('name'),
+        description: formData.get('description'),
         stage: formData.get('stage'),
         amount: formData.get('amount'),
         currency: formData.get('currency'),
@@ -98,6 +105,7 @@ export async function createDealAction(
         ownerId: formData.get('ownerId'),
       };
       for (const key of [
+        'description',
         'expectedCloseDate',
         'companyId',
         'contactId',
@@ -151,6 +159,7 @@ export async function createDealAction(
             companyId: parsed.data.companyId,
             contactId: parsed.data.contactId,
             name: parsed.data.name,
+            description: parsed.data.description ?? null,
             stage: parsed.data.stage,
             amountMinor,
             currency: parsed.data.currency,
@@ -220,6 +229,7 @@ export async function updateDealAction(
       const raw: Record<string, FormDataEntryValue | null> = {
         id: formData.get('id'),
         name: formData.get('name'),
+        description: formData.get('description'),
         stage: formData.get('stage'),
         amount: formData.get('amount'),
         currency: formData.get('currency'),
@@ -227,7 +237,12 @@ export async function updateDealAction(
         companyId: formData.get('companyId'),
         contactId: formData.get('contactId'),
       };
-      for (const key of ['expectedCloseDate', 'companyId', 'contactId'] as const) {
+      for (const key of [
+        'description',
+        'expectedCloseDate',
+        'companyId',
+        'contactId',
+      ] as const) {
         if (typeof raw[key] === 'string' && raw[key].trim() === '') raw[key] = null;
       }
 
@@ -295,6 +310,7 @@ export async function updateDealAction(
             companyId: parsed.data.companyId,
             contactId: parsed.data.contactId,
             name: parsed.data.name,
+            description: parsed.data.description ?? null,
             stage: parsed.data.stage,
             amountMinor,
             currency: parsed.data.currency,
@@ -887,6 +903,234 @@ export async function updateDealOwnerAction(
       revalidatePath('/dashboard/deals');
       revalidatePath(`/dashboard/deals/${result.deal.id}`);
       return { ok: true, deal: result.deal, changed: result.changed };
+    },
+  );
+}
+
+/* -------- BULK UPLOAD (CSV) -------- */
+
+export type BulkUploadResult = {
+  ok: true;
+  inserted: number;
+  skipped: number;
+  errors: Array<{ row: number; message: string }>;
+};
+
+export type BulkUploadFailure = {
+  ok: false;
+  message: string;
+};
+
+const MAX_BULK_ROWS = 1000;
+const MAX_BULK_FILE_BYTES = 2 * 1024 * 1024; // 2 MB — CSVs are tiny
+
+/**
+ * Parse a CSV upload and create deals in one transaction. Per-row
+ * errors are collected and returned alongside the success count so
+ * the UI can show a partial-success summary; the whole batch only
+ * fails on auth, file-size, or empty/no-header conditions.
+ *
+ * Header aliases tolerated (see normalizeHeader). Company column
+ * resolves by exact name match — unknown company is a row error,
+ * not an auto-create (auto-create would let typos bloat the
+ * companies table).
+ */
+export async function bulkUploadDealsAction(
+  formData: FormData,
+): Promise<BulkUploadResult | BulkUploadFailure> {
+  const gate = await checkPermission('manageDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  const file = formData.get('file');
+  if (!(file instanceof File)) {
+    return { ok: false, message: 'No file uploaded.' };
+  }
+  if (file.size === 0) {
+    return { ok: false, message: 'The uploaded file is empty.' };
+  }
+  if (file.size > MAX_BULK_FILE_BYTES) {
+    return {
+      ok: false,
+      message: `File is too large (max ${Math.round(MAX_BULK_FILE_BYTES / 1024)} KB).`,
+    };
+  }
+
+  const text = await file.text();
+  const rows = parseCsv(text);
+  if (rows.length === 0) {
+    return { ok: false, message: 'CSV is empty.' };
+  }
+  if (rows.length > MAX_BULK_ROWS + 1) {
+    return {
+      ok: false,
+      message: `Too many rows (max ${MAX_BULK_ROWS}). Split the file and retry.`,
+    };
+  }
+
+  const headerRow = rows[0];
+  const headerMap = new Map<BulkUploadHeader, number>();
+  headerRow.forEach((cell, idx) => {
+    const h = normalizeHeader(cell);
+    if (h && !headerMap.has(h)) headerMap.set(h, idx);
+  });
+
+  if (!headerMap.has('name')) {
+    return {
+      ok: false,
+      message: `Missing required column "name". Expected headers: ${BULK_UPLOAD_HEADERS.join(', ')}.`,
+    };
+  }
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      // Pre-fetch all tenant companies so we can resolve company
+      // names without a DB round-trip per row.
+      const companyRows = await tenantTransaction(async (tx) =>
+        tx
+          .select({ id: companies.id, name: companies.name })
+          .from(companies)
+          .where(
+            and(eq(companies.tenantId, tenant.id), isNull(companies.deletedAt)),
+          ),
+      );
+      const companyByName = new Map<string, string>(
+        companyRows.map((c) => [c.name.trim().toLowerCase(), c.id]),
+      );
+
+      const errors: Array<{ row: number; message: string }> = [];
+      const toInsert: typeof deals.$inferInsert[] = [];
+
+      for (let i = 1; i < rows.length; i++) {
+        const cells = rows[i];
+        // CSV rows can come with fewer cells than the header when
+        // trailing fields are blank — read defensively.
+        const cell = (h: BulkUploadHeader): string => {
+          const idx = headerMap.get(h);
+          if (idx === undefined) return '';
+          return (cells[idx] ?? '').trim();
+        };
+
+        const name = cell('name');
+        if (!name) {
+          // Skip wholly empty rows silently; flag rows that have
+          // *something* but no name.
+          if (cells.some((c) => c && c.trim().length > 0)) {
+            errors.push({ row: i + 1, message: 'Missing required field "name".' });
+          }
+          continue;
+        }
+
+        const stageRaw = cell('stage').toLowerCase();
+        const stage = (stageRaw || 'lead') as (typeof DEAL_STAGES)[number];
+        if (!DEAL_STAGES.includes(stage)) {
+          errors.push({
+            row: i + 1,
+            message: `Invalid stage "${stageRaw}". Use one of: ${DEAL_STAGES.join(', ')}.`,
+          });
+          continue;
+        }
+
+        const amountRaw = cell('amount');
+        const amount = amountRaw ? Number(amountRaw) : 0;
+        if (!Number.isFinite(amount) || amount < 0) {
+          errors.push({ row: i + 1, message: `Invalid amount "${amountRaw}".` });
+          continue;
+        }
+
+        const currencyRaw = cell('currency').toUpperCase();
+        const currency = (currencyRaw || 'USD') as (typeof KNOWN_CURRENCIES)[number];
+        if (!KNOWN_CURRENCIES.includes(currency)) {
+          errors.push({
+            row: i + 1,
+            message: `Unsupported currency "${currencyRaw}".`,
+          });
+          continue;
+        }
+
+        const closeRaw = cell('expectedCloseDate');
+        let expectedCloseDate: string | null = null;
+        if (closeRaw) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(closeRaw)) {
+            errors.push({
+              row: i + 1,
+              message: `Invalid expectedCloseDate "${closeRaw}". Use YYYY-MM-DD.`,
+            });
+            continue;
+          }
+          expectedCloseDate = closeRaw;
+        }
+
+        let companyId: string | null = null;
+        const companyNameRaw = cell('companyName');
+        if (companyNameRaw) {
+          const id = companyByName.get(companyNameRaw.toLowerCase());
+          if (!id) {
+            errors.push({
+              row: i + 1,
+              message: `Unknown company "${companyNameRaw}". Create it first or correct the name.`,
+            });
+            continue;
+          }
+          companyId = id;
+        }
+
+        const description = cell('description') || null;
+        const isClosedStage = stage === 'won' || stage === 'lost';
+
+        toInsert.push({
+          tenantId: tenant.id,
+          companyId,
+          contactId: null,
+          name,
+          description,
+          stage,
+          amountMinor: toMinorUnits(amount, currency),
+          currency,
+          expectedCloseDate,
+          closedAt: isClosedStage ? new Date() : null,
+          ownerId: membership.userId,
+        });
+      }
+
+      let inserted = 0;
+      if (toInsert.length > 0) {
+        const result = await tenantTransaction(async (tx) => {
+          // Single multi-row INSERT — fast, atomic, and we don't
+          // bother emitting realtime events per row to avoid a
+          // notification storm. The list/board pages revalidate
+          // below and rehydrate from the DB instead.
+          const inserted = await tx
+            .insert(deals)
+            .values(toInsert)
+            .returning({ id: deals.id, name: deals.name });
+          for (const row of inserted) {
+            await recordActivity(tx, {
+              tenantId: tenant.id,
+              actorUserId: membership.userId,
+              entityType: 'deal',
+              entityId: row.id,
+              action: 'created',
+              metadata: { name: row.name, viaBulkUpload: true },
+            });
+          }
+          return inserted.length;
+        });
+        inserted = result;
+      }
+
+      revalidatePath('/dashboard/deals');
+      revalidatePath('/dashboard/deals/board');
+      revalidatePath('/dashboard/activity');
+      revalidatePath('/dashboard');
+
+      return {
+        ok: true,
+        inserted,
+        skipped: errors.length,
+        errors,
+      };
     },
   );
 }

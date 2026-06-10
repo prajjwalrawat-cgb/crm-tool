@@ -183,6 +183,17 @@ export default async function DealDetailPage({ params }: { params: Params }) {
           </aside>
 
           <section className="space-y-4">
+            {deal.description ? (
+              <article className="rounded-lg border border-slate-200 bg-white p-4">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Description
+                </h2>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                  {deal.description}
+                </p>
+              </article>
+            ) : null}
+
             <LiveDealSummaryCard
               tenantId={tenant.id}
               dealId={deal.id}
