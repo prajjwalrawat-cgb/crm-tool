@@ -80,8 +80,10 @@ export async function GET(req: NextRequest): Promise<Response> {
               WHERE d.tenant_id = ${tenant.id}::uuid
                 AND d.deleted_at IS NULL
                 AND d.name ILIKE ${pattern}
-                AND (${mineOnlyId}::uuid IS NULL
-                     OR d.owner_id = ${mineOnlyId}::uuid
+                -- owner_id is text (Clerk ids like "user_xxx"), not
+                -- uuid. ::uuid casts of Clerk ids throw at runtime.
+                AND (${mineOnlyId}::text IS NULL
+                     OR d.owner_id = ${mineOnlyId}::text
                      OR d.owner_id IS NULL)
               ORDER BY d.updated_at DESC
               LIMIT ${MAX_PER_BUCKET}
@@ -97,8 +99,8 @@ export async function GET(req: NextRequest): Promise<Response> {
               WHERE tenant_id = ${tenant.id}::uuid
                 AND deleted_at IS NULL
                 AND (name ILIKE ${pattern} OR domain ILIKE ${pattern})
-                AND (${mineOnlyId}::uuid IS NULL
-                     OR owner_id = ${mineOnlyId}::uuid
+                AND (${mineOnlyId}::text IS NULL
+                     OR owner_id = ${mineOnlyId}::text
                      OR owner_id IS NULL)
               ORDER BY updated_at DESC
               LIMIT ${MAX_PER_BUCKET}
@@ -120,8 +122,8 @@ export async function GET(req: NextRequest): Promise<Response> {
                   OR c.last_name ILIKE ${pattern}
                   OR c.email ILIKE ${pattern}
                 )
-                AND (${mineOnlyId}::uuid IS NULL
-                     OR c.owner_id = ${mineOnlyId}::uuid
+                AND (${mineOnlyId}::text IS NULL
+                     OR c.owner_id = ${mineOnlyId}::text
                      OR c.owner_id IS NULL)
               ORDER BY c.updated_at DESC
               LIMIT ${MAX_PER_BUCKET}

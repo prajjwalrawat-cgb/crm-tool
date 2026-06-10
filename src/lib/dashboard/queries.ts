@@ -404,7 +404,10 @@ export async function getStaleDeals(
               AND d.deleted_at IS NULL
               AND d.stage NOT IN ('won','lost')
               AND d.updated_at < NOW() - (${staleDays}::int * INTERVAL '1 day')
-              AND (${ownerId}::uuid IS NULL OR d.owner_id = ${ownerId}::uuid)
+              -- owner_id is text (Clerk ids like "user_xxx"), NOT uuid.
+              -- Casting a Clerk id to ::uuid throws "invalid input
+              -- syntax for type uuid" at runtime. Use ::text.
+              AND (${ownerId}::text IS NULL OR d.owner_id = ${ownerId}::text)
             ORDER BY d.updated_at ASC
             LIMIT ${limit}`,
       )) as unknown as Array<{
@@ -471,7 +474,8 @@ export async function getUpcomingFollowUps(
               AND d.stage NOT IN ('won','lost')
               AND d.expected_close_date IS NOT NULL
               AND d.expected_close_date <= CURRENT_DATE + (${lookAheadDays}::int * INTERVAL '1 day')
-              AND (${ownerId}::uuid IS NULL OR d.owner_id = ${ownerId}::uuid)
+              -- owner_id is text (Clerk ids), not uuid — see getStaleDeals.
+              AND (${ownerId}::text IS NULL OR d.owner_id = ${ownerId}::text)
             ORDER BY d.expected_close_date ASC
             LIMIT ${limit}`,
       )) as unknown as Array<{
@@ -533,7 +537,8 @@ export async function getRecentWins(
               AND d.deleted_at IS NULL
               AND d.stage = 'won'
               AND d.closed_at IS NOT NULL
-              AND (${ownerId}::uuid IS NULL OR d.owner_id = ${ownerId}::uuid)
+              -- owner_id is text (Clerk ids), not uuid — see getStaleDeals.
+              AND (${ownerId}::text IS NULL OR d.owner_id = ${ownerId}::text)
             ORDER BY d.closed_at DESC
             LIMIT ${limit}`,
       )) as unknown as Array<{
