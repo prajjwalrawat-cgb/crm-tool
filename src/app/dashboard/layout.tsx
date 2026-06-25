@@ -55,12 +55,10 @@ export default async function DashboardLayout({
     tenantId: w.tenantId,
     name: w.name,
   }));
-  // Same rule as canCreateWorkspace(), computed from the list we already
-  // fetched: admins/owners, or a brand-new user with no workspace yet.
-  const canCreate =
-    Boolean(userId) &&
-    (workspacesRaw.length === 0 ||
-      workspacesRaw.some((w) => w.role === 'owner' || w.role === 'admin'));
+  // Only the OWNER of the *active* workspace may create new workspaces.
+  // (Same rule as canCreateWorkspace(), but we already have the active
+  // membership here so no extra query is needed.)
+  const canCreate = membership?.role === 'owner';
 
   return (
     <DashboardShell

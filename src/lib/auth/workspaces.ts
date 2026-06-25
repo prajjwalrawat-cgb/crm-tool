@@ -5,6 +5,7 @@ import { cache } from 'react';
 
 import { db } from '@/db';
 import { memberships, tenants } from '@/db/schema';
+import { getCurrentMembership } from '@/lib/membership';
 
 /**
  * Cross-tenant membership lookups for the session/identity layer (login,
@@ -41,15 +42,16 @@ export const listUserWorkspaces = cache(
 );
 
 /**
- * Workspace creation is restricted to admins/owners. A brand-new user
- * with no workspace yet is allowed to create their first one (bootstrap),
- * otherwise they could never get in. Any plain member/manager who isn't an
- * admin/owner of at least one workspace cannot create new ones.
+ * Workspace creation is restricted to the OWNER of the currently-active
+ * workspace. A brand-new user with no workspace yet may create their first
+ * one (bootstrap), otherwise they could never get in. Members, managers, and
+ * admins of the active workspace cannot create new ones.
  */
 export async function canCreateWorkspace(userId: string): Promise<boolean> {
   const ws = await listUserWorkspaces(userId);
   if (ws.length === 0) return true; // bootstrap: first workspace
-  return ws.some((w) => w.role === 'owner' || w.role === 'admin');
+  const membership = await getCurrentMembership();
+  return membership?.role === 'owner';
 }
 
 export async function userHasMembership(

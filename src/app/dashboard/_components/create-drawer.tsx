@@ -29,6 +29,8 @@ type Props = {
   closeOnSuccessKey?: number;
   /** Disables the trigger when the user lacks the relevant permission. */
   disabled?: boolean;
+  /** Max-width Tailwind class for the drawer panel. */
+  widthClass?: string;
   children: (close: () => void) => ReactNode;
 };
 
@@ -38,6 +40,7 @@ export function CreateDrawer({
   description,
   closeOnSuccessKey,
   disabled,
+  widthClass,
   children,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -75,6 +78,7 @@ export function CreateDrawer({
         onClose={() => setOpen(false)}
         title={drawerTitle}
         description={description}
+        widthClass={widthClass}
       >
         {children(() => setOpen(false))}
       </Drawer>

@@ -2,6 +2,7 @@
 
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { MembershipRole } from '@/db/schema';
 import { cn } from '@/lib/utils';
@@ -53,9 +54,9 @@ export function RemoveMemberDialog({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose, pending]);
 
-  if (!open) return null;
+  if (!open || typeof document === 'undefined') return null;
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -150,7 +151,8 @@ export function RemoveMemberDialog({
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

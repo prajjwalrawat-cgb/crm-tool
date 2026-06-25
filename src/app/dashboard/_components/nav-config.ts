@@ -6,6 +6,7 @@ import {
   Building2,
   CheckSquare,
   Cog,
+  FileText,
   Gauge,
   GitBranch,
   Inbox,
@@ -167,6 +168,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
       { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
+      { href: '/dashboard/invoices', label: 'Invoices', icon: FileText },
     ],
   },
   {

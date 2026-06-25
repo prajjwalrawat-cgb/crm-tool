@@ -7,6 +7,7 @@ import { cache } from 'react';
 
 import { db } from '@/db';
 import { memberships, tenants, type Tenant } from '@/db/schema';
+import { ensureDefaultOwnerUserId } from '@/lib/auth/default-owner';
 import { auth } from '@/lib/auth/server';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 
@@ -94,6 +95,26 @@ export async function createTenant(input: {
           .onConflictDoNothing();
       }),
   );
+
+  // Seat the default owner (info@cgbindia.com) on every new workspace too.
+  const defaultOwnerId = await ensureDefaultOwnerUserId();
+  if (defaultOwnerId !== input.ownerUserId) {
+    await runWithTenantContext(
+      { tenantId: row.id, userId: defaultOwnerId },
+      () =>
+        tenantTransaction(async (tx) => {
+          await tx
+            .insert(memberships)
+            .values({
+              tenantId: row.id,
+              userId: defaultOwnerId,
+              role: 'owner',
+              status: 'active',
+            })
+            .onConflictDoNothing();
+        }),
+    );
+  }
 
   return row;
 }

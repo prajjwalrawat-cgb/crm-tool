@@ -399,7 +399,7 @@ function PendingInvitations({
       <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="text-sm font-semibold">Pending invitations</h2>
         <p className="mt-0.5 text-xs text-slate-500">
-          Invited users will appear above once they accept.
+          Invited users will appear above once they accept the invitation.
         </p>
       </div>
       <div className="overflow-x-auto">

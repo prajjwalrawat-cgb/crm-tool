@@ -13,6 +13,8 @@ type Props = {
   children: ReactNode;
   /** Footer area (typically Save / Delete / Cancel). */
   footer?: ReactNode;
+  /** Max-width Tailwind class for the panel. Defaults to `max-w-md`. */
+  widthClass?: string;
 };
 
 /**
@@ -27,6 +29,7 @@ export function Drawer({
   description,
   children,
   footer,
+  widthClass = 'max-w-md',
 }: Props) {
   useEffect(() => {
     if (!open) return;
@@ -65,7 +68,8 @@ export function Drawer({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          'absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl transition-transform',
+          'absolute inset-y-0 right-0 flex w-full flex-col border-l border-slate-200 bg-white shadow-xl transition-transform',
+          widthClass,
           open ? 'translate-x-0' : 'translate-x-full',
         )}
       >
