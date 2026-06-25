@@ -42,9 +42,12 @@ function displayName(m: TeamMemberRow): string {
   return m.email ?? m.userId;
 }
 
-function clerkRoleToInviteRole(role: string): InviteRole | null {
-  if (role === 'org:admin') return 'admin';
-  if (role === 'org:member') return 'member';
+function normalizeInviteRole(role: string): InviteRole | null {
+  // Local invites carry plain roles; tolerate legacy `org:`-prefixed
+  // values from any invitation rows created before the Clerk migration.
+  if (role === 'admin' || role === 'org:admin') return 'admin';
+  if (role === 'manager') return 'manager';
+  if (role === 'member' || role === 'org:member') return 'member';
   return null;
 }
 
@@ -94,7 +97,7 @@ export function TeamView({
     const draft: OptimisticInvite = {
       id: `optimistic-${crypto.randomUUID()}`,
       emailAddress: email,
-      role: role === 'admin' ? 'org:admin' : 'org:member',
+      role,
       createdAt: new Date(),
       __pending: true,
     };
@@ -396,7 +399,7 @@ function PendingInvitations({
       <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="text-sm font-semibold">Pending invitations</h2>
         <p className="mt-0.5 text-xs text-slate-500">
-          Sent via Clerk. They&apos;ll appear above once accepted.
+          Invited users will appear above once they accept.
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -451,7 +454,7 @@ function PendingInviteRow({
   onActionError: (msg: string | null) => void;
 }) {
   const [revokePending, startRevokeTransition] = useTransition();
-  const inviteRole = clerkRoleToInviteRole(invite.role);
+  const inviteRole = normalizeInviteRole(invite.role);
   const isOptimistic = invite.__pending === true;
 
   function handleRevoke() {

@@ -2,14 +2,11 @@ import { z } from 'zod';
 
 /**
  * Roles the user is allowed to *invite* with from the dashboard. We
- * deliberately exclude 'owner' — owner provisioning happens server-side
- * (organization.created webhook), not via the invite flow.
+ * deliberately exclude 'owner' — ownership is granted only by creating a
+ * workspace, never via the invite flow.
  *
- * Manager IS in this list, but Clerk's built-in org roles are only
- * admin/member. So the invite flow sends a `org:member` Clerk
- * invitation with `publicMetadata.appRole = 'manager'` — when the
- * invitee accepts, `ensureMembership()` and the Clerk webhook handler
- * both look up that metadata and upgrade the local role to 'manager'.
+ * The invited role is stored directly on the `org_invitations` row and
+ * applied verbatim when the invite is accepted — no metadata round-trip.
  */
 export const INVITE_ROLES = ['admin', 'manager', 'member'] as const;
 export type InviteRole = (typeof INVITE_ROLES)[number];
@@ -21,11 +18,8 @@ export const INVITE_ROLE_LABELS: Record<InviteRole, string> = {
 };
 
 /**
- * Roles available in the change-role dropdown. Manager is an
- * application-level role that we persist only in our `memberships`
- * table; Clerk's org membership stays at `org:member` for managers
- * (Clerk's built-in roles don't include "manager", and we don't
- * require tenants to configure custom Clerk roles).
+ * Roles available in the change-role dropdown. All three are persisted
+ * directly on the membership row (the local table is the source of truth).
  */
 export const CHANGE_ROLES = ['admin', 'manager', 'member'] as const;
 export type ChangeRole = (typeof CHANGE_ROLES)[number];
@@ -46,20 +40,18 @@ export const inviteMemberSchema = z.object({
 export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
 
 /**
- * Server actions that take a Clerk user id (remove member, change role)
- * validate it through this — accepts Clerk's `user_…` prefix only.
+ * User id validator. Accepts both legacy Clerk ids (`user_…`, preserved
+ * across the migration) and locally-minted ids (`usr_…`).
  */
-export const clerkUserIdSchema = z
+export const userIdSchema = z
   .string()
-  .regex(/^user_[A-Za-z0-9]+$/, 'Invalid user id');
+  .regex(/^(user|usr)_[A-Za-z0-9]+$/, 'Invalid user id');
 
-/** Same idea for invitation ids (`orginv_…`). */
-export const clerkInvitationIdSchema = z
-  .string()
-  .regex(/^orginv_[A-Za-z0-9]+$/, 'Invalid invitation id');
+/** Invitation ids are UUIDs in the local `org_invitations` table. */
+export const invitationIdSchema = z.uuid('Invalid invitation id');
 
 export const changeRoleSchema = z.object({
-  userId: clerkUserIdSchema,
+  userId: userIdSchema,
   role: z.enum(CHANGE_ROLES, { message: 'Pick a role' }),
 });
 

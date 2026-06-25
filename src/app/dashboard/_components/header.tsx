@@ -1,6 +1,5 @@
 ﻿'use client';
 
-import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import { Menu, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -8,6 +7,8 @@ import type { Notification } from '@/db/schema';
 
 import { NotificationBell } from './notification-bell';
 import { PresenceIndicator } from './presence-indicator';
+import { UserMenu } from './user-menu';
+import { WorkspaceSwitcher, type WorkspaceLite } from './workspace-switcher';
 
 type Props = {
   onMobileMenuOpen: () => void;
@@ -15,6 +16,14 @@ type Props = {
   tenantId: string;
   currentUserId: string;
   initialNotifications: Notification[];
+  account: {
+    displayName: string;
+    email: string | null;
+    imageUrl: string | null;
+  };
+  currentTenantName: string;
+  workspaces: WorkspaceLite[];
+  canCreateWorkspace: boolean;
 };
 
 export function Header({
@@ -23,6 +32,10 @@ export function Header({
   tenantId,
   currentUserId,
   initialNotifications,
+  account,
+  currentTenantName,
+  workspaces,
+  canCreateWorkspace,
 }: Props) {
   // Render the platform-correct shortcut on first mount only, so the
   // shortcut hint matches the OS the user is actually on without
@@ -77,27 +90,17 @@ export function Header({
           initialNotifications={initialNotifications}
         />
         <PresenceIndicator key={tenantId} tenantId={tenantId} />
-        {/*
-         * Clerk's <OrganizationSwitcher /> and <UserButton /> mount their
-         * actual UI client-side after Clerk's bundle initializes. The
-         * server renders a minimal placeholder, the client swaps in the
-         * real widget — this trips React's hydration matcher even though
-         * the swap is intentional. Wrapping in a div with
-         * suppressHydrationWarning is Clerk's documented escape hatch
-         * for Next.js App Router and is scoped to just these two
-         * widgets, not the whole header.
-         */}
-        <div suppressHydrationWarning>
-          <OrganizationSwitcher
-            hidePersonal
-            afterCreateOrganizationUrl="/dashboard"
-            afterSelectOrganizationUrl="/dashboard"
-            afterLeaveOrganizationUrl="/select-org"
-          />
-        </div>
-        <div suppressHydrationWarning>
-          <UserButton />
-        </div>
+        <WorkspaceSwitcher
+          currentTenantId={tenantId}
+          currentTenantName={currentTenantName}
+          workspaces={workspaces}
+          canCreate={canCreateWorkspace}
+        />
+        <UserMenu
+          displayName={account.displayName}
+          email={account.email}
+          imageUrl={account.imageUrl}
+        />
       </div>
     </header>
   );

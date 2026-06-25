@@ -1,24 +1,19 @@
-import { SignUp } from '@clerk/nextjs';
+import { AuthShell } from '@/components/auth/auth-shell';
+import { SignUpForm } from '@/components/auth/sign-up-form';
 
-import { SaleinxLogo } from '@/lib/brand/logo';
-import { clerkAppearance } from '@/lib/clerk-theme';
+export const metadata = { title: 'Create account' };
 
-// See sign-in page — same Clerk catchall / Next.js 16 prerender
-// crash. Force-dynamic skips static path generation.
-export const dynamic = 'force-dynamic';
+export default async function SignUpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const sp = await searchParams;
+  const next = typeof sp.next === 'string' ? sp.next : undefined;
 
-export default function SignUpPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
-      <div className="w-full max-w-[26rem]">
-        <header className="mb-6 flex flex-col items-center text-center">
-          <SaleinxLogo size="lg" />
-          <p className="mt-4 text-[13px] text-slate-500">
-            Create your account. An admin can add you to a workspace next.
-          </p>
-        </header>
-        <SignUp appearance={clerkAppearance} />
-      </div>
-    </main>
+    <AuthShell subtitle="Create your account. An admin can add you to a workspace, or you can create your own.">
+      <SignUpForm next={next} />
+    </AuthShell>
   );
 }

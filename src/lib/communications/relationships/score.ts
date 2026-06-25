@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { auth } from '@clerk/nextjs/server';
+import { auth } from '@/lib/auth/server';
 import { and, eq } from 'drizzle-orm';
 
 import {

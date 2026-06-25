@@ -1,4 +1,4 @@
-import { currentUser } from '@clerk/nextjs/server';
+import { currentUser } from '@/lib/auth/server';
 
 import { withTenantSession } from '@/lib/auth-guard';
 

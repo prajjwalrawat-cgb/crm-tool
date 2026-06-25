@@ -1,31 +1,60 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 
-const isPublicRoute = createRouteMatcher([
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/api/webhooks/(.*)',
-  // Inngest verifies its requests via signed headers (svix-style). Auth
-  // here is the wrong layer.
-  '/api/inngest(.*)',
-]);
+import { SESSION_COOKIE, verifySession } from '@/lib/auth/jwt';
 
-const isOrgFreeRoute = createRouteMatcher(['/select-org(.*)']);
+/**
+ * Self-hosted session gate (replaces Clerk middleware). Verifies the
+ * signed session cookie (HS256 via jose — Edge-safe), redirects
+ * unauthenticated users to /sign-in, and users without an active
+ * workspace to /select-org. Authorization (roles) is enforced deeper,
+ * against the memberships table.
+ */
 
-export default clerkMiddleware(async (auth, request) => {
-  if (isPublicRoute(request)) return;
+// Exact paths or path-prefixes that never require a session.
+const PUBLIC_PATHS = [
+  '/sign-in',
+  '/sign-up',
+  '/forgot-password',
+  '/reset-password',
+  '/accept-invite',
+];
+// Inngest verifies its own requests via signed headers — auth here is the
+// wrong layer.
+const PUBLIC_PREFIXES = ['/api/inngest'];
 
-  const { userId, orgId, redirectToSignIn } = await auth();
-
-  if (!userId) {
-    return redirectToSignIn();
+function isPublic(pathname: string): boolean {
+  if (
+    PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  ) {
+    return true;
   }
+  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+}
 
-  if (!orgId && !isOrgFreeRoute(request)) {
-    const url = new URL('/select-org', request.url);
+function isOrgFree(pathname: string): boolean {
+  return pathname === '/select-org' || pathname.startsWith('/select-org/');
+}
+
+export default async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  if (isPublic(pathname)) return NextResponse.next();
+
+  const claims = await verifySession(
+    request.cookies.get(SESSION_COOKIE)?.value,
+  );
+
+  if (!claims) {
+    const url = new URL('/sign-in', request.url);
+    if (pathname && pathname !== '/') url.searchParams.set('next', pathname);
     return NextResponse.redirect(url);
   }
-});
+
+  if (!claims.tid && !isOrgFree(pathname)) {
+    return NextResponse.redirect(new URL('/select-org', request.url));
+  }
+
+  return NextResponse.next();
+}
 
 export const config = {
   matcher: [

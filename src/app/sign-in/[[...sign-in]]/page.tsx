@@ -1,26 +1,27 @@
-import { SignIn } from '@clerk/nextjs';
+import { AuthShell } from '@/components/auth/auth-shell';
+import { FormNote } from '@/components/auth/form-bits';
+import { SignInForm } from '@/components/auth/sign-in-form';
 
-import { SaleinxLogo } from '@/lib/brand/logo';
-import { clerkAppearance } from '@/lib/clerk-theme';
+export const metadata = { title: 'Sign in' };
 
-// Clerk's <SignIn> is an entirely runtime auth widget. In Next.js 16
-// the dev compiler tries to prerender catchall segments and the worker
-// crashes on browser-only Clerk internals — force-dynamic skips static
-// path generation for this route.
-export const dynamic = 'force-dynamic';
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string; reset?: string }>;
+}) {
+  const sp = await searchParams;
+  const next = typeof sp.next === 'string' ? sp.next : undefined;
 
-export default function SignInPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
-      <div className="w-full max-w-[26rem]">
-        <header className="mb-6 flex flex-col items-center text-center">
-          <SaleinxLogo size="lg" />
-          <p className="mt-4 text-[13px] text-slate-500">
-            Sign in to your workspace. Email and password only.
-          </p>
-        </header>
-        <SignIn appearance={clerkAppearance} />
-      </div>
-    </main>
+    <AuthShell subtitle="Sign in to your workspace. Email and password only.">
+      {sp.reset ? (
+        <div className="mb-4">
+          <FormNote>
+            Your password was updated. Sign in with your new password.
+          </FormNote>
+        </div>
+      ) : null}
+      <SignInForm next={next} />
+    </AuthShell>
   );
 }

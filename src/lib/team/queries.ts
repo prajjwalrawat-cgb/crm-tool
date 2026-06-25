@@ -1,9 +1,10 @@
 import 'server-only';
 
-import { clerkClient } from '@clerk/nextjs/server';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull } from 'drizzle-orm';
 
-import { type Membership, memberships } from '@/db/schema';
+import { db } from '@/db';
+import { type Membership, memberships, orgInvitations } from '@/db/schema';
+import { clerkClient } from '@/lib/auth/server';
 import { tenantTransaction } from '@/lib/db-context';
 
 export type TeamMemberRow = Membership & {
@@ -46,25 +47,36 @@ export async function listTeamMembers(tenantId: string): Promise<TeamMemberRow[]
       email: u?.primaryEmailAddress?.emailAddress ?? null,
       firstName: u?.firstName ?? null,
       lastName: u?.lastName ?? null,
-      imageUrl: u?.imageUrl ?? null,
+      imageUrl: u?.imageUrl || null,
     };
   });
 }
 
+/**
+ * Outstanding (unaccepted, unexpired) workspace invitations for a tenant.
+ * Reads the local `org_invitations` table — the self-hosted replacement
+ * for Clerk's invitation list. Filtered explicitly on `tenant_id` (this
+ * table is not under RLS).
+ */
 export async function listPendingInvitations(
-  clerkOrgId: string,
+  tenantId: string,
 ): Promise<PendingInvitationRow[]> {
-  const client = await clerkClient();
-  const result = await client.organizations.getOrganizationInvitationList({
-    organizationId: clerkOrgId,
-    status: ['pending'],
-    limit: 100,
-  });
+  const rows = await db
+    .select()
+    .from(orgInvitations)
+    .where(
+      and(
+        eq(orgInvitations.tenantId, tenantId),
+        isNull(orgInvitations.acceptedAt),
+        gt(orgInvitations.expiresAt, new Date()),
+      ),
+    )
+    .orderBy(asc(orgInvitations.createdAt));
 
-  return result.data.map((inv) => ({
+  return rows.map((inv) => ({
     id: inv.id,
-    emailAddress: inv.emailAddress,
+    emailAddress: inv.email,
     role: inv.role,
-    createdAt: new Date(inv.createdAt),
+    createdAt: inv.createdAt,
   }));
 }

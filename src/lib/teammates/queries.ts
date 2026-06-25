@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { clerkClient } from '@clerk/nextjs/server';
+import { clerkClient } from '@/lib/auth/server';
 import { eq } from 'drizzle-orm';
 
 import { memberships } from '@/db/schema';

@@ -19,7 +19,13 @@ const client: PostgresClient =
     // Required by Supabase's Transaction pooler (port 6543) and Neon's pooler;
     // both reject prepared statements at the pool layer.
     prepare: false,
-    max: process.env.NODE_ENV === 'production' ? 10 : 1,
+    // Pool size. Dev was 1, which silently serialized every query —
+    // even Promise.all'd ones ran one-at-a-time (see scripts/_perf-probe.ts:
+    // "8x parallel" took the same as "8x sequential"). The client is reused
+    // across HMR via the global below, so a larger pool doesn't leak
+    // connections on reload. The Supabase transaction pooler multiplexes,
+    // so 10 client-side connections is comfortable.
+    max: 10,
     idle_timeout: 20,
     connect_timeout: 10,
   });

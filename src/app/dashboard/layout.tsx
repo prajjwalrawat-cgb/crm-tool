@@ -1,8 +1,10 @@
-import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import { getAIMode } from '@/lib/ai/config';
+import { auth } from '@/lib/auth/server';
+import { displayNameForUser, getUserById } from '@/lib/auth/users';
+import { listUserWorkspaces } from '@/lib/auth/workspaces';
 import { runWithTenantContext } from '@/lib/db-context';
 import { ensureMembership } from '@/lib/membership';
 import { listNotificationsForUser } from '@/lib/notifications/queries';
@@ -16,13 +18,10 @@ export default async function DashboardLayout({
 }: {
   children: ReactNode;
 }) {
-  // Backstop the org→tenant + membership sync once per dashboard render.
-  // Both helpers self-establish a tenant context for their RLS-touching
-  // writes (memberships table) — the layout doesn't need to wrap them.
-  // Page-level data fetches enter their own context via withTenantSession.
+  // auth() is a cheap cookie/JWT read (no DB); resolve it + the tenant
+  // first since the redirect gate and every fetch below depends on them.
+  const { userId } = await auth();
   const tenant = await ensureTenant();
-  const membership = await ensureMembership();
-  const persona = personaOf(membership?.role ?? null);
 
   if (!tenant) {
     // The middleware should have caught this, but if a race left us
@@ -30,15 +29,38 @@ export default async function DashboardLayout({
     redirect('/select-org');
   }
 
-  const { userId } = await auth();
-  // Pre-fetch the user's recent notifications so the bell renders with
-  // content on first paint. The dropdown stays live afterwards via the
-  // tenant SSE stream — see notification-bell.tsx.
-  const initialNotifications = userId
-    ? await runWithTenantContext({ tenantId: tenant.id, userId }, () =>
-        listNotificationsForUser(tenant.id, userId, { limit: 30 }),
-      )
-    : [];
+  // Everything else is independent — fan out in parallel instead of a
+  // serial await chain. With the larger pool (see src/db/index.ts) these
+  // genuinely run concurrently; the per-request cache() de-dupes the
+  // membership/tenant/user lookups the pages below repeat.
+  const [membership, initialNotifications, userRow, workspacesRaw] =
+    await Promise.all([
+      ensureMembership(),
+      userId
+        ? runWithTenantContext({ tenantId: tenant.id, userId }, () =>
+            listNotificationsForUser(tenant.id, userId, { limit: 30 }),
+          )
+        : Promise.resolve([]),
+      userId ? getUserById(userId) : Promise.resolve(null),
+      userId ? listUserWorkspaces(userId) : Promise.resolve([]),
+    ]);
+
+  const persona = personaOf(membership?.role ?? null);
+  const account = {
+    displayName: userRow ? displayNameForUser(userRow) : 'Account',
+    email: userRow?.email ?? null,
+    imageUrl: userRow?.imageUrl ?? null,
+  };
+  const workspaces = workspacesRaw.map((w) => ({
+    tenantId: w.tenantId,
+    name: w.name,
+  }));
+  // Same rule as canCreateWorkspace(), computed from the list we already
+  // fetched: admins/owners, or a brand-new user with no workspace yet.
+  const canCreate =
+    Boolean(userId) &&
+    (workspacesRaw.length === 0 ||
+      workspacesRaw.some((w) => w.role === 'owner' || w.role === 'admin'));
 
   return (
     <DashboardShell
@@ -47,6 +69,10 @@ export default async function DashboardLayout({
       initialNotifications={initialNotifications}
       aiMode={getAIMode()}
       persona={persona}
+      account={account}
+      currentTenantName={tenant.name}
+      workspaces={workspaces}
+      canCreateWorkspace={canCreate}
     >
       {children}
     </DashboardShell>

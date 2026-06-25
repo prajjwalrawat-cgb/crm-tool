@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { auth } from '@clerk/nextjs/server';
+import { auth } from '@/lib/auth/server';
 
 import type { Membership, Tenant } from '@/db/schema';
 

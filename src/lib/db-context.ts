@@ -124,18 +124,14 @@ export async function tenantTransaction<T>(
 ): Promise<T> {
   const ctx = requireTenantContext();
   return await db.transaction(async (tx) => {
-    await tx.execute(sql`set local role app_user`);
+    // Single round trip for the whole context setup: `app_set_ctx`
+    // (migration 0026) drops to the app_user role and sets the
+    // app.tenant_id / app.user_id / app.include_deleted GUCs server-side,
+    // all transaction-local. This replaces the previous 3 separate
+    // statements (~3 extra network round trips) — see scripts/_perf-probe.ts.
     await tx.execute(
-      sql`select set_config('app.tenant_id', ${ctx.tenantId}, true)`,
+      sql`select app_set_ctx(${ctx.tenantId}, ${ctx.userId}, ${ctx.includeDeleted ?? false})`,
     );
-    await tx.execute(
-      sql`select set_config('app.user_id', ${ctx.userId}, true)`,
-    );
-    if (ctx.includeDeleted) {
-      await tx.execute(
-        sql`select set_config('app.include_deleted', 'true', true)`,
-      );
-    }
     return await fn(tx);
   });
 }

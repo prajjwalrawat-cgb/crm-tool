@@ -154,6 +154,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/dashboard/deals', label: 'My Deals', icon: Briefcase },
+      { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
       // Communications removed for members — inbox is tenant-shared
       // in the current schema, so member access leaks other reps'

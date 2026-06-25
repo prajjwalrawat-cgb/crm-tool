@@ -1,117 +1,99 @@
 import 'server-only';
 
-import { auth, clerkClient } from '@clerk/nextjs/server';
+import { randomBytes } from 'node:crypto';
+
 import { eq } from 'drizzle-orm';
+import { cache } from 'react';
 
 import { db } from '@/db';
-import { tenants, type Tenant } from '@/db/schema';
-
-type ClerkOrgSnapshot = {
-  id: string;
-  name: string;
-  slug: string | null;
-};
+import { memberships, tenants, type Tenant } from '@/db/schema';
+import { auth } from '@/lib/auth/server';
+import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 
 /**
- * Insert-or-fetch the tenant row matching a Clerk organization. Race-safe:
- * relies on the unique index on `clerk_org_id`. Returns the row on insert,
- * or the existing row if a concurrent request won the insert.
- *
- * Used by the Clerk webhook (where we already have org data) and by
- * ensureTenant() (which fetches via the Clerk SDK as a dev-time fallback).
+ * Tenant resolution for self-hosted auth. The active tenant is carried in
+ * the session cookie as its UUID (`orgId` from `auth()`), so resolution is
+ * a direct primary-key lookup — no Clerk org round-trip.
  */
-export async function upsertTenantFromOrg(org: ClerkOrgSnapshot): Promise<Tenant | null> {
-  const [inserted] = await db
-    .insert(tenants)
-    .values({
-      clerkOrgId: org.id,
-      name: org.name,
-      slug: org.slug ?? org.id,
-    })
-    .onConflictDoNothing()
-    .returning();
 
-  if (inserted) return inserted;
-
-  const [existing] = await db
-    .select()
-    .from(tenants)
-    .where(eq(tenants.clerkOrgId, org.id))
-    .limit(1);
-
-  return existing ?? null;
-}
-
-/**
- * Apply later mutations from organization.updated webhook events. Returns
- * null if no row exists yet (caller can fall through to upsertTenantFromOrg).
- */
-export async function updateTenantFromOrg(org: ClerkOrgSnapshot): Promise<Tenant | null> {
-  const [updated] = await db
-    .update(tenants)
-    .set({ name: org.name, slug: org.slug ?? org.id })
-    .where(eq(tenants.clerkOrgId, org.id))
-    .returning();
-  return updated ?? null;
-}
-
-/**
- * Delete a tenant by Clerk org id. Cascades to memberships/companies/contacts/
- * deals via the schema's ON DELETE CASCADE.
- */
-export async function deleteTenantByClerkOrgId(orgId: string): Promise<void> {
-  await db.delete(tenants).where(eq(tenants.clerkOrgId, orgId));
-}
-
-/**
- * Returns the tenant row matching the active Clerk organization, or null if
- * the user has no active org (or no row has been provisioned yet).
- */
-export async function getCurrentTenant(): Promise<Tenant | null> {
+// Memoized per request: the dashboard layout, page-level
+// `withTenantSession`, and permission guards all resolve the active tenant
+// in the same render pass. `cache()` collapses those into one DB hit.
+export const getCurrentTenant = cache(async (): Promise<Tenant | null> => {
   const { orgId } = await auth();
   if (!orgId) return null;
 
   const [row] = await db
     .select()
     .from(tenants)
-    .where(eq(tenants.clerkOrgId, orgId))
+    .where(eq(tenants.id, orgId))
     .limit(1);
 
   return row ?? null;
-}
+});
 
 /**
- * Asserts a tenant row exists for the active org. Throws if not — call from
- * routes that the middleware has already gated on `orgId`.
+ * Asserts a tenant is active. Throws if not — call from routes the
+ * middleware has already gated on an active workspace.
  */
 export async function requireTenant(): Promise<Tenant> {
   const tenant = await getCurrentTenant();
   if (!tenant) {
     throw new Error(
-      'No active tenant. Either no organization is selected, or the org has not been synced from Clerk yet.',
+      'No active tenant. Select or create a workspace before loading this page.',
     );
   }
   return tenant;
 }
 
 /**
- * Returns the active tenant, lazily inserting from Clerk org metadata if the
- * webhook hasn't fired yet (e.g. local dev without ngrok). Race-safe via
- * upsertTenantFromOrg.
+ * Backstop used by the dashboard layout. With local auth the tenant row
+ * always exists for an active session, so this is just `getCurrentTenant`
+ * — kept as a named export so the layout call site is unchanged.
  */
 export async function ensureTenant(): Promise<Tenant | null> {
-  const { orgId } = await auth();
-  if (!orgId) return null;
+  return await getCurrentTenant();
+}
 
-  const existing = await getCurrentTenant();
-  if (existing) return existing;
+function slugify(name: string): string {
+  const base = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  return `${base || 'workspace'}-${randomBytes(3).toString('hex')}`;
+}
 
-  const client = await clerkClient();
-  const org = await client.organizations.getOrganization({ organizationId: orgId });
+/**
+ * Create a new workspace and seat the creator as its owner. Used by the
+ * "Create workspace" flow on /select-org (replaces Clerk's org-creation).
+ */
+export async function createTenant(input: {
+  name: string;
+  ownerUserId: string;
+}): Promise<Tenant> {
+  const [tenant] = await db
+    .insert(tenants)
+    .values({ name: input.name.trim(), slug: slugify(input.name) })
+    .returning();
+  const row = tenant!;
 
-  return await upsertTenantFromOrg({
-    id: org.id,
-    name: org.name,
-    slug: org.slug ?? null,
-  });
+  await runWithTenantContext(
+    { tenantId: row.id, userId: input.ownerUserId },
+    () =>
+      tenantTransaction(async (tx) => {
+        await tx
+          .insert(memberships)
+          .values({
+            tenantId: row.id,
+            userId: input.ownerUserId,
+            role: 'owner',
+            status: 'active',
+          })
+          .onConflictDoNothing();
+      }),
+  );
+
+  return row;
 }

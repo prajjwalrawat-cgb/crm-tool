@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { clerkClient } from '@clerk/nextjs/server';
+import { clerkClient } from '@/lib/auth/server';
 
 /**
  * Shared author/display-name resolver for notes, comments, and

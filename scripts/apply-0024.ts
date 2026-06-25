@@ -25,7 +25,11 @@ async function main() {
       await db.execute(sql.raw(stmt));
       console.log(`  [${i + 1}/${statements.length}] ok`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Drizzle wraps the driver error; the "already exists" text lives on
+      // the cause, not the top-level message — inspect both so re-runs are
+      // idempotent.
+      const cause = (err as { cause?: { message?: string } })?.cause;
+      const msg = `${err instanceof Error ? err.message : String(err)} ${cause?.message ?? ''}`;
       if (msg.includes('already exists') || msg.includes('duplicate')) {
         console.log(`  [${i + 1}/${statements.length}] already exists, skipping`);
       } else {

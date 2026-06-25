@@ -1,4 +1,4 @@
-﻿import { auth } from '@clerk/nextjs/server';
+﻿import { auth } from '@/lib/auth/server';
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { requireMembership } from '@/lib/membership';
@@ -14,16 +14,16 @@ export const metadata = {
 export default async function TeamPage() {
   await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant }) => {
-    const { userId, orgId } = await auth();
+    const { userId } = await auth();
 
-    if (!orgId || !userId) {
-      throw new Error('Active organization is required to view the team page.');
+    if (!userId) {
+      throw new Error('An active session is required to view the team page.');
     }
 
     const [currentMembership, members, pendingInvitations] = await Promise.all([
       requireMembership(),
       listTeamMembers(tenant.id),
-      listPendingInvitations(orgId),
+      listPendingInvitations(tenant.id),
     ]);
 
     return (

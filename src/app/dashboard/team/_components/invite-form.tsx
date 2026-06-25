@@ -43,8 +43,9 @@ export function InviteForm({
       <div>
         <h2 className="text-base font-semibold">Invite teammate</h2>
         <p className="mt-0.5 text-xs text-slate-500">
-          Sends an invitation email via Clerk. They&apos;ll join this org on
-          accept.
+          {/* Sends an invitation email via Clerk. They&apos;ll join this org on
+          accept. */}
+          Sends an invitation email. The user will join this organization after accepting the invitation.
         </p>
       </div>
 

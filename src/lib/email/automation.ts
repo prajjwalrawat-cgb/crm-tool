@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { and, eq } from 'drizzle-orm';
-import { auth, clerkClient } from '@clerk/nextjs/server';
+import { auth, clerkClient } from '@/lib/auth/server';
 
 import { emailMessages } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';

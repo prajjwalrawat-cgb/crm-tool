@@ -10,7 +10,10 @@ export const tenants = pgTable(
   'tenants',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    clerkOrgId: text('clerk_org_id').notNull().unique(),
+    // Legacy link to the Clerk organization. Kept (nullable) so existing
+    // tenants retain their original mapping after the Clerk → local-auth
+    // migration; workspaces created post-migration leave it null.
+    clerkOrgId: text('clerk_org_id').unique(),
     name: text('name').notNull(),
     slug: text('slug').notNull().unique(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

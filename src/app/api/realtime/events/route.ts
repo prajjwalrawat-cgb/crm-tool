@@ -1,4 +1,4 @@
-import { auth, clerkClient } from '@clerk/nextjs/server';
+import { auth, clerkClient } from '@/lib/auth/server';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { client as pgClient } from '@/db';

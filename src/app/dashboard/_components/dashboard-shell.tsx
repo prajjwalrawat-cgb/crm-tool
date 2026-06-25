@@ -12,6 +12,7 @@ import { CopilotPanel } from './copilot-panel';
 import { EditModeProvider } from './edit-mode/edit-mode-context';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
+import type { WorkspaceLite } from './workspace-switcher';
 
 const SIDEBAR_COLLAPSED_KEY = 'crm.sidebar.collapsed';
 
@@ -22,6 +23,10 @@ export function DashboardShell({
   initialNotifications,
   aiMode,
   persona,
+  account,
+  currentTenantName,
+  workspaces,
+  canCreateWorkspace,
 }: {
   children: ReactNode;
   tenantId: string;
@@ -29,6 +34,10 @@ export function DashboardShell({
   initialNotifications: Notification[];
   aiMode: AIMode;
   persona: Persona;
+  account: { displayName: string; email: string | null; imageUrl: string | null };
+  currentTenantName: string;
+  workspaces: WorkspaceLite[];
+  canCreateWorkspace: boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -124,6 +133,10 @@ export function DashboardShell({
             tenantId={tenantId}
             currentUserId={currentUserId}
             initialNotifications={initialNotifications}
+            account={account}
+            currentTenantName={currentTenantName}
+            workspaces={workspaces}
+            canCreateWorkspace={canCreateWorkspace}
           />
           {/*
             Tenant-scoped invalidation boundary. When the active tenant
