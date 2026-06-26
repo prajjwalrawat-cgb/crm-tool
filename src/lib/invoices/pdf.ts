@@ -65,10 +65,16 @@ function amountInWords(totalMinor: number, currency: string): string {
   return `${out} Only`;
 }
 
+function placeLine(p: PdfParty): string {
+  const place = [p.locality, p.city].filter(Boolean).join(', ');
+  return [place, p.pincode].filter(Boolean).join(' - ');
+}
+
 function partyLines(p: PdfParty): string[] {
   const lines = [p.name];
   if (p.address) lines.push(p.address);
-  if (p.city) lines.push(p.city);
+  const place = placeLine(p);
+  if (place) lines.push(place);
   if (p.gstin) lines.push(`GSTIN/UIN: ${p.gstin}`);
   if (p.state) lines.push(`State: ${p.state}${p.stateCode ? `, Code: ${p.stateCode}` : ''}`);
   return lines;
@@ -97,7 +103,8 @@ export function generateInvoicePdf(data: InvoicePdfData): void {
   let ly = y + 4;
   const sellerMeta: string[] = [];
   if (data.seller.address) sellerMeta.push(data.seller.address);
-  if (data.seller.city) sellerMeta.push(data.seller.city);
+  const sellerPlace = placeLine(data.seller);
+  if (sellerPlace) sellerMeta.push(sellerPlace);
   if (data.seller.gstin) sellerMeta.push(`GSTIN/UIN: ${data.seller.gstin}`);
   if (data.seller.state)
     sellerMeta.push(`State: ${data.seller.state}${data.seller.stateCode ? `, Code: ${data.seller.stateCode}` : ''}`);

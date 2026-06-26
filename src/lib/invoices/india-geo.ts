@@ -88,6 +88,89 @@ export const ALL_CITIES: string[] = Array.from(
   new Set(Object.values(CITIES_BY_STATE).flat()),
 ).sort();
 
+/**
+ * A curated set of localities/areas (sub-cities) with their pincodes for a
+ * few major cities. Used to suggest localities and auto-fill the pin code.
+ * Not exhaustive — locality and pin code stay free-text, so any value works.
+ */
+export const LOCALITIES_BY_CITY: Record<string, { name: string; pincode: string }[]> = {
+  'New Delhi': [
+    { name: 'Dwarka', pincode: '110075' },
+    { name: 'Rohini', pincode: '110085' },
+    { name: 'Saket', pincode: '110017' },
+    { name: 'Karol Bagh', pincode: '110005' },
+    { name: 'Connaught Place', pincode: '110001' },
+    { name: 'Janakpuri', pincode: '110058' },
+    { name: 'Vasant Kunj', pincode: '110070' },
+    { name: 'Lajpat Nagar', pincode: '110024' },
+    { name: 'Pitampura', pincode: '110034' },
+    { name: 'Mayur Vihar', pincode: '110091' },
+  ],
+  Delhi: [
+    { name: 'Dwarka', pincode: '110075' },
+    { name: 'Rohini', pincode: '110085' },
+    { name: 'Saket', pincode: '110017' },
+    { name: 'Karol Bagh', pincode: '110005' },
+    { name: 'Janakpuri', pincode: '110058' },
+    { name: 'Pitampura', pincode: '110034' },
+    { name: 'Mayur Vihar', pincode: '110091' },
+  ],
+  Bengaluru: [
+    { name: 'Koramangala', pincode: '560034' },
+    { name: 'Indiranagar', pincode: '560038' },
+    { name: 'Whitefield', pincode: '560066' },
+    { name: 'Jayanagar', pincode: '560011' },
+    { name: 'HSR Layout', pincode: '560102' },
+    { name: 'Electronic City', pincode: '560100' },
+    { name: 'Marathahalli', pincode: '560037' },
+    { name: 'Malleshwaram', pincode: '560003' },
+  ],
+  Mumbai: [
+    { name: 'Andheri', pincode: '400053' },
+    { name: 'Bandra', pincode: '400050' },
+    { name: 'Borivali', pincode: '400092' },
+    { name: 'Powai', pincode: '400076' },
+    { name: 'Dadar', pincode: '400014' },
+    { name: 'Goregaon', pincode: '400062' },
+    { name: 'Malad', pincode: '400064' },
+  ],
+  Pune: [
+    { name: 'Hinjewadi', pincode: '411057' },
+    { name: 'Kothrud', pincode: '411038' },
+    { name: 'Viman Nagar', pincode: '411014' },
+    { name: 'Hadapsar', pincode: '411028' },
+    { name: 'Baner', pincode: '411045' },
+    { name: 'Wakad', pincode: '411057' },
+  ],
+  Hyderabad: [
+    { name: 'Gachibowli', pincode: '500032' },
+    { name: 'Madhapur', pincode: '500081' },
+    { name: 'Kukatpally', pincode: '500072' },
+    { name: 'Banjara Hills', pincode: '500034' },
+    { name: 'Hitech City', pincode: '500081' },
+  ],
+  Chennai: [
+    { name: 'Adyar', pincode: '600020' },
+    { name: 'T. Nagar', pincode: '600017' },
+    { name: 'Velachery', pincode: '600042' },
+    { name: 'Anna Nagar', pincode: '600040' },
+    { name: 'OMR', pincode: '600119' },
+  ],
+};
+
+export function localitiesFor(city: string): { name: string; pincode: string }[] {
+  return LOCALITIES_BY_CITY[city] ?? [];
+}
+
+export function pincodeForLocality(
+  city: string,
+  locality: string,
+): string | undefined {
+  const l = locality.trim().toLowerCase();
+  if (!l) return undefined;
+  return localitiesFor(city).find((x) => x.name.toLowerCase() === l)?.pincode;
+}
+
 /** If a city belongs to exactly one state, return it (for back-fill). */
 export function uniqueStateForCity(city: string): string | undefined {
   const c = city.trim().toLowerCase();

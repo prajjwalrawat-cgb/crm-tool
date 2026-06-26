@@ -19,6 +19,8 @@ export type InvoiceParty = {
   name: string;
   address?: string;
   city?: string;
+  locality?: string;
+  pincode?: string;
   gstin?: string;
   state?: string;
   stateCode?: string;

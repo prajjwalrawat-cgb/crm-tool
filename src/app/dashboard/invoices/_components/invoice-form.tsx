@@ -15,6 +15,8 @@ import {
   ALL_CITIES,
   citiesFor,
   INDIAN_STATES,
+  localitiesFor,
+  pincodeForLocality,
   stateCodeFor,
   uniqueStateForCity,
 } from '@/lib/invoices/india-geo';
@@ -25,6 +27,8 @@ type PartyFields = {
   name: string;
   address: string;
   city: string;
+  locality: string;
+  pincode: string;
   gstin: string;
   state: string;
   stateCode: string;
@@ -47,7 +51,7 @@ type ItemRow = {
   __uploading?: boolean;
 };
 
-const emptyParty: PartyFields = { name: '', address: '', city: '', gstin: '', state: '', stateCode: '' };
+const emptyParty: PartyFields = { name: '', address: '', city: '', locality: '', pincode: '', gstin: '', state: '', stateCode: '' };
 // Empty unit/qty/rate so placeholders stay visible; defaults are applied on submit.
 const emptyItem: ItemRow = { description: '', hsnSac: '', unit: '', quantity: '', rate: '' };
 
@@ -56,6 +60,8 @@ function partyFromInitial(p?: PdfParty | null): PartyFields {
     name: p?.name ?? '',
     address: p?.address ?? '',
     city: p?.city ?? '',
+    locality: p?.locality ?? '',
+    pincode: p?.pincode ?? '',
     gstin: p?.gstin ?? '',
     state: p?.state ?? '',
     stateCode: p?.stateCode ?? '',
@@ -460,38 +466,51 @@ function PartyInputs({
   prefix: string;
   namePlaceholder: string;
 }) {
-  const listId = `${prefix}-cities`;
+  const cityListId = `${prefix}-cities`;
+  const localityListId = `${prefix}-localities`;
   const cities = value.state ? citiesFor(value.state) : ALL_CITIES;
+  const localities = localitiesFor(value.city);
 
   function onStateChange(name: string) {
-    // GST state code is fixed per state — fill it automatically.
+    // GST state code is fixed per state — fill it automatically (kept for
+    // the PDF, just not shown as a field).
     const patch: Partial<PartyFields> = {
       state: name,
       stateCode: stateCodeFor(name) ?? '',
     };
-    // Drop a now-inconsistent city: if a (non-empty) state is chosen and the
-    // current city isn't one of its cities, clear it. Blanking the state
-    // ("Select state…") imposes no constraint, so the city is left as-is.
+    // Drop a now-inconsistent city (and its locality/pin) when switching to
+    // a different non-empty state.
     if (
       value.city &&
       name &&
       !citiesFor(name).some((c) => c.toLowerCase() === value.city.toLowerCase())
     ) {
       patch.city = '';
+      patch.locality = '';
+      patch.pincode = '';
     }
     onChange(patch);
   }
   function onCityChange(city: string) {
     const patch: Partial<PartyFields> = { city };
-    // Keep state in sync with the city: if the (known) city belongs to exactly
-    // one state and that differs from the current state, switch the state +
-    // code to match. Unknown/free-text or ambiguous cities leave the state
-    // untouched, so a valid manual selection is never clobbered.
+    // Locality + pin are city-specific — reset them when the city changes.
+    if (city !== value.city) {
+      patch.locality = '';
+      patch.pincode = '';
+    }
+    // Keep state in sync with a known city.
     const st = uniqueStateForCity(city);
     if (st && st !== value.state) {
       patch.state = st;
       patch.stateCode = stateCodeFor(st) ?? '';
     }
+    onChange(patch);
+  }
+  function onLocalityChange(locality: string) {
+    const patch: Partial<PartyFields> = { locality };
+    // Auto-fill the pin code for a known locality (still editable after).
+    const pin = pincodeForLocality(value.city, locality);
+    if (pin) patch.pincode = pin;
     onChange(patch);
   }
 
@@ -503,8 +522,8 @@ function PartyInputs({
         </Field>
         <Field label="GSTIN/UIN"><input value={value.gstin} onChange={(e) => onChange({ gstin: e.target.value })} placeholder="29ABCDE1234F1Z5" className={inputCls} /></Field>
       </div>
-      <Field label="Address"><textarea value={value.address} onChange={(e) => onChange({ address: e.target.value })} rows={2} placeholder="Street / building, area, pincode" className={inputCls} /></Field>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <Field label="Address"><textarea value={value.address} onChange={(e) => onChange({ address: e.target.value })} rows={2} placeholder="Building / street" className={inputCls} /></Field>
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="State">
           <select value={value.state} onChange={(e) => onStateChange(e.target.value)} className={inputCls}>
             <option value="">Select state…</option>
@@ -515,14 +534,24 @@ function PartyInputs({
         </Field>
         <Field label="City">
           <>
-            <input list={listId} value={value.city} onChange={(e) => onCityChange(e.target.value)} placeholder="Start typing…" className={inputCls} />
-            <datalist id={listId}>
+            <input list={cityListId} value={value.city} onChange={(e) => onCityChange(e.target.value)} placeholder="Start typing…" className={inputCls} />
+            <datalist id={cityListId}>
               {cities.map((c) => <option key={c} value={c} />)}
             </datalist>
           </>
         </Field>
-        <Field label="State code">
-          <input value={value.stateCode} readOnly placeholder="—" className={`${inputCls} bg-slate-50 text-slate-500`} />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Locality / Area">
+          <>
+            <input list={localityListId} value={value.locality} onChange={(e) => onLocalityChange(e.target.value)} placeholder="e.g. Dwarka" className={inputCls} />
+            <datalist id={localityListId}>
+              {localities.map((l) => <option key={l.name} value={l.name} />)}
+            </datalist>
+          </>
+        </Field>
+        <Field label="Pin Code">
+          <input value={value.pincode} onChange={(e) => onChange({ pincode: e.target.value })} maxLength={12} placeholder="110075" className={inputCls} />
         </Field>
       </div>
     </div>

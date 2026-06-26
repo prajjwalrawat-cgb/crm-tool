@@ -131,7 +131,13 @@ function PartyBlock({ title, party }: { title: string; party: PdfParty }) {
       <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{title}</h3>
       <p className="mt-1 text-[13px] font-medium text-slate-900">{party.name}</p>
       {party.address ? <p className="text-[12px] text-slate-600">{party.address}</p> : null}
-      {party.city ? <p className="text-[12px] text-slate-600">{party.city}</p> : null}
+      {[party.locality, party.city].filter(Boolean).join(', ') || party.pincode ? (
+        <p className="text-[12px] text-slate-600">
+          {[[party.locality, party.city].filter(Boolean).join(', '), party.pincode]
+            .filter(Boolean)
+            .join(' - ')}
+        </p>
+      ) : null}
       {party.gstin ? <p className="text-[12px] text-slate-600">GSTIN: {party.gstin}</p> : null}
       {party.state ? (
         <p className="text-[12px] text-slate-600">
