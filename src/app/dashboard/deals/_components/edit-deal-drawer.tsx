@@ -2,14 +2,17 @@
 
 import { Loader2, Save, Trash2 } from 'lucide-react';
 
+import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
 import { fromMinorUnits, KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
+import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 import { Drawer } from '../../_components/drawer';
+import { OwnerFormField } from '../../_components/owner-form-field';
 
 type Props = {
   open: boolean;
@@ -17,6 +20,9 @@ type Props = {
   deal: DealRow | null;
   companyOptions: CompanyOption[];
   contactOptions: ContactOption[];
+  teammates: Teammate[];
+  currentUserId: string;
+  currentRole: MembershipRole;
   onSubmit: (formData: FormData) => void;
   onDelete: () => void;
   pending: boolean;
@@ -30,8 +36,9 @@ export function EditDealDrawer({
   open,
   onClose,
   deal,
-  companyOptions,
-  contactOptions,
+  teammates,
+  currentUserId,
+  currentRole,
   onSubmit,
   onDelete,
   pending,
@@ -40,6 +47,14 @@ export function EditDealDrawer({
   fieldErrors,
   canDelete,
 }: Props) {
+  // Only owner + manager can reassign a deal; a manager may not assign to an
+  // owner, so they get the team minus owners. Anyone else doesn't see the
+  // field and the edit leaves the owner unchanged.
+  const canAssign = currentRole === 'owner' || currentRole === 'manager';
+  const assignable =
+    currentRole === 'owner'
+      ? teammates
+      : teammates.filter((t) => t.role !== 'owner');
   // Inputs use `defaultValue` (uncontrolled). React doesn't update the DOM
   // `defaultValue` after first mount — so when this drawer first renders
   // with `deal=null` and later gets `deal=<row>`, the inputs keep their
@@ -183,33 +198,28 @@ export function EditDealDrawer({
           errors={fieldErrors.expectedCloseDate}
         />
 
-        <Select
-          name="companyId"
+        <Field
+          name="companyName"
           label="Company"
-          defaultValue={deal?.companyId ?? ''}
-          errors={fieldErrors.companyId}
-        >
-          <option value="">— No company —</option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
+          defaultValue={deal?.companyName ?? ''}
+          errors={fieldErrors.companyName}
+        />
 
-        <Select
-          name="contactId"
+        <Field
+          name="contactName"
           label="Contact"
-          defaultValue={deal?.contactId ?? ''}
-          errors={fieldErrors.contactId}
-        >
-          <option value="">— No contact —</option>
-          {contactOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </Select>
+          defaultValue={deal?.contactName ?? ''}
+          errors={fieldErrors.contactName}
+        />
+
+        {canAssign ? (
+          <OwnerFormField
+            teammates={assignable}
+            currentUserId={currentUserId}
+            defaultOwnerId={deal?.ownerId ?? null}
+            errors={fieldErrors.ownerId}
+          />
+        ) : null}
 
         {error ? (
           <p

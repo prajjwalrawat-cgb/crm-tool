@@ -41,6 +41,12 @@ export type InvoicePdfData = {
   piDate: string;
   currency: string;
   status: string;
+  /**
+   * Workspace logo as a base64 data URL, shown top-left on the PDF. Fetched
+   * server-side (avoids browser CORS on the storage URL) so the client PDF
+   * can embed it directly. Live from the workspace's invoice settings.
+   */
+  logoDataUrl?: string | null;
   seller: PdfSeller;
   buyer: PdfParty;
   consignee: PdfParty | null;

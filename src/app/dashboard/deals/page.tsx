@@ -1,8 +1,7 @@
 import { withTenantSession } from '@/lib/auth-guard';
-import { listCompanyOptions } from '@/lib/companies/queries';
 import { listContactOptions } from '@/lib/contacts/queries';
 import { parseDealFilters } from '@/lib/deals/filters';
-import { listDeals } from '@/lib/deals/queries';
+import { listDealCompanyOptions, listDeals } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { personaOf } from '@/lib/personas';
@@ -47,7 +46,7 @@ export default async function DealsPage({
           currentUserId: userId,
           restrictToOwnerOrUnassigned,
         }),
-        listCompanyOptions(tenant.id),
+        listDealCompanyOptions(tenant.id),
         listContactOptions(tenant.id),
         listTeammates(tenant.id, tenant.name),
       ]);

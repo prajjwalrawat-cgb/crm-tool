@@ -3,7 +3,7 @@ import 'server-only';
 import { clerkClient } from '@/lib/auth/server';
 import { eq } from 'drizzle-orm';
 
-import { memberships } from '@/db/schema';
+import { memberships, type MembershipRole } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
 /**
@@ -24,6 +24,8 @@ export type Teammate = {
   displayName: string;
   email: string | null;
   imageUrl: string | null;
+  /** Membership role in the tenant, for assign-permission filtering. */
+  role: MembershipRole | null;
   /** "seed" for the demo personas, "user" for real Clerk users. */
   source: 'seed' | 'user';
 };
@@ -32,13 +34,13 @@ export type Teammate = {
 // short list, not worth a shared import that would pull node-only
 // scripts into the app bundle). If you edit one, edit both.
 const SEED_PERSONAS: Teammate[] = [
-  { id: 'seed-actor-priya-sharma',    displayName: 'Priya Sharma',   email: 'priya.sharma@test1.example',   imageUrl: null, source: 'seed' },
-  { id: 'seed-actor-rahul-mehta',     displayName: 'Rahul Mehta',    email: 'rahul.mehta@test1.example',    imageUrl: null, source: 'seed' },
-  { id: 'seed-actor-meera-iyer',      displayName: 'Meera Iyer',     email: 'meera.iyer@test1.example',     imageUrl: null, source: 'seed' },
-  { id: 'seed-actor-arjun-rao',       displayName: 'Arjun Rao',      email: 'arjun.rao@test1.example',      imageUrl: null, source: 'seed' },
-  { id: 'seed-actor-sarah-chen',      displayName: 'Sarah Chen',     email: 'sarah.chen@test1.example',     imageUrl: null, source: 'seed' },
-  { id: 'seed-actor-michael-torres',  displayName: 'Michael Torres', email: 'michael.torres@test1.example', imageUrl: null, source: 'seed' },
-  { id: 'seed-actor-emma-wilson',     displayName: 'Emma Wilson',    email: 'emma.wilson@test1.example',    imageUrl: null, source: 'seed' },
+  { id: 'seed-actor-priya-sharma',    displayName: 'Priya Sharma',   email: 'priya.sharma@test1.example',   imageUrl: null, role: 'member', source: 'seed' },
+  { id: 'seed-actor-rahul-mehta',     displayName: 'Rahul Mehta',    email: 'rahul.mehta@test1.example',    imageUrl: null, role: 'member', source: 'seed' },
+  { id: 'seed-actor-meera-iyer',      displayName: 'Meera Iyer',     email: 'meera.iyer@test1.example',     imageUrl: null, role: 'member', source: 'seed' },
+  { id: 'seed-actor-arjun-rao',       displayName: 'Arjun Rao',      email: 'arjun.rao@test1.example',      imageUrl: null, role: 'member', source: 'seed' },
+  { id: 'seed-actor-sarah-chen',      displayName: 'Sarah Chen',     email: 'sarah.chen@test1.example',     imageUrl: null, role: 'member', source: 'seed' },
+  { id: 'seed-actor-michael-torres',  displayName: 'Michael Torres', email: 'michael.torres@test1.example', imageUrl: null, role: 'member', source: 'seed' },
+  { id: 'seed-actor-emma-wilson',     displayName: 'Emma Wilson',    email: 'emma.wilson@test1.example',    imageUrl: null, role: 'member', source: 'seed' },
 ];
 
 /**
@@ -53,12 +55,13 @@ export async function listTeammates(
 ): Promise<Teammate[]> {
   const localRows = await tenantTransaction(async (tx) =>
     tx
-      .select({ userId: memberships.userId })
+      .select({ userId: memberships.userId, role: memberships.role })
       .from(memberships)
       .where(eq(memberships.tenantId, tenantId)),
   );
 
   const realIds = localRows.map((r) => r.userId);
+  const roleByUser = new Map(localRows.map((r) => [r.userId, r.role]));
   const realTeammates: Teammate[] = [];
 
   if (realIds.length > 0) {
@@ -78,6 +81,7 @@ export async function listTeammates(
               : u.primaryEmailAddress?.emailAddress ?? u.id,
           email: u.primaryEmailAddress?.emailAddress ?? null,
           imageUrl: u.imageUrl ?? null,
+          role: roleByUser.get(u.id) ?? null,
           source: 'user',
         });
       }
@@ -90,6 +94,7 @@ export async function listTeammates(
           displayName: id,
           email: null,
           imageUrl: null,
+          role: roleByUser.get(id) ?? null,
           source: 'user',
         });
       }

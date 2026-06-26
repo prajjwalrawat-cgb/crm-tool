@@ -41,6 +41,12 @@ const PERMISSIONS = {
   deleteDeals: ['owner', 'admin'],
   restoreDeals: ['owner', 'admin'],
   hardDeleteDeals: ['owner'],
+  /**
+   * Assigning a deal owner to *someone else*. Only owner + manager. A
+   * manager additionally cannot assign to an owner (enforced separately,
+   * since that depends on the target's role, not just the actor's).
+   */
+  assignDeals: ['owner', 'manager'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -81,6 +87,7 @@ export const canRestoreContacts = (role: RoleArg) => can(role, 'restoreContacts'
 export const canManageDeals = (role: RoleArg) => can(role, 'manageDeals');
 export const canDeleteDeals = (role: RoleArg) => can(role, 'deleteDeals');
 export const canRestoreDeals = (role: RoleArg) => can(role, 'restoreDeals');
+export const canAssignDeals = (role: RoleArg) => can(role, 'assignDeals');
 
 export const canHardDeleteCompanies = (role: RoleArg) =>
   can(role, 'hardDeleteCompanies');

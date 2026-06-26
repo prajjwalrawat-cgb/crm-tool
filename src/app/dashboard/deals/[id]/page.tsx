@@ -14,7 +14,7 @@ import { getDealById } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { requireMembership } from '@/lib/membership';
 import { listNotesForEntity } from '@/lib/notes/queries';
-import { canManageDeals } from '@/lib/rbac';
+import { canAssignDeals, canManageDeals } from '@/lib/rbac';
 import { listTasksForEntity } from '@/lib/tasks/queries';
 import { listTeammates } from '@/lib/teammates/queries';
 import { getEntityTimeline } from '@/lib/timeline/queries';
@@ -73,6 +73,13 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     ]);
 
     const canEdit = canManageDeals(membership.role);
+    // Assigning a deal owner is owner/manager only; a manager can't assign
+    // to an owner, so they pick from the team minus owners.
+    const canAssign = canAssignDeals(membership.role);
+    const assignableTeammates =
+      membership.role === 'owner'
+        ? teammates
+        : teammates.filter((t) => t.role !== 'owner');
 
     // Resolve author display names across notes, comments, timeline
     // activity, and the deal owner. One Clerk batch lookup serves
@@ -162,8 +169,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 deal.ownerId ? authorLookup[deal.ownerId] ?? null : null
               }
               currentUserId={userId}
-              teammates={teammates}
-              canEdit={canEdit}
+              teammates={assignableTeammates}
+              canEdit={canAssign}
             />
             <DetailCard label="Company" value={deal.companyName ?? '—'} />
             <DetailCard

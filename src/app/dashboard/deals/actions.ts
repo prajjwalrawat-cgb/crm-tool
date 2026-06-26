@@ -4,7 +4,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { companies, contacts, deals, type Deal } from '@/db/schema';
+import { deals, memberships, type Deal } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { recordObservation } from '@/lib/agents/observations/record';
 import { checkPermission } from '@/lib/auth-guard';
@@ -41,44 +41,21 @@ export type SimpleResult =
   | { ok: true }
   | { ok: false; message: string };
 
-async function assertCompanyInTenant(
+/** A member's role in the tenant (for assign-permission checks). */
+async function getMemberRole(
   tenantId: string,
-  companyId: string,
-): Promise<boolean> {
+  userId: string,
+): Promise<string | null> {
   const rows = await tenantTransaction(async (tx) =>
     tx
-      .select({ id: companies.id })
-      .from(companies)
+      .select({ role: memberships.role })
+      .from(memberships)
       .where(
-        and(
-          eq(companies.id, companyId),
-          eq(companies.tenantId, tenantId),
-          isNull(companies.deletedAt),
-        ),
+        and(eq(memberships.tenantId, tenantId), eq(memberships.userId, userId)),
       )
       .limit(1),
   );
-  return rows.length > 0;
-}
-
-async function assertContactInTenant(
-  tenantId: string,
-  contactId: string,
-): Promise<boolean> {
-  const rows = await tenantTransaction(async (tx) =>
-    tx
-      .select({ id: contacts.id })
-      .from(contacts)
-      .where(
-        and(
-          eq(contacts.id, contactId),
-          eq(contacts.tenantId, tenantId),
-          isNull(contacts.deletedAt),
-        ),
-      )
-      .limit(1),
-  );
-  return rows.length > 0;
+  return rows[0]?.role ?? null;
 }
 
 /* -------- CREATE -------- */
@@ -93,6 +70,19 @@ export async function createDealAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      // Company/Contact are free-text labels — stored as typed, not linked
+      // to a company/contact record (nothing is created).
+      const companyNameRaw = formData.get('companyName');
+      const contactNameRaw = formData.get('contactName');
+      const companyNameText =
+        typeof companyNameRaw === 'string' && companyNameRaw.trim()
+          ? companyNameRaw.trim()
+          : null;
+      const contactNameText =
+        typeof contactNameRaw === 'string' && contactNameRaw.trim()
+          ? contactNameRaw.trim()
+          : null;
+
       const raw: Record<string, FormDataEntryValue | null> = {
         name: formData.get('name'),
         description: formData.get('description'),
@@ -100,17 +90,11 @@ export async function createDealAction(
         amount: formData.get('amount'),
         currency: formData.get('currency'),
         expectedCloseDate: formData.get('expectedCloseDate'),
-        companyId: formData.get('companyId'),
-        contactId: formData.get('contactId'),
+        companyId: null,
+        contactId: null,
         ownerId: formData.get('ownerId'),
       };
-      for (const key of [
-        'description',
-        'expectedCloseDate',
-        'companyId',
-        'contactId',
-        'ownerId',
-      ] as const) {
+      for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
         if (typeof raw[key] === 'string' && raw[key].trim() === '') raw[key] = null;
       }
 
@@ -124,25 +108,25 @@ export async function createDealAction(
         };
       }
 
-      if (
-        parsed.data.companyId &&
-        !(await assertCompanyInTenant(tenant.id, parsed.data.companyId))
-      ) {
-        return {
-          ok: false,
-          message: 'The selected company is not in this tenant.',
-          fieldErrors: { companyId: ['Pick a company from the list'] },
-        };
-      }
-      if (
-        parsed.data.contactId &&
-        !(await assertContactInTenant(tenant.id, parsed.data.contactId))
-      ) {
-        return {
-          ok: false,
-          message: 'The selected contact is not in this tenant.',
-          fieldErrors: { contactId: ['Pick a contact from the list'] },
-        };
+      // Assignment rules (server-enforced): only owner/manager may assign to
+      // someone else; a manager may not assign to an owner. Anyone else gets
+      // their own new deal.
+      let finalOwnerId = parsed.data.ownerId;
+      if (finalOwnerId && finalOwnerId !== membership.userId) {
+        const canAssign =
+          membership.role === 'owner' || membership.role === 'manager';
+        if (!canAssign) {
+          finalOwnerId = membership.userId;
+        } else if (membership.role === 'manager') {
+          const targetRole = await getMemberRole(tenant.id, finalOwnerId);
+          if (targetRole === 'owner') {
+            return {
+              ok: false,
+              message: 'Managers cannot assign deals to an owner.',
+              fieldErrors: { ownerId: ['Pick a non-owner teammate'] },
+            };
+          }
+        }
       }
 
       const amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
@@ -158,6 +142,8 @@ export async function createDealAction(
             tenantId: tenant.id,
             companyId: parsed.data.companyId,
             contactId: parsed.data.contactId,
+            companyNameText,
+            contactNameText,
             name: parsed.data.name,
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,
@@ -165,7 +151,7 @@ export async function createDealAction(
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt,
-            ownerId: parsed.data.ownerId ?? null,
+            ownerId: finalOwnerId ?? null,
           })
           .returning();
         if (!row) return null;
@@ -226,6 +212,18 @@ export async function updateDealAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      // Free-text company/contact labels (not linked records).
+      const companyNameRaw = formData.get('companyName');
+      const contactNameRaw = formData.get('contactName');
+      const companyNameText =
+        typeof companyNameRaw === 'string' && companyNameRaw.trim()
+          ? companyNameRaw.trim()
+          : null;
+      const contactNameText =
+        typeof contactNameRaw === 'string' && contactNameRaw.trim()
+          ? contactNameRaw.trim()
+          : null;
+
       const raw: Record<string, FormDataEntryValue | null> = {
         id: formData.get('id'),
         name: formData.get('name'),
@@ -234,15 +232,11 @@ export async function updateDealAction(
         amount: formData.get('amount'),
         currency: formData.get('currency'),
         expectedCloseDate: formData.get('expectedCloseDate'),
-        companyId: formData.get('companyId'),
-        contactId: formData.get('contactId'),
+        companyId: null,
+        contactId: null,
+        ownerId: formData.get('ownerId'),
       };
-      for (const key of [
-        'description',
-        'expectedCloseDate',
-        'companyId',
-        'contactId',
-      ] as const) {
+      for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
         if (typeof raw[key] === 'string' && raw[key].trim() === '') raw[key] = null;
       }
 
@@ -256,30 +250,30 @@ export async function updateDealAction(
         };
       }
 
-      if (
-        parsed.data.companyId &&
-        !(await assertCompanyInTenant(tenant.id, parsed.data.companyId))
-      ) {
-        return {
-          ok: false,
-          message: 'The selected company is not in this tenant.',
-          fieldErrors: { companyId: ['Pick a company from the list'] },
-        };
-      }
-      if (
-        parsed.data.contactId &&
-        !(await assertContactInTenant(tenant.id, parsed.data.contactId))
-      ) {
-        return {
-          ok: false,
-          message: 'The selected contact is not in this tenant.',
-          fieldErrors: { contactId: ['Pick a contact from the list'] },
-        };
-      }
-
       const amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       const isClosedStage =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
+
+      // Assignment: only owner/manager may change the owner, and a manager may
+      // not assign to an owner. For anyone else, leave the owner untouched
+      // (their edit form doesn't post an ownerId).
+      const canAssign =
+        membership.role === 'owner' || membership.role === 'manager';
+      let ownerPatch: { ownerId?: string | null } = {};
+      if (canAssign) {
+        const finalOwnerId = parsed.data.ownerId ?? null;
+        if (finalOwnerId && membership.role === 'manager') {
+          const targetRole = await getMemberRole(tenant.id, finalOwnerId);
+          if (targetRole === 'owner') {
+            return {
+              ok: false,
+              message: 'Managers cannot assign deals to an owner.',
+              fieldErrors: { ownerId: ['Pick a non-owner teammate'] },
+            };
+          }
+        }
+        ownerPatch = { ownerId: finalOwnerId };
+      }
 
       const result = await tenantTransaction(async (tx) => {
         const [previous] = await tx
@@ -309,6 +303,8 @@ export async function updateDealAction(
           .set({
             companyId: parsed.data.companyId,
             contactId: parsed.data.contactId,
+            companyNameText,
+            contactNameText,
             name: parsed.data.name,
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,
@@ -316,6 +312,7 @@ export async function updateDealAction(
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt: nextClosedAt,
+            ...ownerPatch,
           })
           .where(
             and(
@@ -794,7 +791,8 @@ export type UpdateOwnerResult =
 export async function updateDealOwnerAction(
   input: UpdateOwnerInput,
 ): Promise<UpdateOwnerResult> {
-  const gate = await checkPermission('manageDeals');
+  // Assigning deal ownership is owner/manager only (members can't reassign).
+  const gate = await checkPermission('assignDeals');
   if (!gate.ok) return { ok: false, message: gate.message };
   const { tenant, membership } = gate;
 
@@ -804,6 +802,14 @@ export async function updateDealOwnerAction(
       const parsed = updateOwnerSchema.safeParse(input);
       if (!parsed.success) {
         return { ok: false, message: 'Invalid owner payload' };
+      }
+
+      // A manager may not assign a deal to an owner.
+      if (membership.role === 'manager' && parsed.data.ownerId) {
+        const targetRole = await getMemberRole(tenant.id, parsed.data.ownerId);
+        if (targetRole === 'owner') {
+          return { ok: false, message: 'Managers cannot assign deals to an owner.' };
+        }
       }
 
       const result = await tenantTransaction(async (tx) => {
@@ -930,10 +936,9 @@ const MAX_BULK_FILE_BYTES = 2 * 1024 * 1024; // 2 MB — CSVs are tiny
  * the UI can show a partial-success summary; the whole batch only
  * fails on auth, file-size, or empty/no-header conditions.
  *
- * Header aliases tolerated (see normalizeHeader). Company column
- * resolves by exact name match — unknown company is a row error,
- * not an auto-create (auto-create would let typos bloat the
- * companies table).
+ * Header aliases tolerated (see normalizeHeader). The company column is
+ * stored as a free-text label on the deal (same as the create form) — it
+ * is not matched to or created as a company record.
  */
 export async function bulkUploadDealsAction(
   formData: FormData,
@@ -985,20 +990,6 @@ export async function bulkUploadDealsAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
-      // Pre-fetch all tenant companies so we can resolve company
-      // names without a DB round-trip per row.
-      const companyRows = await tenantTransaction(async (tx) =>
-        tx
-          .select({ id: companies.id, name: companies.name })
-          .from(companies)
-          .where(
-            and(eq(companies.tenantId, tenant.id), isNull(companies.deletedAt)),
-          ),
-      );
-      const companyByName = new Map<string, string>(
-        companyRows.map((c) => [c.name.trim().toLowerCase(), c.id]),
-      );
-
       const errors: Array<{ row: number; message: string }> = [];
       const toInsert: typeof deals.$inferInsert[] = [];
 
@@ -1062,26 +1053,17 @@ export async function bulkUploadDealsAction(
           expectedCloseDate = closeRaw;
         }
 
-        let companyId: string | null = null;
-        const companyNameRaw = cell('companyName');
-        if (companyNameRaw) {
-          const id = companyByName.get(companyNameRaw.toLowerCase());
-          if (!id) {
-            errors.push({
-              row: i + 1,
-              message: `Unknown company "${companyNameRaw}". Create it first or correct the name.`,
-            });
-            continue;
-          }
-          companyId = id;
-        }
+        // Company is a free-text label (matches the deal form) — store as
+        // typed; no record lookup or creation.
+        const companyNameText = cell('companyName') || null;
 
         const description = cell('description') || null;
         const isClosedStage = stage === 'won' || stage === 'lost';
 
         toInsert.push({
           tenantId: tenant.id,
-          companyId,
+          companyId: null,
+          companyNameText,
           contactId: null,
           name,
           description,

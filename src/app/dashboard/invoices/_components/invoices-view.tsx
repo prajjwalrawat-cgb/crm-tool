@@ -9,7 +9,7 @@ import { CreateDrawer } from '../../_components/create-drawer';
 import { Drawer } from '../../_components/drawer';
 import { DownloadPdfButton } from './download-pdf-button';
 import { InvoiceDetailDrawer } from './invoice-detail-drawer';
-import { InvoiceForm } from './invoice-form';
+import { InvoiceForm, type SellerDefaults } from './invoice-form';
 import type { InvoiceListRow } from '@/lib/invoices/queries';
 import { formatMoneyMinor } from '@/lib/invoices/money';
 import type { InvoicePdfData } from '@/lib/invoices/types';
@@ -29,6 +29,9 @@ export function InvoicesView({
   initialSearch,
   currentUserId,
   canManageAll,
+  defaultSeller,
+  defaultPaymentTerms,
+  defaultDeliveryTerms,
 }: {
   rows: InvoiceListRow[];
   total: number;
@@ -38,6 +41,9 @@ export function InvoicesView({
   initialSearch: string;
   currentUserId: string;
   canManageAll: boolean;
+  defaultSeller: SellerDefaults | null;
+  defaultPaymentTerms: string;
+  defaultDeliveryTerms: string;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
@@ -98,6 +104,9 @@ export function InvoicesView({
           {() => (
             <InvoiceForm
               key={createKey}
+              defaultSeller={defaultSeller}
+              defaultPaymentTerms={defaultPaymentTerms}
+              defaultDeliveryTerms={defaultDeliveryTerms}
               onSuccess={() => {
                 setCreateKey((k) => k + 1);
                 router.refresh();

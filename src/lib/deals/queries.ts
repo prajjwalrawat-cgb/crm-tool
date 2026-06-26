@@ -11,10 +11,12 @@ import {
   isNotNull,
   isNull,
   lte,
+  or,
   sql,
   type SQL,
 } from 'drizzle-orm';
 
+import { db } from '@/db';
 import { companies, contacts, deals, type Deal } from '@/db/schema';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
 import {
@@ -94,6 +96,8 @@ type RawJoinedRow = {
   updatedAt: Date;
   deletedAt: Date | null;
   deletedBy: string | null;
+  companyNameText: string | null;
+  contactNameText: string | null;
   companyName: string | null;
   contactFirstName: string | null;
   contactLastName: string | null;
@@ -118,18 +122,76 @@ const DEALS_PROJECTION = {
   updatedAt: deals.updatedAt,
   deletedAt: deals.deletedAt,
   deletedBy: deals.deletedBy,
-  companyName: companies.name,
+  companyNameText: deals.companyNameText,
+  contactNameText: deals.contactNameText,
+  // Display name: the typed free-text label takes precedence, falling back
+  // to the linked company record's name (legacy/linked deals).
+  companyName: sql<string | null>`coalesce(${deals.companyNameText}, ${companies.name})`,
   contactFirstName: contacts.firstName,
   contactLastName: contacts.lastName,
   contactEmail: contacts.email,
 };
+
+/**
+ * Match deals against the selected company NAMES. Company is free-text on
+ * deals now, so the filter operates on names (see `listDealCompanyOptions`):
+ * a deal matches if its free-text `company_name` equals one of the selected
+ * names, OR it's a legacy/linked deal whose linked company name matches.
+ */
+function companyFilterCondition(tenantId: string, companyNames: string[]): SQL {
+  const lowered = companyNames.map((n) => n.toLowerCase());
+  const linkedIds = db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(
+      and(
+        eq(companies.tenantId, tenantId),
+        inArray(sql`lower(${companies.name})`, lowered),
+      ),
+    );
+  return or(
+    inArray(sql`lower(${deals.companyNameText})`, lowered),
+    inArray(deals.companyId, linkedIds),
+  )!;
+}
+
+/**
+ * Company filter options for the deals page, sourced from the company names
+ * actually used by deals (free-text `company_name`, plus any linked company's
+ * name). Returns `{ id, name }` where `id === name` so the filter matches by
+ * name. Deduped case-insensitively, alphabetized.
+ */
+export async function listDealCompanyOptions(
+  tenantId: string,
+): Promise<{ id: string; name: string }[]> {
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .selectDistinct({
+        name: sql<string>`coalesce(${deals.companyNameText}, ${companies.name})`,
+      })
+      .from(deals)
+      .leftJoin(companies, eq(deals.companyId, companies.id))
+      .where(and(eq(deals.tenantId, tenantId), isNull(deals.deletedAt))),
+  );
+  const byLower = new Map<string, string>();
+  for (const r of rows) {
+    const name = (r.name ?? '').trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (!byLower.has(key)) byLower.set(key, name);
+  }
+  return Array.from(byLower.values())
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({ id: name, name }));
+}
 
 function shapeDealRow(r: RawJoinedRow): DealRow {
   const { contactFirstName, contactLastName, contactEmail, ...rest } = r;
   const nameParts = [contactFirstName, contactLastName].filter(Boolean) as string[];
   return {
     ...rest,
-    contactName: nameParts.length ? nameParts.join(' ') : null,
+    contactName:
+      r.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
     contactEmail,
   };
 }
@@ -177,7 +239,7 @@ export async function listDeals(
     );
   }
   if (f.companyIds && f.companyIds.length > 0) {
-    conditions.push(inArray(deals.companyId, f.companyIds));
+    conditions.push(companyFilterCondition(tenantId, f.companyIds));
   }
   if (f.mine && options.currentUserId) {
     conditions.push(eq(deals.ownerId, options.currentUserId));
@@ -377,7 +439,7 @@ export async function listDealsForBoard(
         );
       }
       if (f.companyIds && f.companyIds.length > 0) {
-        sharedConds.push(inArray(deals.companyId, f.companyIds));
+        sharedConds.push(companyFilterCondition(tenantId, f.companyIds));
       }
       if (f.mine && options.currentUserId) {
         sharedConds.push(eq(deals.ownerId, options.currentUserId));

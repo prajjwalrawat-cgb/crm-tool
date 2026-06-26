@@ -3,6 +3,7 @@
 import { Loader2, Plus } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
+import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
 import type { Teammate } from '@/lib/teammates/queries';
@@ -22,6 +23,7 @@ type Props = {
   contactOptions: ContactOption[];
   teammates: Teammate[];
   currentUserId: string;
+  currentRole: MembershipRole;
 };
 
 export function CreateDealForm({
@@ -30,16 +32,23 @@ export function CreateDealForm({
   error,
   fieldErrors,
   resetKey,
-  companyOptions,
-  contactOptions,
   teammates,
   currentUserId,
+  currentRole,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     formRef.current?.reset();
   }, [resetKey]);
+
+  // Only owner + manager can assign a deal to someone else. A manager may
+  // not assign to an owner, so they get the team minus owners.
+  const canAssign = currentRole === 'owner' || currentRole === 'manager';
+  const assignable =
+    currentRole === 'owner'
+      ? teammates
+      : teammates.filter((t) => t.role !== 'owner');
 
   return (
     <form
@@ -92,7 +101,7 @@ export function CreateDealForm({
           name="currency"
           label="Currency"
           errors={fieldErrors.currency}
-          defaultValue="USD"
+          defaultValue="INR"
         >
           {KNOWN_CURRENCIES.map((c) => (
             <option key={c} value={c}>
@@ -109,41 +118,30 @@ export function CreateDealForm({
         errors={fieldErrors.expectedCloseDate}
       />
 
-      <SelectField
-        name="companyId"
+      <Field
+        name="companyName"
         label="Company"
-        errors={fieldErrors.companyId}
-        defaultValue=""
-        emptyHint={companyOptions.length === 0 ? 'Add a company first to link deals to it.' : undefined}
-      >
-        <option value="">— No company —</option>
-        {companyOptions.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </SelectField>
-
-      <SelectField
-        name="contactId"
-        label="Contact"
-        errors={fieldErrors.contactId}
-        defaultValue=""
-        emptyHint={contactOptions.length === 0 ? 'Add a contact first to link deals to it.' : undefined}
-      >
-        <option value="">— No contact —</option>
-        {contactOptions.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.label}
-          </option>
-        ))}
-      </SelectField>
-
-      <OwnerFormField
-        teammates={teammates}
-        currentUserId={currentUserId}
-        errors={fieldErrors.ownerId}
+        placeholder="Company name"
+        errors={fieldErrors.companyName}
       />
+
+      <Field
+        name="contactName"
+        label="Contact"
+        placeholder="Contact name"
+        errors={fieldErrors.contactName}
+      />
+
+      {canAssign ? (
+        <OwnerFormField
+          teammates={assignable}
+          currentUserId={currentUserId}
+          errors={fieldErrors.ownerId}
+        />
+      ) : (
+        // Members/admins can't reassign — their new deal is owned by them.
+        <input type="hidden" name="ownerId" value={currentUserId} />
+      )}
 
       {error ? (
         <p

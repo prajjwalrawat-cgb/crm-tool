@@ -1,5 +1,6 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { listInvoices } from '@/lib/invoices/queries';
+import { getInvoiceSettings } from '@/lib/invoices/settings';
 import { isAdmin, requireMembership } from '@/lib/membership';
 import { parsePageSize } from '@/lib/pagination/page-size';
 
@@ -25,8 +26,26 @@ export default async function InvoicesPage({
 
   return await withTenantSession(async ({ tenant, userId }) => {
     const membership = await requireMembership();
-    const { rows, total } = await listInvoices(tenant.id, { page, size, search });
+    const [{ rows, total }, settings] = await Promise.all([
+      listInvoices(tenant.id, { page, size, search }),
+      getInvoiceSettings(tenant.id),
+    ]);
     const totalPages = Math.max(1, Math.ceil(total / size));
+
+    // Auto-fill the seller block from the workspace's invoice settings.
+    const defaultSeller = settings.seller.name
+      ? {
+          name: settings.seller.name,
+          address: settings.seller.address ?? '',
+          gstin: settings.seller.gstin ?? '',
+          pan: settings.seller.pan ?? '',
+          cin: settings.seller.cin ?? '',
+          bankName: settings.seller.bankName ?? '',
+          bankAccount: settings.seller.bankAccount ?? '',
+          bankIfsc: settings.seller.bankIfsc ?? '',
+          bankBranch: settings.seller.bankBranch ?? '',
+        }
+      : null;
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -46,6 +65,9 @@ export default async function InvoicesPage({
           initialSearch={search ?? ''}
           currentUserId={userId}
           canManageAll={isAdmin(membership)}
+          defaultSeller={defaultSeller}
+          defaultPaymentTerms={settings.paymentTerms}
+          defaultDeliveryTerms={settings.deliveryTerms}
         />
       </main>
     );

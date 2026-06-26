@@ -25,7 +25,7 @@ export function DownloadPdfButton({
       }
       // Lazy-load jsPDF so it isn't bundled into the initial page chunk.
       const { generateInvoicePdf } = await import('@/lib/invoices/pdf');
-      generateInvoicePdf(data);
+      await generateInvoicePdf(data);
     } catch {
       toast.error('Could not generate the PDF.');
     } finally {

@@ -130,21 +130,10 @@ function PartyBlock({ title, party }: { title: string; party: PdfParty }) {
     <div>
       <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{title}</h3>
       <p className="mt-1 text-[13px] font-medium text-slate-900">{party.name}</p>
-      {party.address ? <p className="text-[12px] text-slate-600">{party.address}</p> : null}
-      {[party.locality, party.city].filter(Boolean).join(', ') || party.pincode ? (
-        <p className="text-[12px] text-slate-600">
-          {[[party.locality, party.city].filter(Boolean).join(', '), party.pincode]
-            .filter(Boolean)
-            .join(' - ')}
-        </p>
+      {party.address ? (
+        <p className="whitespace-pre-line text-[12px] text-slate-600">{party.address}</p>
       ) : null}
       {party.gstin ? <p className="text-[12px] text-slate-600">GSTIN: {party.gstin}</p> : null}
-      {party.state ? (
-        <p className="text-[12px] text-slate-600">
-          {party.state}
-          {party.stateCode ? `, Code: ${party.stateCode}` : ''}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -205,13 +194,6 @@ function DetailBody({ data }: { data: InvoicePdfData }) {
         <div className="flex justify-between text-slate-600"><span>GST @ {Number(data.taxRate)}%</span><span className="tabular-nums">{formatMoneyMinor(data.taxMinor, cur)}</span></div>
         <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-slate-900"><span>Total</span><span className="tabular-nums">{formatMoneyMinor(data.totalMinor, cur)}</span></div>
       </div>
-
-      {data.notes ? (
-        <div>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Notes</h3>
-          <p className="mt-1 text-[12px] text-slate-600">{data.notes}</p>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -84,6 +84,8 @@ export async function loadSerializedDeal(
       updatedAt: deals.updatedAt,
       deletedAt: deals.deletedAt,
       deletedBy: deals.deletedBy,
+      companyNameText: deals.companyNameText,
+      contactNameText: deals.contactNameText,
       companyName: companies.name,
       contactFirstName: contacts.firstName,
       contactLastName: contacts.lastName,
@@ -102,7 +104,9 @@ export async function loadSerializedDeal(
   const nameParts = [contactFirstName, contactLastName].filter(Boolean) as string[];
   const reshaped = {
     ...rest,
-    contactName: nameParts.length ? nameParts.join(' ') : null,
+    companyName: rest.companyNameText ?? rest.companyName,
+    contactName:
+      rest.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
     contactEmail,
   };
   return serializeDates(reshaped);

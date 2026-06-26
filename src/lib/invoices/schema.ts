@@ -16,16 +16,9 @@ const optStr = (max: number) =>
 
 export const partySchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(200),
+  // Single free-text address block (street, area, city, state, pincode).
   address: optStr(600),
-  city: optStr(100),
-  /** Locality / area within the city (e.g. Dwarka). */
-  locality: optStr(120),
-  /** Postal PIN code. */
-  pincode: optStr(12),
   gstin: optStr(20),
-  state: optStr(100),
-  /** GST state code (auto-derived from state). */
-  stateCode: optStr(6),
 });
 
 export const sellerSchema = partySchema.extend({

@@ -30,6 +30,13 @@ export const deals = pgTable(
     }),
     name: text('name').notNull(),
     description: text('description'),
+    /**
+     * Free-text company / contact labels typed on the deal form. Used for
+     * display when the deal isn't linked to a company/contact record; the
+     * list/board show COALESCE(company_name, joined company.name).
+     */
+    companyNameText: text('company_name'),
+    contactNameText: text('contact_name'),
     stage: dealStage('stage').notNull().default('lead'),
     // Currency stored as integer minor units (e.g. cents) to avoid float
     // rounding. bigint covers values well past any realistic deal size.

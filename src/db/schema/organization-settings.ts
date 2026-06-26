@@ -96,6 +96,20 @@ export const organizationSettings = pgTable('organization_settings', {
   notifyEmailEvents: boolean('notify_email_events').notNull().default(true),
   realtimeEnabled: boolean('realtime_enabled').notNull().default(true),
 
+  // Invoice (Proforma) seller + bank details — auto-filled on new invoices.
+  invoiceSellerName: text('invoice_seller_name'),
+  invoiceSellerAddress: text('invoice_seller_address'),
+  invoiceGstin: text('invoice_gstin'),
+  invoicePan: text('invoice_pan'),
+  invoiceCin: text('invoice_cin'),
+  invoiceBankName: text('invoice_bank_name'),
+  invoiceBankAccount: text('invoice_bank_account'),
+  invoiceBankIfsc: text('invoice_bank_ifsc'),
+  invoiceBankBranch: text('invoice_bank_branch'),
+  invoicePaymentTerms: text('invoice_payment_terms'),
+  invoiceDeliveryTerms: text('invoice_delivery_terms'),
+  invoiceLogoUrl: text('invoice_logo_url'),
+
   updatedBy: text('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()

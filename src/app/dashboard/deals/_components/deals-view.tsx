@@ -152,15 +152,18 @@ export function DealsView({
     const amountNum = Number(String(formData.get('amount') ?? '0'));
     const currency = String(formData.get('currency') ?? 'USD');
     const expectedCloseDate = String(formData.get('expectedCloseDate') ?? '').trim() || null;
-    const companyId = String(formData.get('companyId') ?? '').trim() || null;
-    const contactId = String(formData.get('contactId') ?? '').trim() || null;
-
-    const companyName = companyId
-      ? companyOptions.find((c) => c.id === companyId)?.name ?? null
-      : null;
-    const contact = contactId
-      ? contactOptions.find((c) => c.id === contactId) ?? null
-      : null;
+    // Company/Contact are free-text labels now (not linked records).
+    const companyNameText = String(formData.get('companyName') ?? '').trim() || null;
+    const contactNameText = String(formData.get('contactName') ?? '').trim() || null;
+    const companyId = base?.companyId ?? null;
+    const contactId = base?.contactId ?? null;
+    // ownerId is posted only when the user can reassign (owner/manager); when
+    // the field is absent, keep the deal's current owner.
+    const ownerIdRaw = formData.get('ownerId');
+    const ownerId =
+      ownerIdRaw != null
+        ? String(ownerIdRaw).trim() || null
+        : base?.ownerId ?? null;
 
     const amountMinor = Number.isFinite(amountNum)
       ? toMinorUnits(amountNum, currency)
@@ -185,14 +188,16 @@ export function DealsView({
       currency,
       expectedCloseDate,
       closedAt,
-      ownerId: base?.ownerId ?? null,
+      ownerId,
       probability: base?.probability ?? null,
       createdAt: base?.createdAt ?? new Date(),
       updatedAt: new Date(),
       deletedAt: null,
       deletedBy: null,
-      companyName,
-      contactName: contact?.label ?? null,
+      companyNameText,
+      contactNameText,
+      companyName: companyNameText ?? base?.companyName ?? null,
+      contactName: contactNameText ?? base?.contactName ?? null,
       contactEmail: base?.contactEmail ?? null,
       __pending: true,
     };
@@ -330,6 +335,7 @@ export function DealsView({
                     contactOptions={contactOptions}
                     teammates={teammates}
                     currentUserId={currentUserId}
+                    currentRole={currentRole}
                   />
                 )}
               </CreateDrawer>
@@ -389,6 +395,9 @@ export function DealsView({
         deal={editingDeal}
         companyOptions={companyOptions}
         contactOptions={contactOptions}
+        teammates={teammates}
+        currentUserId={currentUserId}
+        currentRole={currentRole}
         onSubmit={handleEditSubmit}
         onDelete={handleDeleteFromDrawer}
         pending={editPending}

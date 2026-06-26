@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Banknote,
   Boxes,
   Brain,
   Briefcase,
@@ -209,6 +210,7 @@ const OWNER_GROUP: NavGroup = {
   label: 'Owner',
   items: [
     { href: '/dashboard/organizations', label: 'Organizations', icon: Boxes },
+    { href: '/dashboard/invoice-settings', label: 'Invoice settings', icon: Banknote },
   ],
 };
 

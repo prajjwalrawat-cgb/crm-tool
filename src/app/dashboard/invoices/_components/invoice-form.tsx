@@ -11,27 +11,13 @@ import {
 } from '@/lib/invoices/actions';
 import { compressImage } from '@/lib/invoices/compress';
 import type { InvoicePdfData, PdfParty, PdfSeller } from '@/lib/invoices/types';
-import {
-  ALL_CITIES,
-  citiesFor,
-  INDIAN_STATES,
-  localitiesFor,
-  pincodeForLocality,
-  stateCodeFor,
-  uniqueStateForCity,
-} from '@/lib/invoices/india-geo';
 import { computeTotals, formatMoneyMinor } from '@/lib/invoices/money';
 import { createInvoiceSchema } from '@/lib/invoices/schema';
 
 type PartyFields = {
   name: string;
   address: string;
-  city: string;
-  locality: string;
-  pincode: string;
   gstin: string;
-  state: string;
-  stateCode: string;
 };
 type SellerFields = PartyFields & {
   pan: string;
@@ -41,6 +27,7 @@ type SellerFields = PartyFields & {
   bankIfsc: string;
   bankBranch: string;
 };
+export type SellerDefaults = Partial<SellerFields>;
 type ItemRow = {
   description: string;
   hsnSac: string;
@@ -51,7 +38,7 @@ type ItemRow = {
   __uploading?: boolean;
 };
 
-const emptyParty: PartyFields = { name: '', address: '', city: '', locality: '', pincode: '', gstin: '', state: '', stateCode: '' };
+const emptyParty: PartyFields = { name: '', address: '', gstin: '' };
 // Empty unit/qty/rate so placeholders stay visible; defaults are applied on submit.
 const emptyItem: ItemRow = { description: '', hsnSac: '', unit: '', quantity: '', rate: '' };
 
@@ -59,12 +46,7 @@ function partyFromInitial(p?: PdfParty | null): PartyFields {
   return {
     name: p?.name ?? '',
     address: p?.address ?? '',
-    city: p?.city ?? '',
-    locality: p?.locality ?? '',
-    pincode: p?.pincode ?? '',
     gstin: p?.gstin ?? '',
-    state: p?.state ?? '',
-    stateCode: p?.stateCode ?? '',
   };
 }
 function sellerFromInitial(s?: PdfSeller | null): SellerFields {
@@ -101,6 +83,9 @@ export function InvoiceForm({
   mode = 'create',
   invoiceId,
   initial = null,
+  defaultSeller = null,
+  defaultPaymentTerms = '',
+  defaultDeliveryTerms = '',
 }: {
   /** Called after a successful create/update (parent closes drawer + refreshes). */
   onSuccess?: () => void;
@@ -109,13 +94,19 @@ export function InvoiceForm({
   invoiceId?: string;
   /** Existing invoice to prefill in edit mode. */
   initial?: InvoicePdfData | null;
+  /** Workspace invoice settings — auto-fill the seller block on create. */
+  defaultSeller?: SellerDefaults | null;
+  defaultPaymentTerms?: string;
+  defaultDeliveryTerms?: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
   const [seller, setSeller] = useState<SellerFields>(() =>
-    sellerFromInitial(initial?.seller),
+    initial
+      ? sellerFromInitial(initial.seller)
+      : { ...sellerFromInitial(null), ...defaultSeller },
   );
   const [buyer, setBuyer] = useState<PartyFields>(() =>
     partyFromInitial(initial?.buyer),
@@ -130,9 +121,12 @@ export function InvoiceForm({
   const [taxRate, setTaxRate] = useState(() =>
     initial ? String(Number(initial.taxRate)) : '18',
   );
-  const [paymentTerms, setPaymentTerms] = useState(() => initial?.paymentTerms ?? '');
-  const [deliveryTerms, setDeliveryTerms] = useState(() => initial?.deliveryTerms ?? '');
-  const [notes, setNotes] = useState(() => initial?.notes ?? '');
+  const [paymentTerms, setPaymentTerms] = useState(
+    () => initial?.paymentTerms ?? defaultPaymentTerms ?? '',
+  );
+  const [deliveryTerms, setDeliveryTerms] = useState(
+    () => initial?.deliveryTerms ?? defaultDeliveryTerms ?? '',
+  );
   const [items, setItems] = useState<ItemRow[]>(() => itemsFromInitial(initial));
 
   const totals = useMemo(
@@ -143,6 +137,15 @@ export function InvoiceForm({
       ),
     [items, taxRate],
   );
+
+  // Seller details are owner-managed via Invoice settings. Lock them here when
+  // auto-filled (create with settings configured) or when editing an existing
+  // invoice. If settings aren't configured yet, leave editable so the first
+  // invoice can still be created.
+  const sellerLocked = mode === 'edit' || Boolean(defaultSeller?.name);
+  const sellerInputCls = sellerLocked
+    ? `${inputCls} cursor-not-allowed bg-slate-50 text-slate-500`
+    : inputCls;
 
   function patchItem(idx: number, patch: Partial<ItemRow>) {
     setItems((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -184,7 +187,6 @@ export function InvoiceForm({
       consignee: sameConsignee ? undefined : consignee,
       paymentTerms,
       deliveryTerms,
-      notes,
       items: items.map((it) => ({
         description: it.description,
         hsnSac: it.hsnSac,
@@ -254,14 +256,23 @@ export function InvoiceForm({
       </Section>
 
       <Section title="Seller (your company)">
-        <PartyInputs value={seller} onChange={(p) => setSeller({ ...seller, ...p })} errors={errors} prefix="seller" namePlaceholder="Your company name" />
+        {sellerLocked ? (
+          <p className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[12px] text-slate-500">
+            Managed by the owner in <span className="font-medium text-slate-700">Invoice settings</span> — not editable here.
+          </p>
+        ) : (
+          <p className="mb-3 text-[12px] text-slate-500">
+            Tip: an owner can set these once in <span className="font-medium text-slate-700">Invoice settings</span> to auto-fill every invoice.
+          </p>
+        )}
+        <PartyInputs value={seller} onChange={(p) => setSeller({ ...seller, ...p })} errors={errors} prefix="seller" namePlaceholder="Your company name" readOnly={sellerLocked} />
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <Field label="PAN"><input value={seller.pan} onChange={(e) => setSeller({ ...seller, pan: e.target.value })} placeholder="ABCDE1234F" className={inputCls} /></Field>
-          <Field label="CIN"><input value={seller.cin} onChange={(e) => setSeller({ ...seller, cin: e.target.value })} placeholder="U12345KA…" className={inputCls} /></Field>
-          <Field label="Bank name"><input value={seller.bankName} onChange={(e) => setSeller({ ...seller, bankName: e.target.value })} placeholder="Axis Bank" className={inputCls} /></Field>
-          <Field label="Bank A/c No."><input value={seller.bankAccount} onChange={(e) => setSeller({ ...seller, bankAccount: e.target.value })} placeholder="Account number" className={inputCls} /></Field>
-          <Field label="IFSC"><input value={seller.bankIfsc} onChange={(e) => setSeller({ ...seller, bankIfsc: e.target.value })} placeholder="UTIB0000009" className={inputCls} /></Field>
-          <Field label="Branch"><input value={seller.bankBranch} onChange={(e) => setSeller({ ...seller, bankBranch: e.target.value })} placeholder="Branch" className={inputCls} /></Field>
+          <Field label="PAN"><input value={seller.pan} onChange={(e) => setSeller({ ...seller, pan: e.target.value })} placeholder="ABCDE1234F" readOnly={sellerLocked} className={sellerInputCls} /></Field>
+          <Field label="CIN"><input value={seller.cin} onChange={(e) => setSeller({ ...seller, cin: e.target.value })} placeholder="U12345KA…" readOnly={sellerLocked} className={sellerInputCls} /></Field>
+          <Field label="Bank name"><input value={seller.bankName} onChange={(e) => setSeller({ ...seller, bankName: e.target.value })} placeholder="Axis Bank" readOnly={sellerLocked} className={sellerInputCls} /></Field>
+          <Field label="Bank A/c No."><input value={seller.bankAccount} onChange={(e) => setSeller({ ...seller, bankAccount: e.target.value })} placeholder="Account number" readOnly={sellerLocked} className={sellerInputCls} /></Field>
+          <Field label="IFSC"><input value={seller.bankIfsc} onChange={(e) => setSeller({ ...seller, bankIfsc: e.target.value })} placeholder="UTIB0000009" readOnly={sellerLocked} className={sellerInputCls} /></Field>
+          <Field label="Branch"><input value={seller.bankBranch} onChange={(e) => setSeller({ ...seller, bankBranch: e.target.value })} placeholder="Branch" readOnly={sellerLocked} className={sellerInputCls} /></Field>
         </div>
       </Section>
 
@@ -347,12 +358,11 @@ export function InvoiceForm({
         </div>
       </Section>
 
-      <Section title="Terms & notes">
+      <Section title="Terms">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Payment terms"><input value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} placeholder="50% advance…" className={inputCls} /></Field>
           <Field label="Delivery terms"><input value={deliveryTerms} onChange={(e) => setDeliveryTerms(e.target.value)} placeholder="7–10 working days" className={inputCls} /></Field>
         </div>
-        <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Any additional notes…" className={inputCls} /></Field>
       </Section>
 
       <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
@@ -459,101 +469,34 @@ function PartyInputs({
   errors,
   prefix,
   namePlaceholder,
+  readOnly = false,
 }: {
   value: PartyFields;
   onChange: (patch: Partial<PartyFields>) => void;
   errors: Record<string, string>;
   prefix: string;
   namePlaceholder: string;
+  readOnly?: boolean;
 }) {
-  const cityListId = `${prefix}-cities`;
-  const localityListId = `${prefix}-localities`;
-  const cities = value.state ? citiesFor(value.state) : ALL_CITIES;
-  const localities = localitiesFor(value.city);
-
-  function onStateChange(name: string) {
-    // GST state code is fixed per state — fill it automatically (kept for
-    // the PDF, just not shown as a field).
-    const patch: Partial<PartyFields> = {
-      state: name,
-      stateCode: stateCodeFor(name) ?? '',
-    };
-    // Drop a now-inconsistent city (and its locality/pin) when switching to
-    // a different non-empty state.
-    if (
-      value.city &&
-      name &&
-      !citiesFor(name).some((c) => c.toLowerCase() === value.city.toLowerCase())
-    ) {
-      patch.city = '';
-      patch.locality = '';
-      patch.pincode = '';
-    }
-    onChange(patch);
-  }
-  function onCityChange(city: string) {
-    const patch: Partial<PartyFields> = { city };
-    // Locality + pin are city-specific — reset them when the city changes.
-    if (city !== value.city) {
-      patch.locality = '';
-      patch.pincode = '';
-    }
-    // Keep state in sync with a known city.
-    const st = uniqueStateForCity(city);
-    if (st && st !== value.state) {
-      patch.state = st;
-      patch.stateCode = stateCodeFor(st) ?? '';
-    }
-    onChange(patch);
-  }
-  function onLocalityChange(locality: string) {
-    const patch: Partial<PartyFields> = { locality };
-    // Auto-fill the pin code for a known locality (still editable after).
-    const pin = pincodeForLocality(value.city, locality);
-    if (pin) patch.pincode = pin;
-    onChange(patch);
-  }
-
+  const cls = readOnly ? `${inputCls} cursor-not-allowed bg-slate-50 text-slate-500` : inputCls;
   return (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Name" error={errors[`${prefix}.name`]}>
-          <input value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={namePlaceholder} className={inputCls} />
+          <input value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={namePlaceholder} readOnly={readOnly} className={cls} />
         </Field>
-        <Field label="GSTIN/UIN"><input value={value.gstin} onChange={(e) => onChange({ gstin: e.target.value })} placeholder="29ABCDE1234F1Z5" className={inputCls} /></Field>
+        <Field label="GSTIN/UIN"><input value={value.gstin} onChange={(e) => onChange({ gstin: e.target.value })} placeholder="29ABCDE1234F1Z5" readOnly={readOnly} className={cls} /></Field>
       </div>
-      <Field label="Address"><textarea value={value.address} onChange={(e) => onChange({ address: e.target.value })} rows={2} placeholder="Building / street" className={inputCls} /></Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="State">
-          <select value={value.state} onChange={(e) => onStateChange(e.target.value)} className={inputCls}>
-            <option value="">Select state…</option>
-            {INDIAN_STATES.map((s) => (
-              <option key={s.code} value={s.name}>{s.name}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="City">
-          <>
-            <input list={cityListId} value={value.city} onChange={(e) => onCityChange(e.target.value)} placeholder="Start typing…" className={inputCls} />
-            <datalist id={cityListId}>
-              {cities.map((c) => <option key={c} value={c} />)}
-            </datalist>
-          </>
-        </Field>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Locality / Area">
-          <>
-            <input list={localityListId} value={value.locality} onChange={(e) => onLocalityChange(e.target.value)} placeholder="e.g. Dwarka" className={inputCls} />
-            <datalist id={localityListId}>
-              {localities.map((l) => <option key={l.name} value={l.name} />)}
-            </datalist>
-          </>
-        </Field>
-        <Field label="Pin Code">
-          <input value={value.pincode} onChange={(e) => onChange({ pincode: e.target.value })} maxLength={12} placeholder="110075" className={inputCls} />
-        </Field>
-      </div>
+      <Field label="Address">
+        <textarea
+          value={value.address}
+          onChange={(e) => onChange({ address: e.target.value })}
+          rows={3}
+          placeholder="Full address — street, area, city, state, pincode"
+          readOnly={readOnly}
+          className={cls}
+        />
+      </Field>
     </div>
   );
 }
