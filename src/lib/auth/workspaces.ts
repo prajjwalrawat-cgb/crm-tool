@@ -54,6 +54,25 @@ export async function canCreateWorkspace(userId: string): Promise<boolean> {
   return membership?.role === 'owner';
 }
 
+/** True if the user is an OWNER of the given workspace. */
+export async function isOwnerOf(
+  userId: string,
+  tenantId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: memberships.id })
+    .from(memberships)
+    .where(
+      and(
+        eq(memberships.userId, userId),
+        eq(memberships.tenantId, tenantId),
+        eq(memberships.role, 'owner'),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
 export async function userHasMembership(
   userId: string,
   tenantId: string,

@@ -16,6 +16,7 @@ type Props = {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   persona: Persona;
+  isOwner: boolean;
 };
 
 export function Sidebar({
@@ -24,6 +25,7 @@ export function Sidebar({
   collapsed,
   onToggleCollapsed,
   persona,
+  isOwner,
 }: Props) {
   return (
     <>
@@ -31,11 +33,13 @@ export function Sidebar({
         collapsed={collapsed}
         onToggle={onToggleCollapsed}
         persona={persona}
+        isOwner={isOwner}
       />
       <MobileSidebar
         open={mobileOpen}
         onClose={onMobileClose}
         persona={persona}
+        isOwner={isOwner}
       />
     </>
   );
@@ -45,10 +49,12 @@ function DesktopSidebar({
   collapsed,
   onToggle,
   persona,
+  isOwner,
 }: {
   collapsed: boolean;
   onToggle: () => void;
   persona: Persona;
+  isOwner: boolean;
 }) {
   const pathname = usePathname();
   return (
@@ -59,7 +65,7 @@ function DesktopSidebar({
       )}
     >
       <Brand collapsed={collapsed} />
-      <NavList pathname={pathname} collapsed={collapsed} persona={persona} />
+      <NavList pathname={pathname} collapsed={collapsed} persona={persona} isOwner={isOwner} />
       <CollapseToggle collapsed={collapsed} onToggle={onToggle} />
     </aside>
   );
@@ -101,10 +107,12 @@ function MobileSidebar({
   open,
   onClose,
   persona,
+  isOwner,
 }: {
   open: boolean;
   onClose: () => void;
   persona: Persona;
+  isOwner: boolean;
 }) {
   const pathname = usePathname();
 
@@ -143,7 +151,7 @@ function MobileSidebar({
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <NavList pathname={pathname} onLinkClick={onClose} persona={persona} />
+        <NavList pathname={pathname} onLinkClick={onClose} persona={persona} isOwner={isOwner} />
       </aside>
     </div>
   );
@@ -179,13 +187,15 @@ function NavList({
   collapsed = false,
   onLinkClick,
   persona,
+  isOwner,
 }: {
   pathname: string;
   collapsed?: boolean;
   onLinkClick?: () => void;
   persona: Persona;
+  isOwner: boolean;
 }) {
-  const groups = navGroupsForPersona(persona);
+  const groups = navGroupsForPersona(persona, isOwner);
   return (
     <nav
       // `min-h-0` is what makes `overflow-y-auto` actually scroll inside

@@ -55,10 +55,10 @@ export default async function DashboardLayout({
     tenantId: w.tenantId,
     name: w.name,
   }));
-  // Only the OWNER of the *active* workspace may create new workspaces.
-  // (Same rule as canCreateWorkspace(), but we already have the active
-  // membership here so no extra query is needed.)
-  const canCreate = membership?.role === 'owner';
+  // Only the OWNER of the *active* workspace may create new workspaces and
+  // see the owner-only Organizations tab.
+  const isOwner = membership?.role === 'owner';
+  const canCreate = isOwner;
 
   return (
     <DashboardShell
@@ -71,6 +71,7 @@ export default async function DashboardLayout({
       currentTenantName={tenant.name}
       workspaces={workspaces}
       canCreateWorkspace={canCreate}
+      isOwner={isOwner}
     >
       {children}
     </DashboardShell>

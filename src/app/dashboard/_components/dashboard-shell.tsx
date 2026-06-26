@@ -27,6 +27,7 @@ export function DashboardShell({
   currentTenantName,
   workspaces,
   canCreateWorkspace,
+  isOwner,
 }: {
   children: ReactNode;
   tenantId: string;
@@ -38,6 +39,7 @@ export function DashboardShell({
   currentTenantName: string;
   workspaces: WorkspaceLite[];
   canCreateWorkspace: boolean;
+  isOwner: boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -125,6 +127,7 @@ export function DashboardShell({
           collapsed={sidebarCollapsed}
           onToggleCollapsed={toggleSidebarCollapsed}
           persona={persona}
+          isOwner={isOwner}
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Header

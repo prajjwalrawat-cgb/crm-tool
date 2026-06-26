@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Boxes,
   Brain,
   Briefcase,
   Building2,
@@ -202,16 +203,26 @@ const MEMBER_NAV: readonly NavGroup[] = [
 /* Public surface                                                */
 /* ============================================================ */
 
-export function navGroupsForPersona(persona: Persona): readonly NavGroup[] {
-  switch (persona) {
-    case 'admin':
-      return ADMIN_NAV;
-    case 'manager':
-      return MANAGER_NAV;
-    case 'sales':
-    default:
-      return MEMBER_NAV;
-  }
+// Owner-only group, appended to whatever persona tree the user has.
+const OWNER_GROUP: NavGroup = {
+  id: 'owner',
+  label: 'Owner',
+  items: [
+    { href: '/dashboard/organizations', label: 'Organizations', icon: Boxes },
+  ],
+};
+
+export function navGroupsForPersona(
+  persona: Persona,
+  isOwner = false,
+): readonly NavGroup[] {
+  const base =
+    persona === 'admin'
+      ? ADMIN_NAV
+      : persona === 'manager'
+        ? MANAGER_NAV
+        : MEMBER_NAV;
+  return isOwner ? [...base, OWNER_GROUP] : base;
 }
 
 /**
