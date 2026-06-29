@@ -65,6 +65,12 @@ export const proformaInvoices = pgTable(
     taxMinor: bigint('tax_minor', { mode: 'number' }).notNull().default(0),
     totalMinor: bigint('total_minor', { mode: 'number' }).notNull().default(0),
 
+    /** Shipping / freight charge + its own GST rate (taxed separately). */
+    shippingMinor: bigint('shipping_minor', { mode: 'number' }).notNull().default(0),
+    shippingTaxRate: numeric('shipping_tax_rate', { precision: 5, scale: 2 })
+      .notNull()
+      .default('0'),
+
     createdBy: text('created_by'),
     /** Last user to edit this PI (audit). Null until first edit. */
     editedBy: text('edited_by'),

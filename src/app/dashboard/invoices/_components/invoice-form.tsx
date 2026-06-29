@@ -13,7 +13,7 @@ import { compressImage } from '@/lib/invoices/compress';
 import { gstStateCode } from '@/lib/invoices/gst';
 import { INDIAN_STATES } from '@/lib/invoices/india-geo';
 import type { InvoicePdfData, PdfParty, PdfSeller } from '@/lib/invoices/types';
-import { computeTotals, formatMoneyMinor } from '@/lib/invoices/money';
+import { computeTotals, formatMoneyMinor, minorToRupees } from '@/lib/invoices/money';
 import { createInvoiceSchema } from '@/lib/invoices/schema';
 
 type PartyFields = {
@@ -169,14 +169,24 @@ export function InvoiceForm({
     () => initial?.deliveryTerms ?? defaultDeliveryTerms ?? '',
   );
   const [items, setItems] = useState<ItemRow[]>(() => itemsFromInitial(initial));
+  const [shippingAmount, setShippingAmount] = useState(() =>
+    initial && initial.shippingMinor ? String(minorToRupees(initial.shippingMinor)) : '',
+  );
+  const [shippingTaxRate, setShippingTaxRate] = useState(() =>
+    initial ? String(Number(initial.shippingTaxRate ?? 0)) : '0',
+  );
 
   const totals = useMemo(
     () =>
       computeTotals(
         items.map((it) => ({ quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0 })),
         Number(taxRate) || 0,
+        {
+          amount: Number(shippingAmount) || 0,
+          taxRatePercent: Number(shippingTaxRate) || 0,
+        },
       ),
-    [items, taxRate],
+    [items, taxRate, shippingAmount, shippingTaxRate],
   );
 
   // Seller is always owner-managed (read-only here), driven by the selected
@@ -219,6 +229,8 @@ export function InvoiceForm({
       piDate,
       currency,
       taxRate,
+      shippingAmount: shippingAmount || '0',
+      shippingTaxRate: shippingTaxRate || '0',
       seller,
       buyer,
       consigneeSameAsBuyer: sameConsignee,
@@ -412,10 +424,30 @@ export function InvoiceForm({
           <Plus className="h-3.5 w-3.5" aria-hidden /> Add line
         </button>
 
-        <div className="mt-4 ml-auto w-full max-w-xs space-y-1 text-[13px]">
-          <Row label="Subtotal" value={formatMoneyMinor(totals.subtotalMinor, currency)} />
-          <Row label={`GST @ ${Number(taxRate) || 0}%`} value={formatMoneyMinor(totals.taxMinor, currency)} />
-          <Row label="Total" value={formatMoneyMinor(totals.totalMinor, currency)} bold />
+        <div className="mt-4 ml-auto w-full max-w-xs space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Shipping (₹)">
+              <input type="number" min={0} step="0.01" value={shippingAmount} onChange={(e) => setShippingAmount(e.target.value)} placeholder="0" className={inputCls} />
+            </Field>
+            <Field label="Shipping GST %">
+              <input type="number" min={0} max={100} step="0.01" value={shippingTaxRate} onChange={(e) => setShippingTaxRate(e.target.value)} placeholder="0" className={inputCls} />
+            </Field>
+          </div>
+          <div className="space-y-1 text-[13px]">
+            <Row label="Subtotal" value={formatMoneyMinor(totals.subtotalMinor, currency)} />
+            {totals.shippingMinor > 0 ? (
+              <Row label="Shipping" value={formatMoneyMinor(totals.shippingMinor, currency)} />
+            ) : null}
+            <Row
+              label={
+                totals.shippingMinor > 0 && Number(shippingTaxRate) !== (Number(taxRate) || 0)
+                  ? 'GST'
+                  : `GST @ ${Number(taxRate) || 0}%`
+              }
+              value={formatMoneyMinor(totals.taxMinor, currency)}
+            />
+            <Row label="Total" value={formatMoneyMinor(totals.totalMinor, currency)} bold />
+          </div>
         </div>
       </Section>
 

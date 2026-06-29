@@ -24,13 +24,22 @@ export function formatMoneyMinor(minor: number, currency = 'INR'): string {
   }
 }
 
-/** Compute per-line amounts and the header totals, all in minor units. */
+/**
+ * Compute per-line amounts and the header totals, all in minor units.
+ * Shipping (freight) is an optional separately-taxed charge: `subtotalMinor`
+ * stays items-only, `taxMinor` is items-tax + shipping-tax, and `totalMinor`
+ * is items + shipping + total tax.
+ */
 export function computeTotals(
   items: { quantity: number; rate: number }[],
   taxRatePercent: number,
+  shipping?: { amount: number; taxRatePercent: number },
 ): {
   amountsMinor: number[];
   subtotalMinor: number;
+  itemsTaxMinor: number;
+  shippingMinor: number;
+  shippingTaxMinor: number;
   taxMinor: number;
   totalMinor: number;
 } {
@@ -38,11 +47,21 @@ export function computeTotals(
     Math.round(it.quantity * rupeesToMinor(it.rate)),
   );
   const subtotalMinor = amountsMinor.reduce((s, a) => s + a, 0);
-  const taxMinor = Math.round((subtotalMinor * taxRatePercent) / 100);
+  const itemsTaxMinor = Math.round((subtotalMinor * taxRatePercent) / 100);
+
+  const shippingMinor = shipping ? rupeesToMinor(shipping.amount) : 0;
+  const shippingTaxMinor = Math.round(
+    (shippingMinor * (shipping?.taxRatePercent ?? 0)) / 100,
+  );
+
+  const taxMinor = itemsTaxMinor + shippingTaxMinor;
   return {
     amountsMinor,
     subtotalMinor,
+    itemsTaxMinor,
+    shippingMinor,
+    shippingTaxMinor,
     taxMinor,
-    totalMinor: subtotalMinor + taxMinor,
+    totalMinor: subtotalMinor + shippingMinor + taxMinor,
   };
 }

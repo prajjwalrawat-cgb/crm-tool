@@ -79,6 +79,7 @@ export async function createInvoice(
   const totals = computeTotals(
     input.items.map((i) => ({ quantity: i.quantity, rate: i.rate })),
     input.taxRate,
+    { amount: input.shippingAmount, taxRatePercent: input.shippingTaxRate },
   );
 
   const seller: InvoiceSeller = input.seller;
@@ -108,6 +109,8 @@ export async function createInvoice(
           subtotalMinor: totals.subtotalMinor,
           taxMinor: totals.taxMinor,
           totalMinor: totals.totalMinor,
+          shippingMinor: totals.shippingMinor,
+          shippingTaxRate: String(input.shippingTaxRate),
           createdBy,
         })
         .returning({ id: proformaInvoices.id, piNumber: proformaInvoices.piNumber });
@@ -164,6 +167,7 @@ export async function updateInvoice(
   const totals = computeTotals(
     input.items.map((i) => ({ quantity: i.quantity, rate: i.rate })),
     input.taxRate,
+    { amount: input.shippingAmount, taxRatePercent: input.shippingTaxRate },
   );
   const consignee: InvoiceParty | null =
     input.consigneeSameAsBuyer || !input.consignee?.name ? null : input.consignee;
@@ -184,6 +188,8 @@ export async function updateInvoice(
         subtotalMinor: totals.subtotalMinor,
         taxMinor: totals.taxMinor,
         totalMinor: totals.totalMinor,
+        shippingMinor: totals.shippingMinor,
+        shippingTaxRate: String(input.shippingTaxRate),
         editedBy,
       })
       .where(

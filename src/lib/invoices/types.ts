@@ -57,5 +57,8 @@ export type InvoicePdfData = {
   subtotalMinor: number;
   taxMinor: number;
   totalMinor: number;
+  /** Shipping / freight charge (minor units) + its own GST rate. */
+  shippingMinor: number;
+  shippingTaxRate: string;
   items: PdfItem[];
 };

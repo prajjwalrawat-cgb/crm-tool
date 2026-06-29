@@ -231,6 +231,8 @@ export async function getInvoiceForPdfAction(
       subtotalMinor: data.invoice.subtotalMinor,
       taxMinor: data.invoice.taxMinor,
       totalMinor: data.invoice.totalMinor,
+      shippingMinor: data.invoice.shippingMinor,
+      shippingTaxRate: data.invoice.shippingTaxRate,
       items: data.items.map((it) => ({
         description: it.description,
         hsnSac: it.hsnSac,

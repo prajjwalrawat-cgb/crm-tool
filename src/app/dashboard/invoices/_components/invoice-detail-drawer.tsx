@@ -191,7 +191,19 @@ function DetailBody({ data }: { data: InvoicePdfData }) {
 
       <div className="ml-auto w-full max-w-xs space-y-1 text-[13px]">
         <div className="flex justify-between text-slate-600"><span>Subtotal</span><span className="tabular-nums">{formatMoneyMinor(data.subtotalMinor, cur)}</span></div>
-        <div className="flex justify-between text-slate-600"><span>GST @ {Number(data.taxRate)}%</span><span className="tabular-nums">{formatMoneyMinor(data.taxMinor, cur)}</span></div>
+        {(() => {
+          const shipMinor = data.shippingMinor ?? 0;
+          const sameRate = Number(data.shippingTaxRate ?? 0) === Number(data.taxRate);
+          const gstLabel = shipMinor > 0 && !sameRate ? 'GST' : `GST @ ${Number(data.taxRate)}%`;
+          return (
+            <>
+              {shipMinor > 0 ? (
+                <div className="flex justify-between text-slate-600"><span>Shipping</span><span className="tabular-nums">{formatMoneyMinor(shipMinor, cur)}</span></div>
+              ) : null}
+              <div className="flex justify-between text-slate-600"><span>{gstLabel}</span><span className="tabular-nums">{formatMoneyMinor(data.taxMinor, cur)}</span></div>
+            </>
+          );
+        })()}
         <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-slate-900"><span>Total</span><span className="tabular-nums">{formatMoneyMinor(data.totalMinor, cur)}</span></div>
       </div>
     </div>

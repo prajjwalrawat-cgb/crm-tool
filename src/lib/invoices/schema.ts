@@ -82,6 +82,17 @@ export const createInvoiceSchema = z.object({
     .number({ message: 'Tax % must be a number' })
     .min(0, 'Min 0')
     .max(100, 'Max 100'),
+  // Shipping / freight charge (rupees) + its own GST %. Default 0 (none).
+  shippingAmount: z.coerce
+    .number({ message: 'Shipping must be a number' })
+    .min(0, 'Cannot be negative')
+    .max(1_000_000_000)
+    .default(0),
+  shippingTaxRate: z.coerce
+    .number({ message: 'Shipping GST % must be a number' })
+    .min(0, 'Min 0')
+    .max(100, 'Max 100')
+    .default(0),
   items: z
     .array(invoiceItemSchema)
     .min(1, 'Add at least one line item')

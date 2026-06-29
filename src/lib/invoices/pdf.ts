@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-import { gstBreakdown, partyStateCode } from './gst';
+import { partyStateCode } from './gst';
 import { INDIAN_STATES } from './india-geo';
 import type { InvoicePdfData, PdfParty, PdfSeller } from './types';
 
@@ -247,6 +247,13 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
   const totalQty = data.items.reduce((s, it) => s + it.quantity, 0);
   const unit = data.items[0]?.unit || 'No';
 
+  // Shipping / freight: separately-taxed charge. itemsTax = total tax − shipping
+  // tax so the goods + shipping GST always sum back to the stored taxMinor.
+  const shippingMinor = data.shippingMinor ?? 0;
+  const shippingTaxRate = Number(data.shippingTaxRate ?? 0);
+  const shippingTaxMinor = Math.round((shippingMinor * shippingTaxRate) / 100);
+  const itemsTaxMinor = data.taxMinor - shippingTaxMinor;
+
   autoTable(doc, {
     startY: headerBottom,
     margin: { left: L, right: L },
@@ -265,9 +272,21 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
         { content: 'Total', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold' } },
         { content: money(data.subtotalMinor), styles: { halign: 'right' } },
       ],
+      ...(shippingMinor > 0
+        ? [
+            [
+              { content: 'Freight / Shipping', colSpan: 6, styles: { halign: 'right' as const } },
+              { content: money(shippingMinor), styles: { halign: 'right' as const } },
+            ],
+          ]
+        : []),
       [
-        { content: `Output GST @ ${Number(data.taxRate)}%`, colSpan: 6, styles: { halign: 'right' } },
-        { content: money(data.taxMinor), styles: { halign: 'right' } },
+        {
+          content: shippingMinor > 0 ? 'Output GST' : `Output GST @ ${Number(data.taxRate)}%`,
+          colSpan: 6,
+          styles: { halign: 'right' as const },
+        },
+        { content: money(data.taxMinor), styles: { halign: 'right' as const } },
       ],
       [
         { content: 'Total', colSpan: 3, styles: { fontStyle: 'bold' } },
@@ -302,17 +321,26 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
   doc.text(amountInWords(data.totalMinor, cur), L + 52, y + 4.3);
   y += 6.5;
 
-  /* ---------- Tax summary (IGST vs CGST + SGST) ---------- */
+  /* ---------- Tax summary (IGST vs CGST + SGST), one row per rate ---------- */
   const hsnLabel =
     data.items.map((i) => i.hsnSac).filter(Boolean).join(', ') || '';
   // Place of supply = ship-to (consignee) state, then bill-to (buyer).
-  const gst = gstBreakdown({
-    sellerStateCode: partyStateCode(data.seller),
-    placeStateCode:
-      partyStateCode(data.consignee) ?? partyStateCode(data.buyer),
-    taxRate: Number(data.taxRate),
-    taxMinor: data.taxMinor,
-  });
+  const sellerCode = partyStateCode(data.seller);
+  const placeCode =
+    partyStateCode(data.consignee) ?? partyStateCode(data.buyer);
+  const interState = Boolean(sellerCode && placeCode && sellerCode !== placeCode);
+
+  // One tax line for goods, plus one for shipping when charged (its own rate).
+  type TaxComp = { label: string; taxable: number; rate: number; tax: number };
+  const comps: TaxComp[] = [
+    { label: hsnLabel || 'Goods', taxable: data.subtotalMinor, rate: Number(data.taxRate), tax: itemsTaxMinor },
+  ];
+  if (shippingMinor > 0) {
+    comps.push({ label: 'Freight', taxable: shippingMinor, rate: shippingTaxRate, tax: shippingTaxMinor });
+  }
+  const totTaxable = comps.reduce((s, c) => s + c.taxable, 0);
+  const totTax = comps.reduce((s, c) => s + c.tax, 0);
+
   const taxStyles = {
     theme: 'grid' as const,
     styles: { fontSize: 7.5, textColor: 25, lineWidth: 0.2, lineColor: [60, 60, 60] as [number, number, number] },
@@ -320,7 +348,7 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
     footStyles: { fillColor: [255, 255, 255] as [number, number, number], textColor: 20, fontSize: 7.5 },
   };
 
-  if (gst.interState) {
+  if (interState) {
     autoTable(doc, {
       startY: y,
       margin: { left: L, right: L },
@@ -333,19 +361,15 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
         ],
         ['Rate', 'Amount'],
       ],
-      body: [[
-        hsnLabel,
-        money(data.subtotalMinor),
-        `${gst.igstRate}%`,
-        money(gst.igstMinor),
-        money(data.taxMinor),
-      ]],
+      body: comps.map((c) => [
+        c.label, money(c.taxable), `${c.rate}%`, money(c.tax), money(c.tax),
+      ]),
       foot: [[
         { content: 'Total', styles: { fontStyle: 'bold' } },
-        { content: money(data.subtotalMinor), styles: { halign: 'right' } },
+        { content: money(totTaxable), styles: { halign: 'right' } },
         { content: '' },
-        { content: money(gst.igstMinor), styles: { halign: 'right' } },
-        { content: money(data.taxMinor), styles: { halign: 'right', fontStyle: 'bold' } },
+        { content: money(totTax), styles: { halign: 'right' } },
+        { content: money(totTax), styles: { halign: 'right', fontStyle: 'bold' } },
       ]],
       ...taxStyles,
       columnStyles: {
@@ -353,6 +377,8 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
       },
     });
   } else {
+    const sumCgst = comps.reduce((s, c) => s + Math.round(c.tax / 2), 0);
+    const sumSgst = totTax - sumCgst;
     autoTable(doc, {
       startY: y,
       margin: { left: L, right: L },
@@ -366,23 +392,20 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
         ],
         ['Rate', 'Amount', 'Rate', 'Amount'],
       ],
-      body: [[
-        hsnLabel,
-        money(data.subtotalMinor),
-        `${gst.halfRate}%`,
-        money(gst.cgstMinor),
-        `${gst.halfRate}%`,
-        money(gst.sgstMinor),
-        money(data.taxMinor),
-      ]],
+      body: comps.map((c) => {
+        const cgst = Math.round(c.tax / 2);
+        const sgst = c.tax - cgst;
+        const half = c.rate / 2;
+        return [c.label, money(c.taxable), `${half}%`, money(cgst), `${half}%`, money(sgst), money(c.tax)];
+      }),
       foot: [[
         { content: 'Total', styles: { fontStyle: 'bold' } },
-        { content: money(data.subtotalMinor), styles: { halign: 'right' } },
+        { content: money(totTaxable), styles: { halign: 'right' } },
         { content: '' },
-        { content: money(gst.cgstMinor), styles: { halign: 'right' } },
+        { content: money(sumCgst), styles: { halign: 'right' } },
         { content: '' },
-        { content: money(gst.sgstMinor), styles: { halign: 'right' } },
-        { content: money(data.taxMinor), styles: { halign: 'right', fontStyle: 'bold' } },
+        { content: money(sumSgst), styles: { halign: 'right' } },
+        { content: money(totTax), styles: { halign: 'right', fontStyle: 'bold' } },
       ]],
       ...taxStyles,
       columnStyles: {
