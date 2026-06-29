@@ -9,7 +9,7 @@ import { CreateDrawer } from '../../_components/create-drawer';
 import { Drawer } from '../../_components/drawer';
 import { DownloadPdfButton } from './download-pdf-button';
 import { InvoiceDetailDrawer } from './invoice-detail-drawer';
-import { InvoiceForm, type SellerDefaults } from './invoice-form';
+import { InvoiceForm, type SellerProfileOption } from './invoice-form';
 import type { InvoiceListRow } from '@/lib/invoices/queries';
 import { formatMoneyMinor } from '@/lib/invoices/money';
 import type { InvoicePdfData } from '@/lib/invoices/types';
@@ -29,7 +29,7 @@ export function InvoicesView({
   initialSearch,
   currentUserId,
   canManageAll,
-  defaultSeller,
+  sellerProfiles,
   defaultPaymentTerms,
   defaultDeliveryTerms,
 }: {
@@ -41,7 +41,7 @@ export function InvoicesView({
   initialSearch: string;
   currentUserId: string;
   canManageAll: boolean;
-  defaultSeller: SellerDefaults | null;
+  sellerProfiles: SellerProfileOption[];
   defaultPaymentTerms: string;
   defaultDeliveryTerms: string;
 }) {
@@ -104,7 +104,7 @@ export function InvoicesView({
           {() => (
             <InvoiceForm
               key={createKey}
-              defaultSeller={defaultSeller}
+              sellerProfiles={sellerProfiles}
               defaultPaymentTerms={defaultPaymentTerms}
               defaultDeliveryTerms={defaultDeliveryTerms}
               onSuccess={() => {
@@ -209,6 +209,7 @@ export function InvoicesView({
             mode="edit"
             invoiceId={editing.id}
             initial={editing}
+            sellerProfiles={sellerProfiles}
             onSuccess={() => {
               setEditing(null);
               router.refresh();

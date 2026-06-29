@@ -7,6 +7,7 @@ export * from './password-reset-tokens';
 export * from './org-invitations';
 export * from './proforma-invoices';
 export * from './proforma-invoice-items';
+export * from './invoice-seller-profiles';
 export * from './chart-views';
 export * from './dashboard-widgets';
 export * from './companies';

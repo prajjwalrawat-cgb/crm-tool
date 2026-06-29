@@ -152,9 +152,10 @@ export function DealsView({
     const amountNum = Number(String(formData.get('amount') ?? '0'));
     const currency = String(formData.get('currency') ?? 'USD');
     const expectedCloseDate = String(formData.get('expectedCloseDate') ?? '').trim() || null;
-    // Company/Contact are free-text labels now (not linked records).
+    // Company/Contact/Email are free-text labels now (not linked records).
     const companyNameText = String(formData.get('companyName') ?? '').trim() || null;
     const contactNameText = String(formData.get('contactName') ?? '').trim() || null;
+    const contactEmailText = String(formData.get('contactEmail') ?? '').trim() || null;
     const companyId = base?.companyId ?? null;
     const contactId = base?.contactId ?? null;
     // ownerId is posted only when the user can reassign (owner/manager); when
@@ -196,9 +197,10 @@ export function DealsView({
       deletedBy: null,
       companyNameText,
       contactNameText,
+      contactEmailText,
       companyName: companyNameText ?? base?.companyName ?? null,
       contactName: contactNameText ?? base?.contactName ?? null,
-      contactEmail: base?.contactEmail ?? null,
+      contactEmail: contactEmailText ?? base?.contactEmail ?? null,
       __pending: true,
     };
   }
@@ -466,6 +468,9 @@ function DealsTable({
                       ? ` · ${d.contactName ?? d.contactEmail}`
                       : ''}
                   </p>
+                  {d.contactName && d.contactEmail ? (
+                    <p className="truncate text-[11px] text-slate-400">{d.contactEmail}</p>
+                  ) : null}
                 </div>
                 <span className="shrink-0 font-mono text-[12px] tabular-nums text-slate-700">
                   {formatCurrency(d.amountMinor, d.currency)}
@@ -595,7 +600,16 @@ function DealsTable({
                     {d.companyName ?? '—'}
                   </td>
                   <td className="hidden px-3 py-2 text-slate-600 lg:table-cell">
-                    {d.contactName ?? d.contactEmail ?? '—'}
+                    {d.contactName || d.contactEmail ? (
+                      <div className="flex flex-col leading-tight">
+                        <span className="truncate">{d.contactName ?? d.contactEmail}</span>
+                        {d.contactName && d.contactEmail ? (
+                          <span className="truncate text-[11px] text-slate-400">{d.contactEmail}</span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                   <td className="hidden px-3 py-2 md:table-cell">
                     <OwnerCell

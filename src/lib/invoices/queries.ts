@@ -35,9 +35,11 @@ function financialYear(isoDate: string): {
 
 /**
  * Next PI number for a tenant within the invoice's financial year, e.g.
- * `PI/25-26/001`. Counts existing invoices in that FY window. A unique
- * index on (tenant_id, pi_number) guards against a concurrent collision —
- * the caller retries on violation.
+ * `PI/25-26/001`. Derived from the HIGHEST existing sequence in that FY (the
+ * numeric suffix), not the row count — so deleting a middle invoice can't make
+ * the next number collide with an existing one. A unique index on
+ * (tenant_id, pi_number) guards against a concurrent collision; the caller
+ * retries on violation.
  */
 async function nextPiNumber(
   tx: Parameters<Parameters<typeof tenantTransaction>[0]>[0],
@@ -45,8 +47,11 @@ async function nextPiNumber(
   piDate: string,
 ): Promise<string> {
   const fy = financialYear(piDate);
-  const [{ count }] = await tx
-    .select({ count: sql<number>`count(*)::int` })
+  // Parse the trailing `/<NNN>` segment as an int; ignore any odd legacy values.
+  const [{ maxSeq }] = await tx
+    .select({
+      maxSeq: sql<number>`coalesce(max(case when split_part(${proformaInvoices.piNumber}, '/', 3) ~ '^[0-9]+$' then split_part(${proformaInvoices.piNumber}, '/', 3)::int else 0 end), 0)`,
+    })
     .from(proformaInvoices)
     .where(
       and(
@@ -55,7 +60,7 @@ async function nextPiNumber(
         lte(proformaInvoices.piDate, fy.end),
       ),
     );
-  const seq = (count ?? 0) + 1;
+  const seq = (maxSeq ?? 0) + 1;
   return `PI/${fy.label}/${String(seq).padStart(3, '0')}`;
 }
 
@@ -125,15 +130,24 @@ export async function createInvoice(
       return { id: row.id, piNumber: row.piNumber };
     });
 
-  try {
-    return await attempt();
-  } catch (err) {
-    const msg = String((err as { cause?: { message?: string } })?.cause?.message ?? err);
-    if (msg.includes('proforma_invoices_tenant_number_unique')) {
+  // Retry on the PI-number race: each attempt recomputes the next sequence, so
+  // concurrent creates resolve to distinct sequential numbers instead of one
+  // user hitting a duplicate-key error.
+  const MAX_ATTEMPTS = 6;
+  let lastErr: unknown;
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    try {
       return await attempt();
+    } catch (err) {
+      const msg = String((err as { cause?: { message?: string } })?.cause?.message ?? err);
+      if (msg.includes('proforma_invoices_tenant_number_unique')) {
+        lastErr = err;
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
+  throw lastErr;
 }
 
 /**
@@ -230,13 +244,22 @@ export type InvoiceListRow = {
 /** Offset-paginated, newest first, with optional search. */
 export async function listInvoices(
   tenantId: string,
-  opts: { page: number; size: number; search?: string },
+  opts: {
+    page: number;
+    size: number;
+    search?: string;
+    /** When set, only return PIs created by this user (member scoping). */
+    restrictToCreatedBy?: string;
+  },
 ): Promise<{ rows: InvoiceListRow[]; total: number }> {
   const page = Math.max(1, opts.page);
   const offset = (page - 1) * opts.size;
 
   // Match on PI number or buyer name (case-insensitive).
   const filters = [eq(proformaInvoices.tenantId, tenantId)];
+  if (opts.restrictToCreatedBy) {
+    filters.push(eq(proformaInvoices.createdBy, opts.restrictToCreatedBy));
+  }
   if (opts.search) {
     const like = `%${opts.search}%`;
     filters.push(

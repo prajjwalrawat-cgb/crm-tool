@@ -10,6 +10,8 @@ import {
   uploadInvoiceItemImageAction,
 } from '@/lib/invoices/actions';
 import { compressImage } from '@/lib/invoices/compress';
+import { gstStateCode } from '@/lib/invoices/gst';
+import { INDIAN_STATES } from '@/lib/invoices/india-geo';
 import type { InvoicePdfData, PdfParty, PdfSeller } from '@/lib/invoices/types';
 import { computeTotals, formatMoneyMinor } from '@/lib/invoices/money';
 import { createInvoiceSchema } from '@/lib/invoices/schema';
@@ -18,6 +20,8 @@ type PartyFields = {
   name: string;
   address: string;
   gstin: string;
+  /** GST state code (place of supply). '' = not set. */
+  stateCode: string;
 };
 type SellerFields = PartyFields & {
   pan: string;
@@ -27,7 +31,26 @@ type SellerFields = PartyFields & {
   bankIfsc: string;
   bankBranch: string;
 };
-export type SellerDefaults = Partial<SellerFields>;
+/** A configured per-state seller profile (from Invoice settings). */
+export type SellerProfileOption = {
+  stateCode: string;
+  stateName: string;
+} & SellerFields;
+
+function profileToSeller(p: SellerProfileOption): SellerFields {
+  return {
+    name: p.name,
+    address: p.address,
+    gstin: p.gstin,
+    stateCode: p.stateCode,
+    pan: p.pan,
+    cin: p.cin,
+    bankName: p.bankName,
+    bankAccount: p.bankAccount,
+    bankIfsc: p.bankIfsc,
+    bankBranch: p.bankBranch,
+  };
+}
 type ItemRow = {
   description: string;
   hsnSac: string;
@@ -38,7 +61,7 @@ type ItemRow = {
   __uploading?: boolean;
 };
 
-const emptyParty: PartyFields = { name: '', address: '', gstin: '' };
+const emptyParty: PartyFields = { name: '', address: '', gstin: '', stateCode: '' };
 // Empty unit/qty/rate so placeholders stay visible; defaults are applied on submit.
 const emptyItem: ItemRow = { description: '', hsnSac: '', unit: '', quantity: '', rate: '' };
 
@@ -47,6 +70,7 @@ function partyFromInitial(p?: PdfParty | null): PartyFields {
     name: p?.name ?? '',
     address: p?.address ?? '',
     gstin: p?.gstin ?? '',
+    stateCode: p?.stateCode ?? '',
   };
 }
 function sellerFromInitial(s?: PdfSeller | null): SellerFields {
@@ -83,7 +107,7 @@ export function InvoiceForm({
   mode = 'create',
   invoiceId,
   initial = null,
-  defaultSeller = null,
+  sellerProfiles = [],
   defaultPaymentTerms = '',
   defaultDeliveryTerms = '',
 }: {
@@ -94,8 +118,8 @@ export function InvoiceForm({
   invoiceId?: string;
   /** Existing invoice to prefill in edit mode. */
   initial?: InvoicePdfData | null;
-  /** Workspace invoice settings — auto-fill the seller block on create. */
-  defaultSeller?: SellerDefaults | null;
+  /** Owner-configured per-state seller profiles. The seller block is driven by these. */
+  sellerProfiles?: SellerProfileOption[];
   defaultPaymentTerms?: string;
   defaultDeliveryTerms?: string;
 }) {
@@ -103,11 +127,28 @@ export function InvoiceForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
-  const [seller, setSeller] = useState<SellerFields>(() =>
-    initial
-      ? sellerFromInitial(initial.seller)
-      : { ...sellerFromInitial(null), ...defaultSeller },
-  );
+  // Pick the initial seller state: in edit mode, match the snapshot's GSTIN
+  // state to a profile (else "as saved"); in create mode, the first profile.
+  const initialStateCode = (() => {
+    if (initial) {
+      const code = gstStateCode(initial.seller.gstin);
+      return code && sellerProfiles.some((p) => p.stateCode === code) ? code : '';
+    }
+    return sellerProfiles[0]?.stateCode ?? '';
+  })();
+
+  const [stateCode, setStateCode] = useState(initialStateCode);
+  const [seller, setSeller] = useState<SellerFields>(() => {
+    if (initial) return sellerFromInitial(initial.seller);
+    const p = sellerProfiles.find((x) => x.stateCode === initialStateCode);
+    return p ? profileToSeller(p) : sellerFromInitial(null);
+  });
+
+  function selectState(code: string) {
+    setStateCode(code);
+    const p = sellerProfiles.find((x) => x.stateCode === code);
+    if (p) setSeller(profileToSeller(p));
+  }
   const [buyer, setBuyer] = useState<PartyFields>(() =>
     partyFromInitial(initial?.buyer),
   );
@@ -138,14 +179,11 @@ export function InvoiceForm({
     [items, taxRate],
   );
 
-  // Seller details are owner-managed via Invoice settings. Lock them here when
-  // auto-filled (create with settings configured) or when editing an existing
-  // invoice. If settings aren't configured yet, leave editable so the first
-  // invoice can still be created.
-  const sellerLocked = mode === 'edit' || Boolean(defaultSeller?.name);
-  const sellerInputCls = sellerLocked
-    ? `${inputCls} cursor-not-allowed bg-slate-50 text-slate-500`
-    : inputCls;
+  // Seller is always owner-managed (read-only here), driven by the selected
+  // state profile (create) or the invoice snapshot (edit).
+  const sellerInputCls = `${inputCls} cursor-not-allowed bg-slate-50 text-slate-500`;
+  // Block creation until the owner has configured at least one state.
+  const blocked = mode === 'create' && sellerProfiles.length === 0;
 
   function patchItem(idx: number, patch: Partial<ItemRow>) {
     setItems((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -233,6 +271,19 @@ export function InvoiceForm({
     });
   }
 
+  if (blocked) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-6 text-[13px] text-amber-800">
+        <p className="font-medium">Invoice settings aren&apos;t ready yet</p>
+        <p className="mt-1">
+          An owner needs to add seller &amp; bank details (per state) in{' '}
+          <span className="font-semibold">Invoice settings</span> before invoices
+          can be created.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {formError ? (
@@ -256,28 +307,38 @@ export function InvoiceForm({
       </Section>
 
       <Section title="Seller (your company)">
-        {sellerLocked ? (
-          <p className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[12px] text-slate-500">
-            Managed by the owner in <span className="font-medium text-slate-700">Invoice settings</span> — not editable here.
-          </p>
+        {sellerProfiles.length > 0 ? (
+          <Field label="Seller state">
+            <select value={stateCode} onChange={(e) => selectState(e.target.value)} className={inputCls}>
+              {mode === 'edit' && !sellerProfiles.some((p) => p.stateCode === stateCode) ? (
+                <option value="">As saved on this invoice</option>
+              ) : null}
+              {sellerProfiles.map((p) => (
+                <option key={p.stateCode} value={p.stateCode}>{p.stateName}</option>
+              ))}
+            </select>
+          </Field>
         ) : (
-          <p className="mb-3 text-[12px] text-slate-500">
-            Tip: an owner can set these once in <span className="font-medium text-slate-700">Invoice settings</span> to auto-fill every invoice.
+          <p className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[12px] text-slate-500">
+            Seller details are taken from this invoice (no states configured in Invoice settings).
           </p>
         )}
-        <PartyInputs value={seller} onChange={(p) => setSeller({ ...seller, ...p })} errors={errors} prefix="seller" namePlaceholder="Your company name" readOnly={sellerLocked} />
+        <p className="mb-1 mt-3 text-[12px] text-slate-500">
+          Managed by the owner in <span className="font-medium text-slate-700">Invoice settings</span> — not editable here.
+        </p>
+        <PartyInputs value={seller} onChange={() => {}} errors={errors} prefix="seller" namePlaceholder="" readOnly />
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <Field label="PAN"><input value={seller.pan} onChange={(e) => setSeller({ ...seller, pan: e.target.value })} placeholder="ABCDE1234F" readOnly={sellerLocked} className={sellerInputCls} /></Field>
-          <Field label="CIN"><input value={seller.cin} onChange={(e) => setSeller({ ...seller, cin: e.target.value })} placeholder="U12345KA…" readOnly={sellerLocked} className={sellerInputCls} /></Field>
-          <Field label="Bank name"><input value={seller.bankName} onChange={(e) => setSeller({ ...seller, bankName: e.target.value })} placeholder="Axis Bank" readOnly={sellerLocked} className={sellerInputCls} /></Field>
-          <Field label="Bank A/c No."><input value={seller.bankAccount} onChange={(e) => setSeller({ ...seller, bankAccount: e.target.value })} placeholder="Account number" readOnly={sellerLocked} className={sellerInputCls} /></Field>
-          <Field label="IFSC"><input value={seller.bankIfsc} onChange={(e) => setSeller({ ...seller, bankIfsc: e.target.value })} placeholder="UTIB0000009" readOnly={sellerLocked} className={sellerInputCls} /></Field>
-          <Field label="Branch"><input value={seller.bankBranch} onChange={(e) => setSeller({ ...seller, bankBranch: e.target.value })} placeholder="Branch" readOnly={sellerLocked} className={sellerInputCls} /></Field>
+          <Field label="PAN"><input value={seller.pan} readOnly className={sellerInputCls} /></Field>
+          <Field label="CIN"><input value={seller.cin} readOnly className={sellerInputCls} /></Field>
+          <Field label="Bank name"><input value={seller.bankName} readOnly className={sellerInputCls} /></Field>
+          <Field label="Bank A/c No."><input value={seller.bankAccount} readOnly className={sellerInputCls} /></Field>
+          <Field label="IFSC"><input value={seller.bankIfsc} readOnly className={sellerInputCls} /></Field>
+          <Field label="Branch"><input value={seller.bankBranch} readOnly className={sellerInputCls} /></Field>
         </div>
       </Section>
 
       <Section title="Buyer (Bill to)">
-        <PartyInputs value={buyer} onChange={(p) => setBuyer({ ...buyer, ...p })} errors={errors} prefix="buyer" namePlaceholder="Buyer / company name" />
+        <PartyInputs value={buyer} onChange={(p) => setBuyer({ ...buyer, ...p })} errors={errors} prefix="buyer" namePlaceholder="Buyer / company name" showState />
       </Section>
 
       <Section title="Consignee (Ship to)">
@@ -286,7 +347,7 @@ export function InvoiceForm({
           Same as buyer
         </label>
         {!sameConsignee ? (
-          <PartyInputs value={consignee} onChange={(p) => setConsignee({ ...consignee, ...p })} errors={errors} prefix="consignee" namePlaceholder="Consignee name" />
+          <PartyInputs value={consignee} onChange={(p) => setConsignee({ ...consignee, ...p })} errors={errors} prefix="consignee" namePlaceholder="Consignee name" showState />
         ) : null}
       </Section>
 
@@ -470,6 +531,7 @@ function PartyInputs({
   prefix,
   namePlaceholder,
   readOnly = false,
+  showState = false,
 }: {
   value: PartyFields;
   onChange: (patch: Partial<PartyFields>) => void;
@@ -477,24 +539,50 @@ function PartyInputs({
   prefix: string;
   namePlaceholder: string;
   readOnly?: boolean;
+  /** Show an explicit State dropdown (used for buyer / consignee). */
+  showState?: boolean;
 }) {
   const cls = readOnly ? `${inputCls} cursor-not-allowed bg-slate-50 text-slate-500` : inputCls;
+  const errCls = (err?: string) =>
+    err && !readOnly ? `${cls} border-rose-300 focus:border-rose-500 focus:ring-rose-500/20` : cls;
   return (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Name" error={errors[`${prefix}.name`]}>
-          <input value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={namePlaceholder} readOnly={readOnly} className={cls} />
+          <input value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={namePlaceholder} readOnly={readOnly} className={errCls(errors[`${prefix}.name`])} />
         </Field>
-        <Field label="GSTIN/UIN"><input value={value.gstin} onChange={(e) => onChange({ gstin: e.target.value })} placeholder="29ABCDE1234F1Z5" readOnly={readOnly} className={cls} /></Field>
+        <Field label="GSTIN/UIN">
+          <input
+            value={value.gstin}
+            onChange={(e) => {
+              // Auto-fill the state from the GSTIN prefix when it's a valid code.
+              const code = gstStateCode(e.target.value);
+              onChange(code ? { gstin: e.target.value, stateCode: code } : { gstin: e.target.value });
+            }}
+            placeholder="29ABCDE1234F1Z5"
+            readOnly={readOnly}
+            className={cls}
+          />
+        </Field>
       </div>
-      <Field label="Address">
+      {showState ? (
+        <Field label="State (place of supply)" error={errors[`${prefix}.stateCode`]}>
+          <select value={value.stateCode} onChange={(e) => onChange({ stateCode: e.target.value })} className={errCls(errors[`${prefix}.stateCode`])}>
+            <option value="">Select state…</option>
+            {INDIAN_STATES.map((s) => (
+              <option key={s.code} value={s.code}>{s.name}</option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+      <Field label="Address" error={errors[`${prefix}.address`]}>
         <textarea
           value={value.address}
           onChange={(e) => onChange({ address: e.target.value })}
           rows={3}
           placeholder="Full address — street, area, city, state, pincode"
           readOnly={readOnly}
-          className={cls}
+          className={errCls(errors[`${prefix}.address`])}
         />
       </Field>
     </div>

@@ -98,6 +98,7 @@ type RawJoinedRow = {
   deletedBy: string | null;
   companyNameText: string | null;
   contactNameText: string | null;
+  contactEmailText: string | null;
   companyName: string | null;
   contactFirstName: string | null;
   contactLastName: string | null;
@@ -124,12 +125,14 @@ const DEALS_PROJECTION = {
   deletedBy: deals.deletedBy,
   companyNameText: deals.companyNameText,
   contactNameText: deals.contactNameText,
+  contactEmailText: deals.contactEmailText,
   // Display name: the typed free-text label takes precedence, falling back
   // to the linked company record's name (legacy/linked deals).
   companyName: sql<string | null>`coalesce(${deals.companyNameText}, ${companies.name})`,
   contactFirstName: contacts.firstName,
   contactLastName: contacts.lastName,
-  contactEmail: contacts.email,
+  // Free-text email wins, else the linked contact's email.
+  contactEmail: sql<string | null>`coalesce(${deals.contactEmailText}, ${contacts.email})`,
 };
 
 /**

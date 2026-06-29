@@ -68,9 +68,9 @@ export type InvoiceMutationResult =
   | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
 
 /**
- * Edit an existing PI. Any member of the workspace may edit; the editor is
- * recorded in `edited_by`. Re-validates with the same schema and recomputes
- * totals server-side.
+ * Edit an existing PI. Allowed for the member who created it, or any
+ * owner/admin. The editor is recorded in `edited_by`. Re-validates with the
+ * same schema and recomputes totals server-side.
  */
 export async function updateInvoiceAction(
   id: string,
@@ -99,10 +99,17 @@ export async function updateInvoiceAction(
   }
 
   return runWithTenantContext({ tenantId, userId }, async () => {
+    let role: string;
     try {
-      await requireMembership();
+      role = (await requireMembership()).role;
     } catch {
       return { ok: false, error: 'You are not a member of this workspace.' };
+    }
+    const existing = await getInvoiceWithItems(tenantId, id);
+    if (!existing) return { ok: false, error: 'Invoice not found.' };
+    const isManager = role === 'owner' || role === 'admin';
+    if (!isManager && existing.invoice.createdBy !== userId) {
+      return { ok: false, error: 'You can only edit invoices you created.' };
     }
     const ok = await updateInvoice(tenantId, userId, id, parsed.data);
     if (!ok) return { ok: false, error: 'Invoice not found.' };
@@ -187,8 +194,9 @@ export async function getInvoiceForPdfAction(
   }
 
   return runWithTenantContext({ tenantId, userId }, async () => {
+    let role: string;
     try {
-      await requireMembership();
+      role = (await requireMembership()).role;
     } catch {
       return null;
     }
@@ -197,6 +205,9 @@ export async function getInvoiceForPdfAction(
       getInvoiceSettings(tenantId),
     ]);
     if (!data) return null;
+    // Members can only view/download their own PIs; owner/admin see all.
+    const isManager = role === 'owner' || role === 'admin';
+    if (!isManager && data.invoice.createdBy !== userId) return null;
 
     const logoDataUrl = settings.logoUrl
       ? await fetchLogoDataUrl(settings.logoUrl)

@@ -49,6 +49,18 @@ export const createDealSchema = z.object({
     .nullable(),
   companyId: z.uuid({ message: 'Pick a valid company' }).nullable(),
   contactId: z.uuid({ message: 'Pick a valid contact' }).nullable(),
+  // Free-text contact email — optional, but validated when present.
+  contactEmail: z
+    .string()
+    .trim()
+    .max(200, 'Email must be 200 characters or fewer')
+    .refine(
+      (v) => v === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v),
+      'Enter a valid email',
+    )
+    .nullable()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
   ownerId: z
     .string()
     .min(1, 'Pick an owner')

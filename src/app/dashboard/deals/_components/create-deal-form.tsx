@@ -132,6 +132,14 @@ export function CreateDealForm({
         errors={fieldErrors.contactName}
       />
 
+      <Field
+        name="contactEmail"
+        label="Email"
+        type="email"
+        placeholder="contact@company.com"
+        errors={fieldErrors.contactEmail}
+      />
+
       {canAssign ? (
         <OwnerFormField
           teammates={assignable}
@@ -181,7 +189,7 @@ export function CreateDealForm({
 type FieldProps = {
   name: string;
   label: string;
-  type?: 'text' | 'number' | 'date';
+  type?: 'text' | 'number' | 'date' | 'email';
   placeholder?: string;
   required?: boolean;
   autoFocus?: boolean;

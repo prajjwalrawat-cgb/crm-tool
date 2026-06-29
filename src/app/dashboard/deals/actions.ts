@@ -92,6 +92,7 @@ export async function createDealAction(
         expectedCloseDate: formData.get('expectedCloseDate'),
         companyId: null,
         contactId: null,
+        contactEmail: formData.get('contactEmail'),
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -144,6 +145,7 @@ export async function createDealAction(
             contactId: parsed.data.contactId,
             companyNameText,
             contactNameText,
+            contactEmailText: parsed.data.contactEmail,
             name: parsed.data.name,
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,
@@ -234,6 +236,7 @@ export async function updateDealAction(
         expectedCloseDate: formData.get('expectedCloseDate'),
         companyId: null,
         contactId: null,
+        contactEmail: formData.get('contactEmail'),
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -305,6 +308,7 @@ export async function updateDealAction(
             contactId: parsed.data.contactId,
             companyNameText,
             contactNameText,
+            contactEmailText: parsed.data.contactEmail,
             name: parsed.data.name,
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,

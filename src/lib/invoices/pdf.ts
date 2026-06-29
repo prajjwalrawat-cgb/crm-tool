@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+import { gstBreakdown, partyStateCode } from './gst';
 import { INDIAN_STATES } from './india-geo';
 import type { InvoicePdfData, PdfParty, PdfSeller } from './types';
 
@@ -301,51 +302,95 @@ export async function buildInvoiceDoc(data: InvoicePdfData): Promise<jsPDF> {
   doc.text(amountInWords(data.totalMinor, cur), L + 52, y + 4.3);
   y += 6.5;
 
-  /* ---------- Tax summary (CGST + SGST split) ---------- */
-  const halfRate = Number(data.taxRate) / 2;
-  const halfTax = data.taxMinor / 2;
-  autoTable(doc, {
-    startY: y,
-    margin: { left: L, right: L },
-    head: [
-      [
-        { content: 'HSN/SAC', rowSpan: 2, styles: { valign: 'middle' } },
-        { content: 'Taxable Value', rowSpan: 2, styles: { valign: 'middle', halign: 'right' } },
-        { content: 'Central Tax', colSpan: 2, styles: { halign: 'center' } },
-        { content: 'State Tax', colSpan: 2, styles: { halign: 'center' } },
-        { content: 'Total Tax Amount', rowSpan: 2, styles: { valign: 'middle', halign: 'right' } },
-      ],
-      ['Rate', 'Amount', 'Rate', 'Amount'],
-    ],
-    body: [
-      [
-        data.items.map((i) => i.hsnSac).filter(Boolean).join(', ') || '',
-        money(data.subtotalMinor),
-        `${halfRate}%`,
-        money(halfTax),
-        `${halfRate}%`,
-        money(halfTax),
-        money(data.taxMinor),
-      ],
-    ],
-    foot: [[
-      { content: 'Total', styles: { fontStyle: 'bold' } },
-      { content: money(data.subtotalMinor), styles: { halign: 'right' } },
-      { content: '' },
-      { content: money(halfTax), styles: { halign: 'right' } },
-      { content: '' },
-      { content: money(halfTax), styles: { halign: 'right' } },
-      { content: money(data.taxMinor), styles: { halign: 'right', fontStyle: 'bold' } },
-    ]],
-    theme: 'grid',
-    styles: { fontSize: 7.5, textColor: 25, lineWidth: 0.2, lineColor: [60, 60, 60] },
-    headStyles: { fillColor: [240, 240, 240], textColor: 20, fontSize: 7, fontStyle: 'bold' },
-    footStyles: { fillColor: [255, 255, 255], textColor: 20, fontSize: 7.5 },
-    columnStyles: {
-      1: { halign: 'right' }, 2: { halign: 'center' }, 3: { halign: 'right' },
-      4: { halign: 'center' }, 5: { halign: 'right' }, 6: { halign: 'right' },
-    },
+  /* ---------- Tax summary (IGST vs CGST + SGST) ---------- */
+  const hsnLabel =
+    data.items.map((i) => i.hsnSac).filter(Boolean).join(', ') || '';
+  // Place of supply = ship-to (consignee) state, then bill-to (buyer).
+  const gst = gstBreakdown({
+    sellerStateCode: partyStateCode(data.seller),
+    placeStateCode:
+      partyStateCode(data.consignee) ?? partyStateCode(data.buyer),
+    taxRate: Number(data.taxRate),
+    taxMinor: data.taxMinor,
   });
+  const taxStyles = {
+    theme: 'grid' as const,
+    styles: { fontSize: 7.5, textColor: 25, lineWidth: 0.2, lineColor: [60, 60, 60] as [number, number, number] },
+    headStyles: { fillColor: [240, 240, 240] as [number, number, number], textColor: 20, fontSize: 7, fontStyle: 'bold' as const },
+    footStyles: { fillColor: [255, 255, 255] as [number, number, number], textColor: 20, fontSize: 7.5 },
+  };
+
+  if (gst.interState) {
+    autoTable(doc, {
+      startY: y,
+      margin: { left: L, right: L },
+      head: [
+        [
+          { content: 'HSN/SAC', rowSpan: 2, styles: { valign: 'middle' } },
+          { content: 'Taxable Value', rowSpan: 2, styles: { valign: 'middle', halign: 'right' } },
+          { content: 'Integrated Tax (IGST)', colSpan: 2, styles: { halign: 'center' } },
+          { content: 'Total Tax Amount', rowSpan: 2, styles: { valign: 'middle', halign: 'right' } },
+        ],
+        ['Rate', 'Amount'],
+      ],
+      body: [[
+        hsnLabel,
+        money(data.subtotalMinor),
+        `${gst.igstRate}%`,
+        money(gst.igstMinor),
+        money(data.taxMinor),
+      ]],
+      foot: [[
+        { content: 'Total', styles: { fontStyle: 'bold' } },
+        { content: money(data.subtotalMinor), styles: { halign: 'right' } },
+        { content: '' },
+        { content: money(gst.igstMinor), styles: { halign: 'right' } },
+        { content: money(data.taxMinor), styles: { halign: 'right', fontStyle: 'bold' } },
+      ]],
+      ...taxStyles,
+      columnStyles: {
+        1: { halign: 'right' }, 2: { halign: 'center' }, 3: { halign: 'right' }, 4: { halign: 'right' },
+      },
+    });
+  } else {
+    autoTable(doc, {
+      startY: y,
+      margin: { left: L, right: L },
+      head: [
+        [
+          { content: 'HSN/SAC', rowSpan: 2, styles: { valign: 'middle' } },
+          { content: 'Taxable Value', rowSpan: 2, styles: { valign: 'middle', halign: 'right' } },
+          { content: 'Central Tax', colSpan: 2, styles: { halign: 'center' } },
+          { content: 'State Tax', colSpan: 2, styles: { halign: 'center' } },
+          { content: 'Total Tax Amount', rowSpan: 2, styles: { valign: 'middle', halign: 'right' } },
+        ],
+        ['Rate', 'Amount', 'Rate', 'Amount'],
+      ],
+      body: [[
+        hsnLabel,
+        money(data.subtotalMinor),
+        `${gst.halfRate}%`,
+        money(gst.cgstMinor),
+        `${gst.halfRate}%`,
+        money(gst.sgstMinor),
+        money(data.taxMinor),
+      ]],
+      foot: [[
+        { content: 'Total', styles: { fontStyle: 'bold' } },
+        { content: money(data.subtotalMinor), styles: { halign: 'right' } },
+        { content: '' },
+        { content: money(gst.cgstMinor), styles: { halign: 'right' } },
+        { content: '' },
+        { content: money(gst.sgstMinor), styles: { halign: 'right' } },
+        { content: money(data.taxMinor), styles: { halign: 'right', fontStyle: 'bold' } },
+      ]],
+      ...taxStyles,
+      columnStyles: {
+        1: { halign: 'right' }, 2: { halign: 'center' }, 3: { halign: 'right' },
+        4: { halign: 'center' }, 5: { halign: 'right' }, 6: { halign: 'right' },
+      },
+    });
+  }
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
   /* ---------- Bottom box: [tax-in-words + PAN + declaration] | [bank details + signatory] ---------- */

@@ -86,6 +86,7 @@ export async function loadSerializedDeal(
       deletedBy: deals.deletedBy,
       companyNameText: deals.companyNameText,
       contactNameText: deals.contactNameText,
+      contactEmailText: deals.contactEmailText,
       companyName: companies.name,
       contactFirstName: contacts.firstName,
       contactLastName: contacts.lastName,
@@ -107,7 +108,7 @@ export async function loadSerializedDeal(
     companyName: rest.companyNameText ?? rest.companyName,
     contactName:
       rest.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
-    contactEmail,
+    contactEmail: rest.contactEmailText ?? contactEmail,
   };
   return serializeDates(reshaped);
 }

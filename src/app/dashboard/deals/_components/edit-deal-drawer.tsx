@@ -212,6 +212,14 @@ export function EditDealDrawer({
           errors={fieldErrors.contactName}
         />
 
+        <Field
+          name="contactEmail"
+          label="Email"
+          type="email"
+          defaultValue={deal?.contactEmail ?? ''}
+          errors={fieldErrors.contactEmail}
+        />
+
         {canAssign ? (
           <OwnerFormField
             teammates={assignable}
@@ -238,7 +246,7 @@ type FieldProps = {
   name: string;
   label: string;
   defaultValue: string;
-  type?: 'text' | 'number' | 'date';
+  type?: 'text' | 'number' | 'date' | 'email';
   required?: boolean;
   step?: string;
   min?: string;

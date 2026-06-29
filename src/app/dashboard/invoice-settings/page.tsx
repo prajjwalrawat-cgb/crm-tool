@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 
 import { withTenantSession } from '@/lib/auth-guard';
+import { listSellerProfiles } from '@/lib/invoices/seller-profiles';
 import { getInvoiceSettings } from '@/lib/invoices/settings';
 import { isOwner, requireMembership } from '@/lib/membership';
 
@@ -14,7 +15,10 @@ export default async function InvoiceSettingsPage() {
     const membership = await requireMembership();
     if (!isOwner(membership)) redirect('/dashboard');
 
-    const s = await getInvoiceSettings(tenant.id);
+    const [settings, profiles] = await Promise.all([
+      getInvoiceSettings(tenant.id),
+      listSellerProfiles(tenant.id),
+    ]);
 
     return (
       <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-5 lg:px-6">
@@ -23,26 +27,17 @@ export default async function InvoiceSettingsPage() {
             Invoice settings
           </h1>
           <p className="mt-0.5 text-[12px] text-slate-500 dark:text-[#A1A1AA]">
-            Seller &amp; bank details for {tenant.name}. These auto-fill on every
-            new proforma invoice in this workspace.
+            Seller &amp; bank details for {tenant.name}, per state. Add a profile
+            for each GST registration (e.g. Delhi, Karnataka). Members pick the
+            state when creating a PI and the seller block auto-fills.
           </p>
         </header>
 
         <InvoiceSettingsForm
-          initial={{
-            logoUrl: s.logoUrl ?? '',
-            sellerName: s.seller.name,
-            sellerAddress: s.seller.address ?? '',
-            gstin: s.seller.gstin ?? '',
-            pan: s.seller.pan ?? '',
-            cin: s.seller.cin ?? '',
-            bankName: s.seller.bankName ?? '',
-            bankAccount: s.seller.bankAccount ?? '',
-            bankIfsc: s.seller.bankIfsc ?? '',
-            bankBranch: s.seller.bankBranch ?? '',
-            paymentTerms: s.paymentTerms,
-            deliveryTerms: s.deliveryTerms,
-          }}
+          logoUrl={settings.logoUrl ?? ''}
+          paymentTerms={settings.paymentTerms}
+          deliveryTerms={settings.deliveryTerms}
+          profiles={profiles}
         />
       </main>
     );

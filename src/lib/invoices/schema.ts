@@ -19,6 +19,26 @@ export const partySchema = z.object({
   // Single free-text address block (street, area, city, state, pincode).
   address: optStr(600),
   gstin: optStr(20),
+  // GST state code (place of supply). Explicit so IGST vs CGST/SGST is correct
+  // even for unregistered buyers without a GSTIN.
+  stateCode: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z
+      .string()
+      .regex(/^\d{2}$/)
+      .optional(),
+  ),
+});
+
+/**
+ * Buyer / consignee require a real address and an explicit state (place of
+ * supply) — the latter keeps IGST vs CGST/SGST correct even for unregistered
+ * buyers with no GSTIN. The seller comes from a validated profile, so it keeps
+ * the looser `partySchema`.
+ */
+export const billPartySchema = partySchema.extend({
+  address: z.string().trim().min(1, 'Address is required').max(600),
+  stateCode: z.string().regex(/^\d{2}$/, 'Select a state'),
 });
 
 export const sellerSchema = partySchema.extend({
@@ -52,9 +72,9 @@ export const createInvoiceSchema = z.object({
   piDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick a valid date'),
   currency: z.string().trim().min(1).max(8).default('INR'),
   seller: sellerSchema,
-  buyer: partySchema,
+  buyer: billPartySchema,
   consigneeSameAsBuyer: z.boolean().default(true),
-  consignee: partySchema.optional(),
+  consignee: billPartySchema.optional(),
   paymentTerms: optStr(300),
   deliveryTerms: optStr(300),
   notes: optStr(1000),
