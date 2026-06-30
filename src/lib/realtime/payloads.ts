@@ -87,6 +87,7 @@ export async function loadSerializedDeal(
       companyNameText: deals.companyNameText,
       contactNameText: deals.contactNameText,
       contactEmailText: deals.contactEmailText,
+      customFields: deals.customFields,
       companyName: companies.name,
       contactFirstName: contacts.firstName,
       contactLastName: contacts.lastName,

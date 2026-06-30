@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { formatCurrency, fromMinorUnits, toMinorUnits } from '@/lib/deals/currency';
 import type { DealFilters } from '@/lib/deals/filters';
@@ -87,6 +88,7 @@ export function DealsView({
   currentRole,
   nextCursor,
   pageSize,
+  customFieldDefs,
 }: {
   initialItems: DealRow[];
   initialSearch: string;
@@ -98,6 +100,7 @@ export function DealsView({
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
+  customFieldDefs: CustomFieldDef[];
 }) {
   const router = useRouter();
   const canEdit = canManageDeals(currentRole);
@@ -301,6 +304,7 @@ export function DealsView({
       companyNameText,
       contactNameText,
       contactEmailText,
+      customFields: base?.customFields ?? {},
       companyName: companyNameText ?? base?.companyName ?? null,
       contactName: contactNameText ?? base?.contactName ?? null,
       contactEmail: contactEmailText ?? base?.contactEmail ?? null,
@@ -545,6 +549,7 @@ export function DealsView({
                     teammates={teammates}
                     currentUserId={currentUserId}
                     currentRole={currentRole}
+                    customFieldDefs={customFieldDefs}
                   />
                 )}
               </CreateDrawer>
@@ -635,6 +640,7 @@ export function DealsView({
         teammates={teammates}
         currentUserId={currentUserId}
         currentRole={currentRole}
+        customFieldDefs={customFieldDefs}
         onSubmit={handleEditSubmit}
         onDelete={handleDeleteFromDrawer}
         pending={editPending}

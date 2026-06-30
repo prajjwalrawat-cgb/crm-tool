@@ -3,6 +3,7 @@ import {
   bigint,
   date,
   index,
+  jsonb,
   pgTable,
   smallint,
   text,
@@ -38,6 +39,11 @@ export const deals = pgTable(
     companyNameText: text('company_name'),
     contactNameText: text('contact_name'),
     contactEmailText: text('contact_email'),
+    /** Admin-defined custom field values, keyed by definition `key`. */
+    customFields: jsonb('custom_fields')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
     stage: dealStage('stage').notNull().default('lead'),
     // Currency stored as integer minor units (e.g. cents) to avoid float
     // rounding. bigint covers values well past any realistic deal size.

@@ -5,14 +5,24 @@ import { Loader2, Save, Trash2 } from 'lucide-react';
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
 import { fromMinorUnits, KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
+import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { Drawer } from '../../_components/drawer';
 import { OwnerFormField } from '../../_components/owner-form-field';
+
+function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fieldErrors)
+      .filter(([k]) => k.startsWith('cf_'))
+      .map(([k, v]) => [k, v[0] ?? '']),
+  );
+}
 
 type Props = {
   open: boolean;
@@ -23,6 +33,7 @@ type Props = {
   teammates: Teammate[];
   currentUserId: string;
   currentRole: MembershipRole;
+  customFieldDefs: CustomFieldDef[];
   onSubmit: (formData: FormData) => void;
   onDelete: () => void;
   pending: boolean;
@@ -39,6 +50,7 @@ export function EditDealDrawer({
   teammates,
   currentUserId,
   currentRole,
+  customFieldDefs,
   onSubmit,
   onDelete,
   pending,
@@ -228,6 +240,12 @@ export function EditDealDrawer({
             errors={fieldErrors.ownerId}
           />
         ) : null}
+
+        <CustomFieldInputs
+          defs={customFieldDefs}
+          values={(deal?.customFields ?? {}) as CustomValues}
+          errors={customErrors(fieldErrors)}
+        />
 
         {error ? (
           <p

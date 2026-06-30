@@ -6,6 +6,7 @@ import {
   Brain,
   Building2,
   GitBranch,
+  ListPlus,
   Mail,
   Palette,
   User,
@@ -45,6 +46,7 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/organization', label: 'Organization', icon: Building2, group: 'Workspace', visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/pipeline', label: 'Pipeline', icon: GitBranch, visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/currency', label: 'Currency & Locale', icon: Banknote, visibility: 'managerOrAdmin' },
+  { href: '/dashboard/settings/custom-fields', label: 'Custom fields', icon: ListPlus, visibility: 'adminOnly' },
   { href: '/dashboard/settings/email', label: 'Email', icon: Mail, group: 'Infrastructure', visibility: 'adminOnly' },
   { href: '/dashboard/settings/ai', label: 'AI', icon: Brain, visibility: 'adminOnly' },
 ];

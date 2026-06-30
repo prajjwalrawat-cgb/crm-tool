@@ -1,5 +1,6 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { listContactOptions } from '@/lib/contacts/queries';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { parseDealFilters } from '@/lib/deals/filters';
 import { listDealCompanyOptions, listDeals } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
@@ -36,7 +37,7 @@ export default async function DealsPage({
     const restrictToOwnerOrUnassigned =
       persona === 'sales' ? userId : undefined;
 
-    const [page, companyOptions, contactOptions, teammates] =
+    const [page, companyOptions, contactOptions, teammates, customFieldDefs] =
       await Promise.all([
         listDeals(tenant.id, {
           search,
@@ -49,6 +50,7 @@ export default async function DealsPage({
         listDealCompanyOptions(tenant.id),
         listContactOptions(tenant.id),
         listTeammates(tenant.id, tenant.name),
+        listCustomFieldDefs(tenant.id, 'deal'),
       ]);
 
     return (
@@ -74,6 +76,7 @@ export default async function DealsPage({
           currentRole={membership.role}
           nextCursor={page.nextCursor}
           pageSize={page.size}
+          customFieldDefs={customFieldDefs}
         />
       </main>
     );

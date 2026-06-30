@@ -8,6 +8,11 @@ import { deals, memberships, type Deal } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { recordObservation } from '@/lib/agents/observations/record';
 import { checkPermission } from '@/lib/auth-guard';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
+import {
+  type CustomFieldDef,
+  validateCustomFields,
+} from '@/lib/custom-fields/types';
 import { sendAutomatedEmailSafe } from '@/lib/email/automation';
 import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
@@ -41,6 +46,31 @@ export type UpdateDealResult = CreateDealResult;
 export type SimpleResult =
   | { ok: true }
   | { ok: false; message: string };
+
+/**
+ * Read custom-field values out of FormData (inputs are named `cf_<key>`) and
+ * validate them against the active definitions. Returns normalized values or
+ * per-field errors (keyed by `cf_<key>` for the forms).
+ */
+function parseCustomFields(formData: FormData, defs: CustomFieldDef[]) {
+  const raw: Record<string, unknown> = {};
+  for (const def of defs) {
+    const name = `cf_${def.key}`;
+    if (def.fieldType === 'boolean') {
+      raw[def.key] = formData.get(name) != null;
+    } else {
+      const v = formData.get(name);
+      raw[def.key] = typeof v === 'string' ? v : '';
+    }
+  }
+  return validateCustomFields(defs, raw);
+}
+
+function customFieldErrors(errors: Record<string, string>): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(errors).map(([k, m]) => [`cf_${k}`, [m]]),
+  );
+}
 
 /** A member's role in the tenant (for assign-permission checks). */
 async function getMemberRole(
@@ -131,6 +161,16 @@ export async function createDealAction(
         }
       }
 
+      const customDefs = await listCustomFieldDefs(tenant.id, 'deal');
+      const customResult = parseCustomFields(formData, customDefs);
+      if (!customResult.ok) {
+        return {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: customFieldErrors(customResult.errors),
+        };
+      }
+
       const amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       const closedAt =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost'
@@ -155,6 +195,7 @@ export async function createDealAction(
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt,
             ownerId: finalOwnerId ?? null,
+            customFields: customResult.values,
           })
           .returning();
         if (!row) return null;
@@ -254,6 +295,16 @@ export async function updateDealAction(
         };
       }
 
+      const customDefs = await listCustomFieldDefs(tenant.id, 'deal');
+      const customResult = parseCustomFields(formData, customDefs);
+      if (!customResult.ok) {
+        return {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: customFieldErrors(customResult.errors),
+        };
+      }
+
       const amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       const isClosedStage =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
@@ -317,6 +368,7 @@ export async function updateDealAction(
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt: nextClosedAt,
+            customFields: customResult.values,
             ...ownerPatch,
           })
           .where(

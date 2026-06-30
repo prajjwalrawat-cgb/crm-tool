@@ -5,6 +5,8 @@ import { notFound } from 'next/navigation';
 import { getAIMode } from '@/lib/ai/config';
 import { getCachedSummary } from '@/lib/ai/summary-queries';
 import { withTenantSession } from '@/lib/auth-guard';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
+import type { CustomValues } from '@/lib/custom-fields/types';
 import { getDealSummaryInsight } from '@/lib/intelligence/runner';
 
 import { LiveDealSummaryCard } from '../../intelligence/_components/live-ai-card';
@@ -24,6 +26,7 @@ import { CommentsThread } from '../../_components/comments-thread';
 import { ComposeEmailLauncher } from '../../_components/compose-email-launcher';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
 import { EntityTimeline } from '../../_components/entity-timeline';
+import { CustomFieldsDisplay } from '../../_components/custom-fields-display';
 import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { RelationshipHealthCard } from '../../_components/relationship-health-card';
@@ -61,6 +64,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       teammates,
       timeline,
       dealInsight,
+      customFieldDefs,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -70,7 +74,14 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       listTeammates(tenant.id, tenant.name),
       getEntityTimeline(tenant.id, 'deal', deal.id, { limit: 150 }),
       getDealSummaryInsight(tenant.id, userId, deal.id),
+      listCustomFieldDefs(tenant.id, 'deal'),
     ]);
+
+    const customValues = (deal.customFields ?? {}) as CustomValues;
+    const hasCustom = customFieldDefs.some((d) => {
+      const v = customValues[d.key];
+      return v !== undefined && v !== null && v !== '';
+    });
 
     const canEdit = canManageDeals(membership.role);
     // Assigning a deal owner is owner/manager only; a manager can't assign
@@ -186,6 +197,18 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 label="Closed"
                 value={dateFormatter.format(new Date(deal.closedAt))}
               />
+            ) : null}
+            {hasCustom ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">
+                  Custom fields
+                </div>
+                <CustomFieldsDisplay
+                  defs={customFieldDefs}
+                  values={customValues}
+                  className="grid grid-cols-1 gap-y-2"
+                />
+              </div>
             ) : null}
           </aside>
 

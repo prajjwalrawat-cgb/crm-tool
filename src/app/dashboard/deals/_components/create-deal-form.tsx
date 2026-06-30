@@ -6,12 +6,23 @@ import { useEffect, useRef } from 'react';
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
+import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
 import { cn } from '@/lib/utils';
 
+import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { OwnerFormField } from '../../_components/owner-form-field';
+
+/** Pull `cf_*` errors out of the field-error map (first message each). */
+function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fieldErrors)
+      .filter(([k]) => k.startsWith('cf_'))
+      .map(([k, v]) => [k, v[0] ?? '']),
+  );
+}
 
 type Props = {
   onSubmit: (formData: FormData) => void;
@@ -24,6 +35,7 @@ type Props = {
   teammates: Teammate[];
   currentUserId: string;
   currentRole: MembershipRole;
+  customFieldDefs: CustomFieldDef[];
 };
 
 export function CreateDealForm({
@@ -35,6 +47,7 @@ export function CreateDealForm({
   teammates,
   currentUserId,
   currentRole,
+  customFieldDefs,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -150,6 +163,8 @@ export function CreateDealForm({
         // Members/admins can't reassign — their new deal is owned by them.
         <input type="hidden" name="ownerId" value={currentUserId} />
       )}
+
+      <CustomFieldInputs defs={customFieldDefs} errors={customErrors(fieldErrors)} />
 
       {error ? (
         <p

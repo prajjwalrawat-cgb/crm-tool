@@ -99,6 +99,7 @@ type RawJoinedRow = {
   companyNameText: string | null;
   contactNameText: string | null;
   contactEmailText: string | null;
+  customFields: Record<string, unknown>;
   companyName: string | null;
   contactFirstName: string | null;
   contactLastName: string | null;
@@ -126,6 +127,7 @@ const DEALS_PROJECTION = {
   companyNameText: deals.companyNameText,
   contactNameText: deals.contactNameText,
   contactEmailText: deals.contactEmailText,
+  customFields: deals.customFields,
   // Display name: the typed free-text label takes precedence, falling back
   // to the linked company record's name (legacy/linked deals).
   companyName: sql<string | null>`coalesce(${deals.companyNameText}, ${companies.name})`,
