@@ -1,6 +1,7 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { parseCompanyFilters } from '@/lib/companies/filters';
 import { listCompanies } from '@/lib/companies/queries';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { personaOf } from '@/lib/personas';
@@ -36,7 +37,7 @@ export default async function CompaniesPage({
     const restrictToOwnerOrUnassigned =
       persona === 'sales' ? userId : undefined;
 
-    const [page, teammates] = await Promise.all([
+    const [page, teammates, customFieldDefs] = await Promise.all([
       listCompanies(tenant.id, {
         search,
         cursor,
@@ -46,6 +47,7 @@ export default async function CompaniesPage({
         restrictToOwnerOrUnassigned,
       }),
       listTeammates(tenant.id, tenant.name),
+      listCustomFieldDefs(tenant.id, 'company'),
     ]);
 
     return (
@@ -65,6 +67,7 @@ export default async function CompaniesPage({
           currentRole={membership.role}
           nextCursor={page.nextCursor}
           pageSize={page.size}
+          customFieldDefs={customFieldDefs}
         />
       </main>
     );

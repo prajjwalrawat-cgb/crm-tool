@@ -199,6 +199,7 @@ export async function listContacts(
           createdAt: contacts.createdAt,
           updatedAt: contacts.updatedAt,
           updatedBy: contacts.updatedBy,
+          customFields: contacts.customFields,
           deletedAt: contacts.deletedAt,
           deletedBy: contacts.deletedBy,
           companyName: companies.name,

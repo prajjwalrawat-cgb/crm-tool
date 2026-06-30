@@ -83,14 +83,11 @@ export function CustomFieldsManager({
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-1 py-1">
-      <header className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Custom fields</h1>
-        <p className="mt-0.5 text-[12px] text-slate-500">
-          Define extra fields for {entityLabel.toLowerCase()}s. They appear on the create &amp; edit
-          forms and the detail page.
-        </p>
-      </header>
+    <div>
+      <p className="mb-5 text-[12px] text-slate-500">
+        Define extra fields for {entityLabel.toLowerCase()}s. They appear on the create &amp; edit
+        forms and the detail page.
+      </p>
 
       {/* Add field */}
       <section className="mb-6 rounded-lg border border-slate-200 bg-white p-4">
@@ -241,7 +238,7 @@ export function CustomFieldsManager({
           </p>
         </section>
       ) : null}
-    </main>
+    </div>
   );
 }
 

@@ -12,6 +12,7 @@ import {
 import { toast } from 'sonner';
 
 import type { Company, MembershipRole } from '@/db/schema';
+import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { PageSize } from '@/lib/pagination/page-size';
 import { canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
@@ -56,6 +57,7 @@ export function CompaniesView({
   currentRole,
   nextCursor,
   pageSize,
+  customFieldDefs,
 }: {
   initialItems: Company[];
   initialSearch: string;
@@ -64,6 +66,7 @@ export function CompaniesView({
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
+  customFieldDefs: CustomFieldDef[];
 }) {
   const router = useRouter();
   const canEdit = canManageCompanies(currentRole);
@@ -146,6 +149,7 @@ export function CompaniesView({
       createdAt: new Date(),
       updatedAt: new Date(),
       updatedBy: null,
+      customFields: {},
       deletedAt: null,
       deletedBy: null,
       __pending: true,
@@ -339,6 +343,7 @@ export function CompaniesView({
                   resetKey={createResetKey}
                   teammates={teammates}
                   currentUserId={currentUserId}
+                  customFieldDefs={customFieldDefs}
                 />
               )}
             </CreateDrawer>
@@ -414,6 +419,7 @@ export function CompaniesView({
         open={editingCompany !== null}
         onClose={() => setEditingCompany(null)}
         company={editingCompany}
+        customFieldDefs={customFieldDefs}
         onSubmit={handleEditSubmit}
         onDelete={handleDeleteFromDrawer}
         pending={editPending}

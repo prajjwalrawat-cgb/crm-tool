@@ -3,10 +3,20 @@
 import { Loader2, Plus } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
+import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
+import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { OwnerFormField } from '../../_components/owner-form-field';
+
+function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fieldErrors)
+      .filter(([k]) => k.startsWith('cf_'))
+      .map(([k, v]) => [k, v[0] ?? '']),
+  );
+}
 
 type Props = {
   onSubmit: (formData: FormData) => void;
@@ -17,6 +27,7 @@ type Props = {
   resetKey: number;
   teammates: Teammate[];
   currentUserId: string;
+  customFieldDefs: CustomFieldDef[];
 };
 
 export function CreateCompanyForm({
@@ -27,6 +38,7 @@ export function CreateCompanyForm({
   resetKey,
   teammates,
   currentUserId,
+  customFieldDefs,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -67,6 +79,8 @@ export function CreateCompanyForm({
         currentUserId={currentUserId}
         errors={fieldErrors.ownerId}
       />
+
+      <CustomFieldInputs defs={customFieldDefs} errors={customErrors(fieldErrors)} />
 
       {error ? (
         <p

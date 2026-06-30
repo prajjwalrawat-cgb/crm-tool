@@ -2,6 +2,7 @@ import { withTenantSession } from '@/lib/auth-guard';
 import { listCompanyOptions } from '@/lib/companies/queries';
 import { parseContactFilters } from '@/lib/contacts/filters';
 import { listContacts } from '@/lib/contacts/queries';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { personaOf } from '@/lib/personas';
@@ -37,7 +38,7 @@ export default async function ContactsPage({
     const restrictToOwnerOrUnassigned =
       persona === 'sales' ? userId : undefined;
 
-    const [page, companyOptions, teammates] = await Promise.all([
+    const [page, companyOptions, teammates, customFieldDefs] = await Promise.all([
       listContacts(tenant.id, {
         search,
         cursor,
@@ -48,6 +49,7 @@ export default async function ContactsPage({
       }),
       listCompanyOptions(tenant.id),
       listTeammates(tenant.id, tenant.name),
+      listCustomFieldDefs(tenant.id, 'contact'),
     ]);
 
     return (
@@ -68,6 +70,7 @@ export default async function ContactsPage({
           currentRole={membership.role}
           nextCursor={page.nextCursor}
           pageSize={page.size}
+          customFieldDefs={customFieldDefs}
         />
       </main>
     );

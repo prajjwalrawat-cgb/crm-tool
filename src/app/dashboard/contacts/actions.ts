@@ -7,6 +7,11 @@ import { z } from 'zod';
 import { companies, contacts, type Contact } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
+import {
+  customFieldFieldErrors,
+  parseCustomFieldsForm,
+} from '@/lib/custom-fields/form';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   contactIdSchema,
@@ -109,6 +114,16 @@ export async function createContactAction(
         };
       }
 
+      const defs = await listCustomFieldDefs(tenant.id, 'contact');
+      const cf = parseCustomFieldsForm(defs, formData);
+      if (!cf.ok) {
+        return {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: customFieldFieldErrors(cf.errors),
+        };
+      }
+
       const created = await tenantTransaction(async (tx) => {
         const [row] = await tx
           .insert(contacts)
@@ -122,6 +137,7 @@ export async function createContactAction(
             title: parsed.data.title,
             ownerId: parsed.data.ownerId ?? null,
             updatedBy: membership.userId,
+            customFields: cf.values,
           })
           .returning();
         if (!row) return null;
@@ -212,6 +228,16 @@ export async function updateContactAction(
         };
       }
 
+      const defs = await listCustomFieldDefs(tenant.id, 'contact');
+      const cf = parseCustomFieldsForm(defs, formData);
+      if (!cf.ok) {
+        return {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: customFieldFieldErrors(cf.errors),
+        };
+      }
+
       const updated = await tenantTransaction(async (tx) => {
         const [row] = await tx
           .update(contacts)
@@ -223,6 +249,7 @@ export async function updateContactAction(
             phone: parsed.data.phone,
             title: parsed.data.title,
             updatedBy: membership.userId,
+            customFields: cf.values,
           })
           .where(
             and(

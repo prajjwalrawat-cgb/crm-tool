@@ -3,14 +3,25 @@
 import { Loader2, Save, Trash2 } from 'lucide-react';
 
 import type { Company } from '@/db/schema';
+import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
 import { cn } from '@/lib/utils';
 
+import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { Drawer } from '../../_components/drawer';
+
+function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fieldErrors)
+      .filter(([k]) => k.startsWith('cf_'))
+      .map(([k, v]) => [k, v[0] ?? '']),
+  );
+}
 
 type Props = {
   open: boolean;
   onClose: () => void;
   company: Company | null;
+  customFieldDefs: CustomFieldDef[];
   onSubmit: (formData: FormData) => void;
   onDelete: () => void;
   pending: boolean;
@@ -24,6 +35,7 @@ export function EditCompanyDrawer({
   open,
   onClose,
   company,
+  customFieldDefs,
   onSubmit,
   onDelete,
   pending,
@@ -122,6 +134,12 @@ export function EditCompanyDrawer({
           label="Industry"
           defaultValue={company?.industry ?? ''}
           errors={fieldErrors.industry}
+        />
+
+        <CustomFieldInputs
+          defs={customFieldDefs}
+          values={(company?.customFields ?? {}) as CustomValues}
+          errors={customErrors(fieldErrors)}
         />
 
         {error ? (

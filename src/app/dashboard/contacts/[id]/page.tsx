@@ -5,6 +5,8 @@ import { notFound } from 'next/navigation';
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCommentsForEntity } from '@/lib/comments/queries';
 import { getContactById } from '@/lib/contacts/queries';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
+import type { CustomValues } from '@/lib/custom-fields/types';
 import { requireMembership } from '@/lib/membership';
 import { listNotesForEntity } from '@/lib/notes/queries';
 import { canManageContacts } from '@/lib/rbac';
@@ -17,6 +19,7 @@ import { CommentsThread } from '../../_components/comments-thread';
 import { ComposeEmailLauncher } from '../../_components/compose-email-launcher';
 import { EntityOwnerCard } from '../../_components/entity-owner-card';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
+import { CustomFieldsDisplay } from '../../_components/custom-fields-display';
 import { EntityTimeline } from '../../_components/entity-timeline';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { updateContactOwnerAction } from '../actions';
@@ -43,7 +46,7 @@ export default async function ContactDetailPage({
     const contact = await getContactById(tenant.id, id);
     if (!contact) notFound();
 
-    const [membership, notes, comments, tasks, teammates, timeline] =
+    const [membership, notes, comments, tasks, teammates, timeline, customFieldDefs] =
       await Promise.all([
         requireMembership(),
         listNotesForEntity(tenant.id, 'contact', contact.id, { limit: 100 }),
@@ -51,9 +54,15 @@ export default async function ContactDetailPage({
         listTasksForEntity(tenant.id, 'contact', contact.id, { limit: 50 }),
         listTeammates(tenant.id, tenant.name),
         getEntityTimeline(tenant.id, 'contact', contact.id, { limit: 150 }),
+        listCustomFieldDefs(tenant.id, 'contact'),
       ]);
 
     const canEdit = canManageContacts(membership.role);
+    const customValues = (contact.customFields ?? {}) as CustomValues;
+    const hasCustom = customFieldDefs.some((d) => {
+      const v = customValues[d.key];
+      return v !== undefined && v !== null && v !== '';
+    });
 
     const authorIds = new Set<string>();
     for (const n of notes) authorIds.add(n.authorUserId);
@@ -130,6 +139,18 @@ export default async function ContactDetailPage({
               label="Created"
               value={dateFormatter.format(new Date(contact.createdAt))}
             />
+            {hasCustom ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">
+                  Custom fields
+                </div>
+                <CustomFieldsDisplay
+                  defs={customFieldDefs}
+                  values={customValues}
+                  className="grid grid-cols-1 gap-y-2"
+                />
+              </div>
+            ) : null}
           </aside>
 
           <section className="space-y-4">

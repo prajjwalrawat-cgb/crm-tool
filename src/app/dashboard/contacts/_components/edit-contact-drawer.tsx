@@ -4,15 +4,26 @@ import { Loader2, Save, Trash2 } from 'lucide-react';
 
 import type { Contact } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
+import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
 import { cn } from '@/lib/utils';
 
+import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { Drawer } from '../../_components/drawer';
+
+function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fieldErrors)
+      .filter(([k]) => k.startsWith('cf_'))
+      .map(([k, v]) => [k, v[0] ?? '']),
+  );
+}
 
 type Props = {
   open: boolean;
   onClose: () => void;
   contact: Contact | null;
   companyOptions: CompanyOption[];
+  customFieldDefs: CustomFieldDef[];
   onSubmit: (formData: FormData) => void;
   onDelete: () => void;
   pending: boolean;
@@ -27,6 +38,7 @@ export function EditContactDrawer({
   onClose,
   contact,
   companyOptions,
+  customFieldDefs,
   onSubmit,
   onDelete,
   pending,
@@ -174,6 +186,12 @@ export function EditContactDrawer({
             </p>
           ) : null}
         </div>
+
+        <CustomFieldInputs
+          defs={customFieldDefs}
+          values={(contact?.customFields ?? {}) as CustomValues}
+          errors={customErrors(fieldErrors)}
+        />
 
         {error ? (
           <p

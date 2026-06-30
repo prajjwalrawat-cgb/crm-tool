@@ -7,6 +7,11 @@ import { z } from 'zod';
 import { companies, type Company } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
+import {
+  customFieldFieldErrors,
+  parseCustomFieldsForm,
+} from '@/lib/custom-fields/form';
+import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   companyIdSchema,
@@ -59,6 +64,16 @@ export async function createCompanyAction(
         };
       }
 
+      const defs = await listCustomFieldDefs(tenant.id, 'company');
+      const cf = parseCustomFieldsForm(defs, formData);
+      if (!cf.ok) {
+        return {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: customFieldFieldErrors(cf.errors),
+        };
+      }
+
       const created = await tenantTransaction(async (tx) => {
         const [row] = await tx
           .insert(companies)
@@ -69,6 +84,7 @@ export async function createCompanyAction(
             industry: parsed.data.industry,
             ownerId: parsed.data.ownerId ?? null,
             updatedBy: membership.userId,
+            customFields: cf.values,
           })
           .returning();
         if (!row) return null;
@@ -142,6 +158,16 @@ export async function updateCompanyAction(
         };
       }
 
+      const defs = await listCustomFieldDefs(tenant.id, 'company');
+      const cf = parseCustomFieldsForm(defs, formData);
+      if (!cf.ok) {
+        return {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: customFieldFieldErrors(cf.errors),
+        };
+      }
+
       const updated = await tenantTransaction(async (tx) => {
         const [row] = await tx
           .update(companies)
@@ -150,6 +176,7 @@ export async function updateCompanyAction(
             domain: parsed.data.domain,
             industry: parsed.data.industry,
             updatedBy: membership.userId,
+            customFields: cf.values,
           })
           .where(
             and(

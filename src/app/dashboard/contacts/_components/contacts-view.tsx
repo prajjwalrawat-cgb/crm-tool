@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import type { Contact, MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactRow } from '@/lib/contacts/queries';
+import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { PageSize } from '@/lib/pagination/page-size';
 import { canDeleteContacts, canManageContacts } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
@@ -65,12 +66,14 @@ export function ContactsView({
   currentRole,
   nextCursor,
   pageSize,
+  customFieldDefs,
 }: {
   initialItems: ContactRow[];
   initialSearch: string;
   companyOptions: CompanyOption[];
   teammates: Teammate[];
   currentUserId: string;
+  customFieldDefs: CustomFieldDef[];
   currentRole: MembershipRole;
   nextCursor: string | null;
   pageSize: PageSize;
@@ -163,6 +166,7 @@ export function ContactsView({
       createdAt: new Date(),
       updatedAt: new Date(),
       updatedBy: null,
+      customFields: {},
       deletedAt: null,
       deletedBy: null,
       __pending: true,
@@ -364,6 +368,7 @@ export function ContactsView({
                   companyOptions={companyOptions}
                   teammates={teammates}
                   currentUserId={currentUserId}
+                  customFieldDefs={customFieldDefs}
                 />
               )}
             </CreateDrawer>
@@ -439,6 +444,7 @@ export function ContactsView({
         onClose={() => setEditingContact(null)}
         contact={editingContact}
         companyOptions={companyOptions}
+        customFieldDefs={customFieldDefs}
         onSubmit={handleEditSubmit}
         onDelete={handleDeleteFromDrawer}
         pending={editPending}

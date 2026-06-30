@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 import { contacts } from './contacts';
 import { deals } from './deals';
@@ -24,6 +24,11 @@ export const companies = pgTable(
       .$onUpdate(() => new Date()),
     /** Last user to change this company (audit). */
     updatedBy: text('updated_by'),
+    /** Admin-defined custom field values, keyed by definition `key`. */
+    customFields: jsonb('custom_fields')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: text('deleted_by'),
   },
