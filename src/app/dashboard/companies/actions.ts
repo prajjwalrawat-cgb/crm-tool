@@ -11,6 +11,7 @@ import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   companyIdSchema,
   createCompanySchema,
+  patchCompanySchema,
   updateCompanySchema,
 } from '@/lib/companies/schema';
 import {
@@ -188,6 +189,82 @@ export async function updateCompanyAction(
       revalidatePath('/dashboard/companies');
       revalidatePath('/dashboard/activity');
       return { ok: true, company: updated };
+    },
+  );
+}
+
+/* -------- INLINE PATCH (click-to-edit cells) -------- */
+
+export type PatchCompanyResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/** Partial field update for inline company-table editing. */
+export async function patchCompanyAction(
+  input: unknown,
+): Promise<PatchCompanyResult> {
+  const gate = await checkPermission('manageCompanies');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  const parsed = patchCompanySchema.safeParse(input);
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error);
+    return {
+      ok: false,
+      message:
+        flat.formErrors[0] ??
+        Object.values(flat.fieldErrors).flat()[0] ??
+        'Invalid update.',
+    };
+  }
+  const d = parsed.data;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const updated = await tenantTransaction(async (tx) => {
+        const patch: Record<string, unknown> = {};
+        if (d.name !== undefined) patch.name = d.name;
+        if (d.domain !== undefined)
+          patch.domain = d.domain?.trim() ? d.domain.trim() : null;
+        if (d.industry !== undefined)
+          patch.industry = d.industry?.trim() ? d.industry.trim() : null;
+        if (d.ownerId !== undefined) patch.ownerId = d.ownerId;
+        if (Object.keys(patch).length === 0) return null;
+
+        const [row] = await tx
+          .update(companies)
+          .set(patch)
+          .where(
+            and(
+              eq(companies.id, d.id),
+              eq(companies.tenantId, tenant.id),
+              isNull(companies.deletedAt),
+            ),
+          )
+          .returning();
+        if (!row) return null;
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'company',
+          entityId: row.id,
+          action: 'updated',
+          metadata: { name: row.name },
+        });
+        await publishRealtimeEvent(tx, {
+          type: 'company.updated',
+          tenantId: tenant.id,
+          company: serializeCompany(row),
+        });
+        return row;
+      });
+
+      if (!updated) return { ok: false, message: 'Company not found.' };
+      revalidatePath('/dashboard/companies');
+      revalidatePath('/dashboard/activity');
+      return { ok: true };
     },
   );
 }

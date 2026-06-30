@@ -16,7 +16,7 @@ import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactOption } from '@/lib/contacts/queries';
 import type { Teammate } from '@/lib/teammates/queries';
-import { formatCurrency, toMinorUnits } from '@/lib/deals/currency';
+import { formatCurrency, fromMinorUnits, toMinorUnits } from '@/lib/deals/currency';
 import type { DealFilters } from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
 import type { PageSize } from '@/lib/pagination/page-size';
@@ -33,15 +33,20 @@ import { FilterChips, type FilterChip } from '../../_components/filter-chips';
 import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createDealAction,
+  patchDealAction,
   softDeleteDealAction,
   updateDealAction,
+  updateDealOwnerAction,
   updateDealStageAction,
 } from '../actions';
+import { TeammatePicker } from '../../_components/teammate-picker';
 import { BulkUploadButton } from './bulk-upload-button';
 import { CreateDealForm } from './create-deal-form';
 import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
 import { EmptyState } from './empty-state';
+import { InlineEditCell } from '../../_components/inline-edit-cell';
+import { SavedViews } from './saved-views';
 import { StageBadge } from './stage-badge';
 
 type DealItem = DealRow & { __pending?: boolean };
@@ -49,7 +54,17 @@ type DealItem = DealRow & { __pending?: boolean };
 type OptimisticOp =
   | { type: 'create'; draft: DealItem }
   | { type: 'update'; draft: DealItem }
+  | { type: 'patch'; id: string; patch: Partial<DealItem> }
   | { type: 'remove'; id: string };
+
+/** Fields editable inline in the table (stage/owner have dedicated controls). */
+type EditableField =
+  | 'name'
+  | 'amount'
+  | 'expectedCloseDate'
+  | 'companyName'
+  | 'contactName'
+  | 'contactEmail';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -87,6 +102,13 @@ export function DealsView({
   const router = useRouter();
   const canEdit = canManageDeals(currentRole);
   const canDelete = canDeleteDeals(currentRole);
+  // Inline owner reassignment: owner + manager only; a manager may not assign
+  // to an owner, so they get the team minus owners.
+  const canAssign = currentRole === 'owner' || currentRole === 'manager';
+  const assignable =
+    currentRole === 'owner'
+      ? teammates
+      : teammates.filter((t) => t.role !== 'owner');
   const filterChips = buildDealFilterChips(initialFilters, {
     companyOptions,
     teammates,
@@ -109,6 +131,10 @@ export function DealsView({
           return state.map((item) =>
             item.id === op.draft.id ? { ...op.draft, __pending: true } : item,
           );
+        case 'patch':
+          return state.map((item) =>
+            item.id === op.id ? { ...item, ...op.patch, __pending: true } : item,
+          );
         case 'remove':
           return state.filter((item) => item.id !== op.id);
       }
@@ -124,6 +150,83 @@ export function DealsView({
   const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string[]>>({});
 
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // ---- Multi-select + bulk edit ----
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkPending, startBulkTransition] = useTransition();
+  const selectableIds = optimisticItems
+    .filter((d) => !d.id.startsWith('optimistic-'))
+    .map((d) => d.id);
+  const allSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelectedIds((prev) =>
+      prev.size >= selectableIds.length ? new Set() : new Set(selectableIds),
+    );
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function bulkStage(stage: DealStage) {
+    const ids = [...selectedIds];
+    startBulkTransition(async () => {
+      for (const id of ids) {
+        const deal = optimisticItems.find((d) => d.id === id);
+        if (deal && deal.stage !== stage) {
+          applyOptimistic({ type: 'patch', id, patch: { stage } });
+        }
+      }
+      const results = await Promise.all(
+        ids.map((id) => updateDealStageAction({ id, stage })),
+      );
+      clearSelection();
+      const ok = results.filter((r) => r.ok).length;
+      if (ok) toast.success(`${ok} deal${ok > 1 ? 's' : ''} → ${DEAL_STAGE_LABELS[stage]}`);
+      const failed = results.length - ok;
+      if (failed) toast.error(`${failed} couldn't be moved`);
+    });
+  }
+
+  function bulkOwner(ownerId: string | null) {
+    const ids = [...selectedIds];
+    startBulkTransition(async () => {
+      for (const id of ids) applyOptimistic({ type: 'patch', id, patch: { ownerId } });
+      const results = await Promise.all(
+        ids.map((id) => updateDealOwnerAction({ id, ownerId })),
+      );
+      clearSelection();
+      const ok = results.filter((r) => r.ok).length;
+      if (ok) toast.success(`Reassigned ${ok} deal${ok > 1 ? 's' : ''}`);
+      const failed = results.length - ok;
+      if (failed) toast.error(`${failed} couldn't be reassigned`);
+    });
+  }
+
+  function bulkDelete() {
+    const ids = [...selectedIds];
+    if (!window.confirm(`Delete ${ids.length} deal${ids.length > 1 ? 's' : ''}? They can be restored from Recently deleted.`)) {
+      return;
+    }
+    startBulkTransition(async () => {
+      for (const id of ids) applyOptimistic({ type: 'remove', id });
+      const results = await Promise.all(ids.map((id) => softDeleteDealAction(id)));
+      clearSelection();
+      const ok = results.filter((r) => r.ok).length;
+      if (ok) toast.success(`${ok} deal${ok > 1 ? 's' : ''} deleted`);
+      const failed = results.length - ok;
+      if (failed) toast.error(`${failed} couldn't be deleted`);
+    });
+  }
 
   const isFirstSearchRender = useRef(true);
 
@@ -253,12 +356,110 @@ export function DealsView({
     setEditingDeal(null);
   }
 
+  // ---- Inline cell editing (click-to-edit) ----
+  // Build the optimistic row-patch + server payload for one field/value.
+  function buildFieldPatch(
+    deal: DealItem,
+    field: EditableField,
+    raw: string,
+  ): { optimistic: Partial<DealItem>; server: Record<string, unknown> } {
+    switch (field) {
+      case 'name':
+        return { optimistic: { name: raw }, server: { name: raw } };
+      case 'amount': {
+        const num = Number(raw) || 0;
+        return {
+          optimistic: { amountMinor: toMinorUnits(num, deal.currency) },
+          server: { amount: num },
+        };
+      }
+      case 'expectedCloseDate':
+        return {
+          optimistic: { expectedCloseDate: raw || null },
+          server: { expectedCloseDate: raw || null },
+        };
+      case 'companyName':
+        return {
+          optimistic: { companyName: raw || null, companyNameText: raw || null },
+          server: { companyName: raw },
+        };
+      case 'contactName':
+        return {
+          optimistic: { contactName: raw || null, contactNameText: raw || null },
+          server: { contactName: raw },
+        };
+      case 'contactEmail':
+        return {
+          optimistic: { contactEmail: raw || null, contactEmailText: raw || null },
+          server: { contactEmail: raw },
+        };
+    }
+  }
+
+  function fieldRaw(deal: DealItem, field: EditableField): string {
+    switch (field) {
+      case 'name':
+        return deal.name;
+      case 'amount':
+        return String(fromMinorUnits(deal.amountMinor, deal.currency));
+      case 'expectedCloseDate':
+        return deal.expectedCloseDate ?? '';
+      case 'companyName':
+        return deal.companyName ?? '';
+      case 'contactName':
+        return deal.contactName ?? '';
+      case 'contactEmail':
+        return deal.contactEmail ?? '';
+    }
+  }
+
+  function runPatch(
+    id: string,
+    payload: { optimistic: Partial<DealItem>; server: Record<string, unknown> },
+    onUndo?: () => void,
+  ) {
+    startEditTransition(async () => {
+      applyOptimistic({ type: 'patch', id, patch: payload.optimistic });
+      const res = await patchDealAction({ id, ...payload.server });
+      if (!res.ok) {
+        toast.error(res.message);
+        return; // optimistic state reverts when the transition ends
+      }
+      if (onUndo) {
+        toast.success('Updated', { action: { label: 'Undo', onClick: onUndo } });
+      }
+    });
+  }
+
+  function commitField(deal: DealItem, field: EditableField, raw: string) {
+    const prev = fieldRaw(deal, field);
+    if (raw === prev) return;
+    const forward = buildFieldPatch(deal, field, raw);
+    const reverse = buildFieldPatch(deal, field, prev);
+    runPatch(deal.id, forward, () => runPatch(deal.id, reverse));
+  }
+
+  function commitOwner(deal: DealItem, ownerId: string | null) {
+    if ((deal.ownerId ?? null) === ownerId) return;
+    const prevOwner = deal.ownerId ?? null;
+    runPatch(
+      deal.id,
+      { optimistic: { ownerId }, server: { ownerId } },
+      () => runPatch(deal.id, { optimistic: { ownerId: prevOwner }, server: { ownerId: prevOwner } }),
+    );
+  }
+
   // Inline stage edit — used by the stage-cell dropdown. Reuses the
   // existing kanban server action so the audit trail + automation
   // workflows fire identically regardless of where the move came from.
   const [stagePending, startStageTransition] = useTransition();
-  function handleStageChange(deal: DealRow, nextStage: DealStage) {
+  function handleStageChange(
+    deal: DealRow,
+    nextStage: DealStage,
+    opts?: { undo?: boolean },
+  ) {
     if (deal.stage === nextStage) return;
+    const prevStage = deal.stage;
     const optimisticDraft: DealItem = {
       ...deal,
       stage: nextStage,
@@ -277,10 +478,16 @@ export function DealsView({
       });
       if (!result.ok) {
         toast.error(`Couldn't change stage: ${result.message}`);
-      } else if (result.changed) {
-        toast.success(
-          `${deal.name} → ${DEAL_STAGE_LABELS[nextStage]}`,
-        );
+      } else if (result.changed && !opts?.undo) {
+        toast.success(`${deal.name} → ${DEAL_STAGE_LABELS[nextStage]}`, {
+          action: {
+            label: 'Undo',
+            onClick: () =>
+              handleStageChange({ ...deal, stage: nextStage }, prevStage, {
+                undo: true,
+              }),
+          },
+        });
       }
     });
   }
@@ -353,6 +560,8 @@ export function DealsView({
 
         <FilterChips chips={filterChips} />
 
+        <SavedViews userId={currentUserId} />
+
         {actionError ? (
           <p
             role="alert"
@@ -360,6 +569,22 @@ export function DealsView({
           >
             {actionError}
           </p>
+        ) : null}
+
+        {(canEdit || canDelete) && selectedIds.size > 0 ? (
+          <BulkBar
+            count={selectedIds.size}
+            pending={bulkPending}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            canAssign={canAssign}
+            assignable={assignable}
+            currentUserId={currentUserId}
+            onStage={bulkStage}
+            onOwner={bulkOwner}
+            onDelete={bulkDelete}
+            onClear={clearSelection}
+          />
         ) : null}
 
         {showEmpty ? (
@@ -371,6 +596,14 @@ export function DealsView({
               canEdit={canEdit}
               canDelete={canDelete}
               teammates={teammates}
+              currentUserId={currentUserId}
+              canAssignOwner={canAssign}
+              assignableTeammates={assignable}
+              selectable={canEdit || canDelete}
+              selectedIds={selectedIds}
+              allSelected={allSelected}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
               onEdit={(d) => {
                 setEditError(null);
                 setEditFieldErrors({});
@@ -378,6 +611,8 @@ export function DealsView({
               }}
               onDelete={handleDelete}
               onStageChange={handleStageChange}
+              onPatchField={commitField}
+              onPatchOwner={commitOwner}
               stagePending={stagePending}
               deletePending={deletePending}
             />
@@ -417,9 +652,19 @@ function DealsTable({
   canEdit,
   canDelete,
   teammates,
+  currentUserId,
+  canAssignOwner,
+  assignableTeammates,
+  selectable,
+  selectedIds,
+  allSelected,
+  onToggleSelect,
+  onToggleSelectAll,
   onEdit,
   onDelete,
   onStageChange,
+  onPatchField,
+  onPatchOwner,
   stagePending,
   deletePending,
 }: {
@@ -427,9 +672,19 @@ function DealsTable({
   canEdit: boolean;
   canDelete: boolean;
   teammates: Teammate[];
+  currentUserId: string;
+  canAssignOwner: boolean;
+  assignableTeammates: Teammate[];
+  selectable: boolean;
+  selectedIds: Set<string>;
+  allSelected: boolean;
+  onToggleSelect: (id: string) => void;
+  onToggleSelectAll: () => void;
   onEdit: (deal: DealRow) => void;
   onDelete: (deal: DealRow) => void;
   onStageChange: (deal: DealRow, next: DealStage) => void;
+  onPatchField: (deal: DealItem, field: EditableField, raw: string) => void;
+  onPatchOwner: (deal: DealItem, ownerId: string | null) => void;
   stagePending: boolean;
   deletePending: boolean;
 }) {
@@ -516,7 +771,18 @@ function DealsTable({
                 scope="col"
                 className="sticky left-0 z-20 bg-slate-50/95 px-3 py-1.5 text-left font-semibold backdrop-blur"
               >
-                Name
+                <span className="flex items-center gap-2">
+                  {selectable ? (
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={onToggleSelectAll}
+                      aria-label="Select all deals"
+                      className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  ) : null}
+                  Name
+                </span>
               </th>
               <th scope="col" className="px-3 py-1.5 text-left font-semibold">
                 Stage
@@ -570,17 +836,28 @@ function DealsTable({
                   )}
                 >
                   <td className="sticky left-0 z-[1] bg-white/95 px-3 py-2 backdrop-blur group-hover:bg-slate-50/95">
-                    {isOptimistic ? (
-                      <span className="font-medium">{d.name}</span>
-                    ) : (
-                      <Link
-                        href={`/dashboard/deals/${d.id}`}
-                        className="inline-flex items-center gap-1 font-medium hover:underline"
-                      >
-                        {d.name}
-                        <ExternalLink className="h-3 w-3 text-slate-400" aria-hidden />
-                      </Link>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {selectable && !isOptimistic ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(d.id)}
+                          onChange={() => onToggleSelect(d.id)}
+                          aria-label={`Select ${d.name}`}
+                          className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      ) : null}
+                      {isOptimistic ? (
+                        <span className="font-medium">{d.name}</span>
+                      ) : (
+                        <Link
+                          href={`/dashboard/deals/${d.id}`}
+                          className="inline-flex items-center gap-1 font-medium hover:underline"
+                        >
+                          {d.name}
+                          <ExternalLink className="h-3 w-3 text-slate-400" aria-hidden />
+                        </Link>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     {canEdit && !isOptimistic ? (
@@ -594,33 +871,68 @@ function DealsTable({
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
-                    {formatCurrency(d.amountMinor, d.currency)}
+                    <InlineEditCell
+                      ariaLabel="amount"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      align="right"
+                      disabled={!canEdit || isOptimistic}
+                      value={String(fromMinorUnits(d.amountMinor, d.currency))}
+                      render={() => formatCurrency(d.amountMinor, d.currency)}
+                      onCommit={(v) => onPatchField(d, 'amount', v)}
+                    />
                   </td>
                   <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
-                    {d.companyName ?? '—'}
+                    <InlineEditCell
+                      ariaLabel="company"
+                      disabled={!canEdit || isOptimistic}
+                      value={d.companyName ?? ''}
+                      onCommit={(v) => onPatchField(d, 'companyName', v)}
+                    />
                   </td>
                   <td className="hidden px-3 py-2 text-slate-600 lg:table-cell">
-                    {d.contactName || d.contactEmail ? (
-                      <div className="flex flex-col leading-tight">
-                        <span className="truncate">{d.contactName ?? d.contactEmail}</span>
-                        {d.contactName && d.contactEmail ? (
-                          <span className="truncate text-[11px] text-slate-400">{d.contactEmail}</span>
-                        ) : null}
-                      </div>
-                    ) : (
-                      '—'
-                    )}
+                    <div className="flex flex-col leading-tight">
+                      <InlineEditCell
+                        ariaLabel="contact name"
+                        disabled={!canEdit || isOptimistic}
+                        value={d.contactName ?? ''}
+                        onCommit={(v) => onPatchField(d, 'contactName', v)}
+                      />
+                      <span className="text-[11px] text-slate-400">
+                        <InlineEditCell
+                          ariaLabel="contact email"
+                          type="text"
+                          placeholder="+ email"
+                          disabled={!canEdit || isOptimistic}
+                          value={d.contactEmail ?? ''}
+                          onCommit={(v) => onPatchField(d, 'contactEmail', v)}
+                        />
+                      </span>
+                    </div>
                   </td>
                   <td className="hidden px-3 py-2 md:table-cell">
-                    <OwnerCell
-                      ownerId={d.ownerId}
+                    <InlineOwnerCell
+                      deal={d}
                       teammate={d.ownerId ? teammateById.get(d.ownerId) : undefined}
+                      teammates={assignableTeammates}
+                      currentUserId={currentUserId}
+                      disabled={!canAssignOwner || isOptimistic}
+                      onSelect={(ownerId) => onPatchOwner(d, ownerId)}
                     />
                   </td>
                   <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 sm:table-cell">
-                    {d.expectedCloseDate
-                      ? dateFormatter.format(new Date(d.expectedCloseDate))
-                      : '—'}
+                    <InlineEditCell
+                      ariaLabel="close date"
+                      type="date"
+                      align="right"
+                      disabled={!canEdit || isOptimistic}
+                      value={d.expectedCloseDate ?? ''}
+                      render={(v) =>
+                        v ? dateFormatter.format(new Date(v)) : <span className="text-slate-400">—</span>
+                      }
+                      onCommit={(v) => onPatchField(d, 'expectedCloseDate', v)}
+                    />
                   </td>
                   {showActions ? (
                     <td className="sticky right-0 z-[1] whitespace-nowrap bg-white/95 px-3 py-2 text-right backdrop-blur group-hover:bg-slate-50/95">
@@ -849,6 +1161,177 @@ function OwnerCell({
       )}
       {!compact ? <span className="truncate">{name}</span> : null}
     </span>
+  );
+}
+
+/** Floating action bar for the current multi-selection. */
+function BulkBar({
+  count,
+  pending,
+  canEdit,
+  canDelete,
+  canAssign,
+  assignable,
+  currentUserId,
+  onStage,
+  onOwner,
+  onDelete,
+  onClear,
+}: {
+  count: number;
+  pending: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canAssign: boolean;
+  assignable: Teammate[];
+  currentUserId: string;
+  onStage: (s: DealStage) => void;
+  onOwner: (ownerId: string | null) => void;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  const [stageOpen, setStageOpen] = useState(false);
+  const [ownerOpen, setOwnerOpen] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!stageOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (stageRef.current && !stageRef.current.contains(e.target as Node)) {
+        setStageOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [stageOpen]);
+
+  const triggerCls =
+    'inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60';
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[13px]">
+      <span className="font-medium text-indigo-900">{count} selected</span>
+      <span className="h-4 w-px bg-indigo-200" aria-hidden />
+
+      {canEdit ? (
+        <div className="relative" ref={stageRef}>
+          <button type="button" disabled={pending} onClick={() => setStageOpen((v) => !v)} className={triggerCls}>
+            Set stage
+            <ChevronDown className="h-3 w-3 text-slate-400" aria-hidden />
+          </button>
+          {stageOpen ? (
+            <ul className="absolute left-0 top-full z-40 mt-1 min-w-[9rem] overflow-hidden rounded-md border border-slate-200 bg-white py-0.5 shadow-md">
+              {DEAL_STAGES.map((s) => (
+                <li key={s}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStageOpen(false);
+                      onStage(s);
+                    }}
+                    className="flex w-full items-center px-2 py-1 text-left text-[12px] text-slate-700 hover:bg-slate-50"
+                  >
+                    {DEAL_STAGE_LABELS[s]}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {canAssign ? (
+        <div className="relative">
+          <button type="button" disabled={pending} onClick={() => setOwnerOpen((v) => !v)} className={triggerCls}>
+            Assign owner
+            <ChevronDown className="h-3 w-3 text-slate-400" aria-hidden />
+          </button>
+          <TeammatePicker
+            open={ownerOpen}
+            onOpenChange={setOwnerOpen}
+            teammates={assignable}
+            currentUserId={currentUserId}
+            selectedId={null}
+            onSelect={(t) => {
+              setOwnerOpen(false);
+              onOwner(t.id);
+            }}
+            onUnassign={() => {
+              setOwnerOpen(false);
+              onOwner(null);
+            }}
+          />
+        </div>
+      ) : null}
+
+      {canDelete ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={onDelete}
+          className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2.5 py-1 font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          Delete
+        </button>
+      ) : null}
+
+      {pending ? <Loader2 className="h-4 w-4 animate-spin text-indigo-500" aria-hidden /> : null}
+
+      <button type="button" onClick={onClear} className="ml-auto rounded-md px-2 py-1 text-[12px] font-medium text-indigo-700 hover:bg-indigo-100">
+        Clear
+      </button>
+    </div>
+  );
+}
+
+/** Owner cell that opens the teammate picker on click (inline reassignment). */
+function InlineOwnerCell({
+  deal,
+  teammate,
+  teammates,
+  currentUserId,
+  disabled,
+  onSelect,
+}: {
+  deal: DealItem;
+  teammate: Teammate | undefined;
+  teammates: Teammate[];
+  currentUserId: string;
+  disabled?: boolean;
+  onSelect: (ownerId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (disabled) {
+    return <OwnerCell ownerId={deal.ownerId} teammate={teammate} />;
+  }
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Assign owner"
+        title="Assign owner"
+        className="rounded px-1 py-0.5 text-left transition hover:bg-slate-100 hover:ring-1 hover:ring-slate-200"
+      >
+        <OwnerCell ownerId={deal.ownerId} teammate={teammate} />
+      </button>
+      <TeammatePicker
+        open={open}
+        onOpenChange={setOpen}
+        teammates={teammates}
+        currentUserId={currentUserId}
+        selectedId={deal.ownerId}
+        onSelect={(t) => {
+          onSelect(t.id);
+          setOpen(false);
+        }}
+        onUnassign={() => {
+          onSelect(null);
+          setOpen(false);
+        }}
+      />
+    </div>
   );
 }
 

@@ -66,6 +66,30 @@ export function DashboardShell({
     return () => window.removeEventListener('keydown', onPaletteShortcut);
   }, [onPaletteShortcut]);
 
+  // Global "c" → create on the current page. Dispatches `crm:new`, which the
+  // page's CreateDrawer listens for. Ignored while typing or with modifiers.
+  const onCreateShortcut = useCallback((e: KeyboardEvent) => {
+    if (e.key !== 'c' && e.key !== 'C') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (
+      target?.isContentEditable ||
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'SELECT'
+    ) {
+      return;
+    }
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent('crm:new'));
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('keydown', onCreateShortcut);
+    return () => window.removeEventListener('keydown', onCreateShortcut);
+  }, [onCreateShortcut]);
+
   // Close palette on route change.
   useEffect(() => {
     setPaletteOpen(false);

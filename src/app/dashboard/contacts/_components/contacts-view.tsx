@@ -9,6 +9,7 @@ import {
   useState,
   useTransition,
 } from 'react';
+import { toast } from 'sonner';
 
 import type { Contact, MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
@@ -18,14 +19,19 @@ import { canDeleteContacts, canManageContacts } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
+import { BulkActionBar } from '../../_components/bulk-action-bar';
 import { CreateDrawer } from '../../_components/create-drawer';
+import { InlineEditCell } from '../../_components/inline-edit-cell';
 import { ToggleFilterBar } from '../../_components/toggle-filter-bar';
 import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createContactAction,
+  patchContactAction,
   softDeleteContactAction,
   updateContactAction,
 } from '../actions';
+
+type ContactField = 'email' | 'title' | 'phone';
 import { CreateContactForm } from './create-contact-form';
 import { EditContactDrawer } from './edit-contact-drawer';
 import { EmptyState } from './empty-state';
@@ -35,6 +41,7 @@ type ContactItem = ContactRow & { __pending?: boolean };
 type OptimisticOp =
   | { type: 'create'; draft: ContactItem }
   | { type: 'update'; draft: ContactItem }
+  | { type: 'patch'; id: string; patch: Partial<ContactItem> }
   | { type: 'remove'; id: string };
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -87,6 +94,10 @@ export function ContactsView({
         case 'update':
           return state.map((item) =>
             item.id === op.draft.id ? { ...op.draft, __pending: true } : item,
+          );
+        case 'patch':
+          return state.map((item) =>
+            item.id === op.id ? { ...item, ...op.patch, __pending: true } : item,
           );
         case 'remove':
           return state.filter((item) => item.id !== op.id);
@@ -222,6 +233,87 @@ export function ContactsView({
     setEditingContact(null);
   }
 
+  // ---- Inline cell editing (click-to-edit) ----
+  function runContactPatch(
+    id: string,
+    field: ContactField,
+    raw: string,
+    onUndo?: () => void,
+  ) {
+    const value = raw.trim() ? raw.trim() : null;
+    startEditTransition(async () => {
+      applyOptimistic({ type: 'patch', id, patch: { [field]: value } as Partial<ContactItem> });
+      const res = await patchContactAction({ id, [field]: value });
+      if (!res.ok) {
+        toast.error(res.message);
+        return;
+      }
+      if (onUndo) toast.success('Updated', { action: { label: 'Undo', onClick: onUndo } });
+    });
+  }
+  function commitField(contact: ContactItem, field: ContactField, raw: string) {
+    const prev = (contact[field] ?? '') as string;
+    if (raw.trim() === prev.trim()) return;
+    runContactPatch(contact.id, field, raw, () =>
+      runContactPatch(contact.id, field, prev),
+    );
+  }
+
+  // ---- Multi-select + bulk ----
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkPending, startBulkTransition] = useTransition();
+  const selectableIds = optimisticItems
+    .filter((c) => !c.id.startsWith('optimistic-'))
+    .map((c) => c.id);
+  const allSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelectedIds((prev) =>
+      prev.size >= selectableIds.length ? new Set() : new Set(selectableIds),
+    );
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function bulkOwner(ownerId: string | null) {
+    const ids = [...selectedIds];
+    startBulkTransition(async () => {
+      for (const id of ids) applyOptimistic({ type: 'patch', id, patch: { ownerId } });
+      const results = await Promise.all(ids.map((id) => patchContactAction({ id, ownerId })));
+      clearSelection();
+      const ok = results.filter((r) => r.ok).length;
+      if (ok) toast.success(`Reassigned ${ok} contact${ok > 1 ? 's' : ''}`);
+      const failed = results.length - ok;
+      if (failed) toast.error(`${failed} couldn't be reassigned`);
+    });
+  }
+
+  function bulkDelete() {
+    const ids = [...selectedIds];
+    if (!window.confirm(`Delete ${ids.length} contact${ids.length > 1 ? 's' : ''}? They can be restored from Recently deleted.`)) {
+      return;
+    }
+    startBulkTransition(async () => {
+      for (const id of ids) applyOptimistic({ type: 'remove', id });
+      const results = await Promise.all(ids.map((id) => softDeleteContactAction(id)));
+      clearSelection();
+      const ok = results.filter((r) => r.ok).length;
+      if (ok) toast.success(`${ok} contact${ok > 1 ? 's' : ''} deleted`);
+      const failed = results.length - ok;
+      if (failed) toast.error(`${failed} couldn't be deleted`);
+    });
+  }
+
   const showEmpty = optimisticItems.length === 0;
   const trimmedSearch = search.trim();
 
@@ -297,6 +389,18 @@ export function ContactsView({
           </p>
         ) : null}
 
+        {(canEdit || canDelete) && selectedIds.size > 0 ? (
+          <BulkActionBar
+            count={selectedIds.size}
+            pending={bulkPending}
+            currentUserId={currentUserId}
+            assignable={canEdit ? teammates : undefined}
+            onAssignOwner={canEdit ? bulkOwner : undefined}
+            onDelete={canDelete ? bulkDelete : undefined}
+            onClear={clearSelection}
+          />
+        ) : null}
+
         {showEmpty ? (
           <EmptyState searchActive={trimmedSearch.length > 0} />
         ) : (
@@ -305,12 +409,18 @@ export function ContactsView({
               items={optimisticItems}
               canEdit={canEdit}
               canDelete={canDelete}
+              selectable={canEdit || canDelete}
+              selectedIds={selectedIds}
+              allSelected={allSelected}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
               onEdit={(c) => {
                 setEditError(null);
                 setEditFieldErrors({});
                 setEditingContact(c);
               }}
               onDelete={handleDelete}
+              onPatchField={commitField}
               deletePending={deletePending}
             />
             <PaginationControls
@@ -344,15 +454,27 @@ function ContactsTable({
   items,
   canEdit,
   canDelete,
+  selectable,
+  selectedIds,
+  allSelected,
+  onToggleSelect,
+  onToggleSelectAll,
   onEdit,
   onDelete,
+  onPatchField,
   deletePending,
 }: {
   items: ContactItem[];
   canEdit: boolean;
   canDelete: boolean;
+  selectable: boolean;
+  selectedIds: Set<string>;
+  allSelected: boolean;
+  onToggleSelect: (id: string) => void;
+  onToggleSelectAll: () => void;
   onEdit: (contact: ContactRow) => void;
   onDelete: (contact: ContactRow) => void;
+  onPatchField: (contact: ContactItem, field: ContactField, raw: string) => void;
   deletePending: boolean;
 }) {
   const showActions = canEdit || canDelete;
@@ -362,7 +484,18 @@ function ContactsTable({
           <thead className="sticky top-0 z-10 bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
             <tr>
               <th scope="col" className="px-3 py-2 text-left font-medium">
-                Name
+                <span className="flex items-center gap-2">
+                  {selectable ? (
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={onToggleSelectAll}
+                      aria-label="Select all contacts"
+                      className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  ) : null}
+                  Name
+                </span>
               </th>
               <th
                 scope="col"
@@ -402,16 +535,49 @@ function ContactsTable({
                 className={cn('transition-opacity', c.__pending && 'opacity-60')}
               >
                 <td className="px-3 py-2">
+                  <div className="flex items-start gap-2">
+                    {selectable && !c.id.startsWith('optimistic-') ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(c.id)}
+                        onChange={() => onToggleSelect(c.id)}
+                        aria-label={`Select ${displayName(c)}`}
+                        className="mt-1 h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                    ) : null}
+                    <div className="min-w-0 flex-1">
                   <div className="font-medium">{displayName(c)}</div>
-                  {c.phone ? (
-                    <div className="text-xs text-slate-500">{c.phone}</div>
-                  ) : null}
+                  <span className="text-xs text-slate-500">
+                    <InlineEditCell
+                      ariaLabel="phone"
+                      type="text"
+                      placeholder="+ phone"
+                      disabled={!canEdit || c.__pending === true}
+                      value={c.phone ?? ''}
+                      onCommit={(v) => onPatchField(c, 'phone', v)}
+                    />
+                  </span>
+                    </div>
+                  </div>
                 </td>
                 <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">
-                  {c.email ?? '—'}
+                  <InlineEditCell
+                    ariaLabel="email"
+                    type="text"
+                    placeholder="+ email"
+                    disabled={!canEdit || c.__pending === true}
+                    value={c.email ?? ''}
+                    onCommit={(v) => onPatchField(c, 'email', v)}
+                  />
                 </td>
                 <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
-                  {c.title ?? '—'}
+                  <InlineEditCell
+                    ariaLabel="title"
+                    placeholder="—"
+                    disabled={!canEdit || c.__pending === true}
+                    value={c.title ?? ''}
+                    onCommit={(v) => onPatchField(c, 'title', v)}
+                  />
                 </td>
                 <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
                   {c.companyName ?? '—'}

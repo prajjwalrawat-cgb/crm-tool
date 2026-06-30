@@ -25,6 +25,7 @@ import {
   createDealSchema,
   dealIdSchema,
   DEAL_STAGES,
+  patchDealSchema,
   updateDealSchema,
 } from '@/lib/deals/schema';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
@@ -769,6 +770,134 @@ export async function restoreDealAction(id: string): Promise<SimpleResult> {
       revalidatePath('/dashboard/deals/board');
       revalidatePath('/dashboard/recently-deleted');
       revalidatePath('/dashboard/activity');
+      return { ok: true };
+    },
+  );
+}
+
+/* -------- INLINE PATCH (click-to-edit cells) -------- */
+
+export type PatchDealResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/**
+ * Apply a partial field update to a deal — backs inline table editing. Only
+ * the provided keys are written; `null` clears nullable fields. Reuses the
+ * same RBAC as full edits (manageDeals), gates owner reassignment like
+ * `updateDealOwnerAction`, and emits a realtime `deal.updated` so the board /
+ * other clients reconcile.
+ */
+export async function patchDealAction(
+  input: unknown,
+): Promise<PatchDealResult> {
+  const gate = await checkPermission('manageDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  const parsed = patchDealSchema.safeParse(input);
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error);
+    const first =
+      flat.formErrors[0] ??
+      Object.values(flat.fieldErrors).flat()[0] ??
+      'Invalid update.';
+    return { ok: false, message: first };
+  }
+  const d = parsed.data;
+
+  // Owner reassignment is owner/manager only; a manager can't assign to owner.
+  if (d.ownerId !== undefined) {
+    const canAssign =
+      membership.role === 'owner' || membership.role === 'manager';
+    if (!canAssign) return { ok: false, message: 'You cannot reassign deals.' };
+    if (membership.role === 'manager' && d.ownerId) {
+      const targetRole = await getMemberRole(tenant.id, d.ownerId);
+      if (targetRole === 'owner') {
+        return { ok: false, message: 'Managers cannot assign deals to an owner.' };
+      }
+    }
+  }
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const updated = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select()
+          .from(deals)
+          .where(
+            and(
+              eq(deals.id, d.id),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return null;
+
+        const patch: Record<string, unknown> = {};
+        if (d.name !== undefined) patch.name = d.name;
+        if (d.expectedCloseDate !== undefined)
+          patch.expectedCloseDate = d.expectedCloseDate;
+        if (d.companyName !== undefined)
+          patch.companyNameText = d.companyName?.trim() ? d.companyName.trim() : null;
+        if (d.contactName !== undefined)
+          patch.contactNameText = d.contactName?.trim() ? d.contactName.trim() : null;
+        if (d.contactEmail !== undefined)
+          patch.contactEmailText = d.contactEmail?.trim() ? d.contactEmail.trim() : null;
+        if (d.ownerId !== undefined) patch.ownerId = d.ownerId;
+        if (d.currency !== undefined) patch.currency = d.currency;
+        if (d.amount !== undefined) {
+          patch.amountMinor = toMinorUnits(d.amount, d.currency ?? previous.currency);
+        }
+        if (Object.keys(patch).length === 0) return previous;
+
+        const [row] = await tx
+          .update(deals)
+          .set(patch)
+          .where(
+            and(
+              eq(deals.id, d.id),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .returning();
+        if (!row) return null;
+
+        if (
+          d.ownerId !== undefined &&
+          (previous.ownerId ?? null) !== (row.ownerId ?? null)
+        ) {
+          await recordActivity(tx, {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            entityType: 'deal',
+            entityId: row.id,
+            action: 'owner_changed',
+            metadata: {
+              name: row.name,
+              from: previous.ownerId ?? null,
+              to: row.ownerId ?? null,
+            },
+          });
+        }
+
+        const serialized = await loadSerializedDeal(tx, tenant.id, row.id);
+        if (serialized) {
+          await publishRealtimeEvent(tx, {
+            type: 'deal.updated',
+            tenantId: tenant.id,
+            deal: serialized,
+          });
+        }
+        return row;
+      });
+
+      if (!updated) return { ok: false, message: 'Deal not found.' };
+      revalidatePath('/dashboard/deals');
+      revalidatePath('/dashboard/deals/board');
       return { ok: true };
     },
   );

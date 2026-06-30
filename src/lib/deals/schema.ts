@@ -77,6 +77,44 @@ export const updateDealSchema = createDealSchema.extend({
 
 export type UpdateDealInput = z.infer<typeof updateDealSchema>;
 
+/**
+ * Partial single/multi-field update for inline (click-to-edit) table cells.
+ * Every field is optional; only the keys present are written. `null` clears a
+ * nullable field. Stage is intentionally NOT here — it keeps its own action so
+ * stage-change automation/activity stays intact.
+ */
+export const patchDealSchema = z.object({
+  id: z.uuid({ message: 'Invalid deal id' }),
+  name: z.string().trim().min(1, 'Name is required').max(200).optional(),
+  amount: z.coerce
+    .number({ message: 'Enter a valid amount' })
+    .min(0, 'Amount cannot be negative')
+    .max(999_999_999_999, 'Amount is too large')
+    .optional(),
+  currency: z.enum(KNOWN_CURRENCIES).optional(),
+  expectedCloseDate: z
+    .union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date'), z.null()])
+    .optional(),
+  companyName: z.union([z.string().trim().max(200), z.null()]).optional(),
+  contactName: z.union([z.string().trim().max(200), z.null()]).optional(),
+  contactEmail: z
+    .union([
+      z
+        .string()
+        .trim()
+        .max(200)
+        .refine(
+          (v) => v === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v),
+          'Enter a valid email',
+        ),
+      z.null(),
+    ])
+    .optional(),
+  ownerId: z.union([z.string().min(1).max(120), z.null()]).optional(),
+});
+
+export type PatchDealInput = z.infer<typeof patchDealSchema>;
+
 export const dealIdSchema = z.object({
   id: z.uuid({ message: 'Invalid deal id' }),
 });

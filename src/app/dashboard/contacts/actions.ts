@@ -11,6 +11,7 @@ import { recordNotificationSafe } from '@/lib/notifications/recorder';
 import {
   contactIdSchema,
   createContactSchema,
+  patchContactSchema,
   updateContactSchema,
 } from '@/lib/contacts/schema';
 import {
@@ -261,6 +262,111 @@ export async function updateContactAction(
       revalidatePath('/dashboard/contacts');
       revalidatePath('/dashboard/activity');
       return { ok: true, contact: updated };
+    },
+  );
+}
+
+/* -------- INLINE PATCH (click-to-edit cells) -------- */
+
+export type PatchContactResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/** Partial field update for inline contact-table editing. */
+export async function patchContactAction(
+  input: unknown,
+): Promise<PatchContactResult> {
+  const gate = await checkPermission('manageContacts');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  const parsed = patchContactSchema.safeParse(input);
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error);
+    return {
+      ok: false,
+      message:
+        flat.formErrors[0] ??
+        Object.values(flat.fieldErrors).flat()[0] ??
+        'Invalid update.',
+    };
+  }
+  const d = parsed.data;
+  const norm = (v?: string | null) => (v && v.trim() ? v.trim() : null);
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      try {
+        const updated = await tenantTransaction(async (tx) => {
+          const [previous] = await tx
+            .select()
+            .from(contacts)
+            .where(
+              and(
+                eq(contacts.id, d.id),
+                eq(contacts.tenantId, tenant.id),
+                isNull(contacts.deletedAt),
+              ),
+            )
+            .limit(1);
+          if (!previous) return null;
+
+          const patch: Record<string, unknown> = {};
+          if (d.firstName !== undefined) patch.firstName = norm(d.firstName);
+          if (d.lastName !== undefined) patch.lastName = norm(d.lastName);
+          if (d.email !== undefined) patch.email = d.email ?? null;
+          if (d.phone !== undefined) patch.phone = norm(d.phone);
+          if (d.title !== undefined) patch.title = norm(d.title);
+          if (d.ownerId !== undefined) patch.ownerId = d.ownerId;
+          if (Object.keys(patch).length === 0) return previous;
+
+          // A contact must keep a name or email after the edit.
+          const nextFirst = 'firstName' in patch ? patch.firstName : previous.firstName;
+          const nextLast = 'lastName' in patch ? patch.lastName : previous.lastName;
+          const nextEmail = 'email' in patch ? patch.email : previous.email;
+          if (!nextFirst && !nextLast && !nextEmail) {
+            throw new Error('CONTACT_IDENTITY');
+          }
+
+          const [row] = await tx
+            .update(contacts)
+            .set(patch)
+            .where(
+              and(
+                eq(contacts.id, d.id),
+                eq(contacts.tenantId, tenant.id),
+                isNull(contacts.deletedAt),
+              ),
+            )
+            .returning();
+          if (!row) return null;
+          await recordActivity(tx, {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            entityType: 'contact',
+            entityId: row.id,
+            action: 'updated',
+            metadata: { name: [row.firstName, row.lastName].filter(Boolean).join(' ') || row.email },
+          });
+          await publishRealtimeEvent(tx, {
+            type: 'contact.updated',
+            tenantId: tenant.id,
+            contact: serializeContact(row),
+          });
+          return row;
+        });
+
+        if (!updated) return { ok: false, message: 'Contact not found.' };
+        revalidatePath('/dashboard/contacts');
+        revalidatePath('/dashboard/activity');
+        return { ok: true };
+      } catch (err) {
+        if (err instanceof Error && err.message === 'CONTACT_IDENTITY') {
+          return { ok: false, message: 'Keep a name or email on the contact.' };
+        }
+        throw err;
+      }
     },
   );
 }

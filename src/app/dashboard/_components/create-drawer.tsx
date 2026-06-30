@@ -1,7 +1,8 @@
 ﻿'use client';
 
 import { Plus } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -44,6 +45,30 @@ export function CreateDrawer({
   children,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Open on the global "create" shortcut (the shell dispatches `crm:new`
+  // when you press `c`). One CreateDrawer per page, so this is unambiguous.
+  useEffect(() => {
+    if (disabled) return;
+    const onNew = () => setOpen(true);
+    window.addEventListener('crm:new', onNew);
+    return () => window.removeEventListener('crm:new', onNew);
+  }, [disabled]);
+
+  // Deep link: `?new=1` opens the drawer (used by the command palette's
+  // "Create X" actions). Strip the param so back/refresh doesn't reopen, and
+  // react to param changes so it also fires when already on the page.
+  useEffect(() => {
+    if (disabled || searchParams.get('new') !== '1') return;
+    setOpen(true);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('new');
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
+  }, [searchParams, disabled, pathname, router]);
 
   // Close after the parent reports a successful submit (resetKey
   // increments on the create-form contract). We track the latest seen

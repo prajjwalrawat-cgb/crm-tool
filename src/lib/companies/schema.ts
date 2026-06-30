@@ -32,6 +32,17 @@ export const updateCompanySchema = createCompanySchema.extend({
 
 export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
 
+/** Partial update for inline (click-to-edit) company cells. */
+export const patchCompanySchema = z.object({
+  id: z.uuid({ message: 'Invalid company id' }),
+  name: z.string().trim().min(1, 'Name is required').max(200).optional(),
+  domain: z.union([z.string().trim().max(255), z.null()]).optional(),
+  industry: z.union([z.string().trim().max(100), z.null()]).optional(),
+  ownerId: z.union([z.string().min(1).max(120), z.null()]).optional(),
+});
+
+export type PatchCompanyInput = z.infer<typeof patchCompanySchema>;
+
 export const companyIdSchema = z.object({
   id: z.uuid({ message: 'Invalid company id' }),
 });
