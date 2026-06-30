@@ -68,6 +68,7 @@ export async function createCompanyAction(
             domain: parsed.data.domain,
             industry: parsed.data.industry,
             ownerId: parsed.data.ownerId ?? null,
+            updatedBy: membership.userId,
           })
           .returning();
         if (!row) return null;
@@ -148,6 +149,7 @@ export async function updateCompanyAction(
             name: parsed.data.name,
             domain: parsed.data.domain,
             industry: parsed.data.industry,
+            updatedBy: membership.userId,
           })
           .where(
             and(
@@ -232,6 +234,7 @@ export async function patchCompanyAction(
           patch.industry = d.industry?.trim() ? d.industry.trim() : null;
         if (d.ownerId !== undefined) patch.ownerId = d.ownerId;
         if (Object.keys(patch).length === 0) return null;
+        patch.updatedBy = membership.userId;
 
         const [row] = await tx
           .update(companies)
@@ -506,7 +509,7 @@ export async function updateCompanyOwnerAction(
 
         const [updated] = await tx
           .update(companies)
-          .set({ ownerId: parsed.data.ownerId })
+          .set({ ownerId: parsed.data.ownerId, updatedBy: membership.userId })
           .where(eq(companies.id, parsed.data.id))
           .returning();
         if (!updated) return { changed: false, company: null as Company | null };

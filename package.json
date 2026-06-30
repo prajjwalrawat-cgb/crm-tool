@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "tsx scripts/apply-0024.ts && tsx scripts/apply-0025.ts && tsx scripts/apply-0026.ts && tsx scripts/apply-0027.ts && tsx scripts/apply-0028.ts && tsx scripts/apply-0029.ts && tsx scripts/apply-0030.ts && tsx scripts/apply-0031.ts && tsx scripts/apply-0032.ts && tsx scripts/apply-0033.ts && tsx scripts/apply-0034.ts && tsx scripts/apply-0035.ts && tsx scripts/apply-0036.ts && next build",
+    "build": "tsx scripts/apply-0024.ts && tsx scripts/apply-0025.ts && tsx scripts/apply-0026.ts && tsx scripts/apply-0027.ts && tsx scripts/apply-0028.ts && tsx scripts/apply-0029.ts && tsx scripts/apply-0030.ts && tsx scripts/apply-0031.ts && tsx scripts/apply-0032.ts && tsx scripts/apply-0033.ts && tsx scripts/apply-0034.ts && tsx scripts/apply-0035.ts && tsx scripts/apply-0036.ts && tsx scripts/apply-0037.ts && tsx scripts/apply-0038.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "inngest:dev": "npx inngest-cli@latest dev -u http://localhost:3001/api/inngest --no-discovery",

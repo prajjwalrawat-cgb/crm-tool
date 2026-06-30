@@ -4,7 +4,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { deals, memberships, type Deal } from '@/db/schema';
+import { companies, contacts, deals, memberships, type Deal } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { recordObservation } from '@/lib/agents/observations/record';
 import { checkPermission } from '@/lib/auth-guard';
@@ -34,6 +34,7 @@ import {
   updateDealSchema,
 } from '@/lib/deals/schema';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { personaOf } from '@/lib/personas';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
@@ -72,6 +73,75 @@ function customFieldErrors(errors: Record<string, string>): Record<string, strin
   );
 }
 
+/**
+ * Validate the chosen Company/Contact links: they must exist in the tenant,
+ * the contact must belong to the chosen company, and (for sales members) both
+ * must be owned-or-unassigned. Returns the normalized ids or an error.
+ */
+async function resolveDealLinks(
+  tenantId: string,
+  restrictToOwnerId: string | undefined,
+  companyId: string | null,
+  contactId: string | null,
+): Promise<
+  | { ok: true; companyId: string | null; contactId: string | null }
+  | { ok: false; message: string; field: 'companyId' | 'contactId' }
+> {
+  const cId = companyId;
+  let ctId = contactId;
+
+  if (cId) {
+    const [c] = await tenantTransaction((tx) =>
+      tx
+        .select({ ownerId: companies.ownerId })
+        .from(companies)
+        .where(
+          and(
+            eq(companies.id, cId),
+            eq(companies.tenantId, tenantId),
+            isNull(companies.deletedAt),
+          ),
+        )
+        .limit(1),
+    );
+    if (!c) return { ok: false, message: 'Selected company not found.', field: 'companyId' };
+    if (restrictToOwnerId && c.ownerId && c.ownerId !== restrictToOwnerId) {
+      return { ok: false, message: "You can't link that company.", field: 'companyId' };
+    }
+  } else {
+    ctId = null; // No company → no contact.
+  }
+
+  if (ctId) {
+    const [ct] = await tenantTransaction((tx) =>
+      tx
+        .select({ ownerId: contacts.ownerId, companyId: contacts.companyId })
+        .from(contacts)
+        .where(
+          and(
+            eq(contacts.id, ctId),
+            eq(contacts.tenantId, tenantId),
+            isNull(contacts.deletedAt),
+          ),
+        )
+        .limit(1),
+    );
+    if (!ct) return { ok: false, message: 'Selected contact not found.', field: 'contactId' };
+    if (restrictToOwnerId && ct.ownerId && ct.ownerId !== restrictToOwnerId) {
+      return { ok: false, message: "You can't link that contact.", field: 'contactId' };
+    }
+    if (cId && ct.companyId && ct.companyId !== cId) {
+      return {
+        ok: false,
+        message: 'Contact does not belong to the selected company.',
+        field: 'contactId',
+      };
+    }
+  }
+
+  return { ok: true, companyId: cId, contactId: ctId };
+}
+
 /** A member's role in the tenant (for assign-permission checks). */
 async function getMemberRole(
   tenantId: string,
@@ -101,19 +171,7 @@ export async function createDealAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
-      // Company/Contact are free-text labels — stored as typed, not linked
-      // to a company/contact record (nothing is created).
-      const companyNameRaw = formData.get('companyName');
-      const contactNameRaw = formData.get('contactName');
-      const companyNameText =
-        typeof companyNameRaw === 'string' && companyNameRaw.trim()
-          ? companyNameRaw.trim()
-          : null;
-      const contactNameText =
-        typeof contactNameRaw === 'string' && contactNameRaw.trim()
-          ? contactNameRaw.trim()
-          : null;
-
+      // Company/Contact are linked records chosen from role-scoped dropdowns.
       const raw: Record<string, FormDataEntryValue | null> = {
         name: formData.get('name'),
         description: formData.get('description'),
@@ -121,9 +179,8 @@ export async function createDealAction(
         amount: formData.get('amount'),
         currency: formData.get('currency'),
         expectedCloseDate: formData.get('expectedCloseDate'),
-        companyId: null,
-        contactId: null,
-        contactEmail: formData.get('contactEmail'),
+        companyId: formData.get('companyId') || null,
+        contactId: formData.get('contactId') || null,
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -137,6 +194,23 @@ export async function createDealAction(
           ok: false,
           message: flat.formErrors[0] ?? 'Please fix the highlighted fields.',
           fieldErrors: flat.fieldErrors as Record<string, string[]>,
+        };
+      }
+
+      // Validate the Company/Contact links against tenant + role scope.
+      const restrictToOwnerId =
+        personaOf(membership.role) === 'sales' ? membership.userId : undefined;
+      const links = await resolveDealLinks(
+        tenant.id,
+        restrictToOwnerId,
+        parsed.data.companyId,
+        parsed.data.contactId,
+      );
+      if (!links.ok) {
+        return {
+          ok: false,
+          message: links.message,
+          fieldErrors: { [links.field]: [links.message] },
         };
       }
 
@@ -182,11 +256,8 @@ export async function createDealAction(
           .insert(deals)
           .values({
             tenantId: tenant.id,
-            companyId: parsed.data.companyId,
-            contactId: parsed.data.contactId,
-            companyNameText,
-            contactNameText,
-            contactEmailText: parsed.data.contactEmail,
+            companyId: links.companyId,
+            contactId: links.contactId,
             name: parsed.data.name,
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,
@@ -196,6 +267,7 @@ export async function createDealAction(
             closedAt,
             ownerId: finalOwnerId ?? null,
             customFields: customResult.values,
+            updatedBy: membership.userId,
           })
           .returning();
         if (!row) return null;
@@ -256,18 +328,7 @@ export async function updateDealAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
-      // Free-text company/contact labels (not linked records).
-      const companyNameRaw = formData.get('companyName');
-      const contactNameRaw = formData.get('contactName');
-      const companyNameText =
-        typeof companyNameRaw === 'string' && companyNameRaw.trim()
-          ? companyNameRaw.trim()
-          : null;
-      const contactNameText =
-        typeof contactNameRaw === 'string' && contactNameRaw.trim()
-          ? contactNameRaw.trim()
-          : null;
-
+      // Company/Contact are linked records chosen from role-scoped dropdowns.
       const raw: Record<string, FormDataEntryValue | null> = {
         id: formData.get('id'),
         name: formData.get('name'),
@@ -276,9 +337,8 @@ export async function updateDealAction(
         amount: formData.get('amount'),
         currency: formData.get('currency'),
         expectedCloseDate: formData.get('expectedCloseDate'),
-        companyId: null,
-        contactId: null,
-        contactEmail: formData.get('contactEmail'),
+        companyId: formData.get('companyId') || null,
+        contactId: formData.get('contactId') || null,
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -302,6 +362,22 @@ export async function updateDealAction(
           ok: false,
           message: 'Please fix the highlighted fields.',
           fieldErrors: customFieldErrors(customResult.errors),
+        };
+      }
+
+      const restrictToOwnerId =
+        personaOf(membership.role) === 'sales' ? membership.userId : undefined;
+      const links = await resolveDealLinks(
+        tenant.id,
+        restrictToOwnerId,
+        parsed.data.companyId,
+        parsed.data.contactId,
+      );
+      if (!links.ok) {
+        return {
+          ok: false,
+          message: links.message,
+          fieldErrors: { [links.field]: [links.message] },
         };
       }
 
@@ -356,11 +432,12 @@ export async function updateDealAction(
         const [updated] = await tx
           .update(deals)
           .set({
-            companyId: parsed.data.companyId,
-            contactId: parsed.data.contactId,
-            companyNameText,
-            contactNameText,
-            contactEmailText: parsed.data.contactEmail,
+            companyId: links.companyId,
+            contactId: links.contactId,
+            // Linked now — clear any legacy free-text labels.
+            companyNameText: null,
+            contactNameText: null,
+            contactEmailText: null,
             name: parsed.data.name,
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,
@@ -369,6 +446,7 @@ export async function updateDealAction(
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt: nextClosedAt,
             customFields: customResult.values,
+            updatedBy: membership.userId,
             ...ownerPatch,
           })
           .where(
@@ -528,6 +606,7 @@ export async function updateDealStageAction(
           .set({
             stage: parsed.data.stage,
             closedAt: nextClosedAt,
+            updatedBy: membership.userId,
           })
           .where(
             and(
@@ -874,6 +953,27 @@ export async function patchDealAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      // Resolve linked company/contact (tenant + role scope) before the write.
+      let linkPatch: Record<string, unknown> = {};
+      if (d.companyId !== undefined || d.contactId !== undefined) {
+        const restrictToOwnerId =
+          personaOf(membership.role) === 'sales' ? membership.userId : undefined;
+        const links = await resolveDealLinks(
+          tenant.id,
+          restrictToOwnerId,
+          d.companyId ?? null,
+          d.contactId ?? null,
+        );
+        if (!links.ok) return { ok: false, message: links.message };
+        linkPatch = {
+          companyId: links.companyId,
+          contactId: links.contactId,
+          companyNameText: null,
+          contactNameText: null,
+          contactEmailText: null,
+        };
+      }
+
       const updated = await tenantTransaction(async (tx) => {
         const [previous] = await tx
           .select()
@@ -888,7 +988,7 @@ export async function patchDealAction(
           .limit(1);
         if (!previous) return null;
 
-        const patch: Record<string, unknown> = {};
+        const patch: Record<string, unknown> = { ...linkPatch };
         if (d.name !== undefined) patch.name = d.name;
         if (d.expectedCloseDate !== undefined)
           patch.expectedCloseDate = d.expectedCloseDate;
@@ -904,6 +1004,7 @@ export async function patchDealAction(
           patch.amountMinor = toMinorUnits(d.amount, d.currency ?? previous.currency);
         }
         if (Object.keys(patch).length === 0) return previous;
+        patch.updatedBy = membership.userId;
 
         const [row] = await tx
           .update(deals)
@@ -1017,7 +1118,7 @@ export async function updateDealOwnerAction(
 
         const [updated] = await tx
           .update(deals)
-          .set({ ownerId: parsed.data.ownerId })
+          .set({ ownerId: parsed.data.ownerId, updatedBy: membership.userId })
           .where(eq(deals.id, parsed.data.id))
           .returning();
         if (!updated) return { changed: false, deal: null as Deal | null };

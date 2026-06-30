@@ -1,5 +1,6 @@
 import { withTenantSession } from '@/lib/auth-guard';
-import { listContactOptions } from '@/lib/contacts/queries';
+import { listCompanyOptionsScoped } from '@/lib/companies/queries';
+import { listContactPickerOptions } from '@/lib/contacts/queries';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { parseDealFilters } from '@/lib/deals/filters';
 import { listDealCompanyOptions, listDeals } from '@/lib/deals/queries';
@@ -37,21 +38,30 @@ export default async function DealsPage({
     const restrictToOwnerOrUnassigned =
       persona === 'sales' ? userId : undefined;
 
-    const [page, companyOptions, contactOptions, teammates, customFieldDefs] =
-      await Promise.all([
-        listDeals(tenant.id, {
-          search,
-          cursor,
-          size,
-          filters,
-          currentUserId: userId,
-          restrictToOwnerOrUnassigned,
-        }),
-        listDealCompanyOptions(tenant.id),
-        listContactOptions(tenant.id),
-        listTeammates(tenant.id, tenant.name),
-        listCustomFieldDefs(tenant.id, 'deal'),
-      ]);
+    const [
+      page,
+      companyOptions,
+      formCompanyOptions,
+      formContactOptions,
+      teammates,
+      customFieldDefs,
+    ] = await Promise.all([
+      listDeals(tenant.id, {
+        search,
+        cursor,
+        size,
+        filters,
+        currentUserId: userId,
+        restrictToOwnerOrUnassigned,
+      }),
+      // Filter dropdown uses free-text company names; the form uses real,
+      // role-scoped company/contact records.
+      listDealCompanyOptions(tenant.id),
+      listCompanyOptionsScoped(tenant.id, restrictToOwnerOrUnassigned),
+      listContactPickerOptions(tenant.id, restrictToOwnerOrUnassigned),
+      listTeammates(tenant.id, tenant.name),
+      listCustomFieldDefs(tenant.id, 'deal'),
+    ]);
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -70,7 +80,8 @@ export default async function DealsPage({
           initialSearch={search ?? ''}
           initialFilters={filters}
           companyOptions={companyOptions}
-          contactOptions={contactOptions}
+          formCompanyOptions={formCompanyOptions}
+          formContactOptions={formContactOptions}
           teammates={teammates}
           currentUserId={userId}
           currentRole={membership.role}

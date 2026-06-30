@@ -145,6 +145,7 @@ export function CompaniesView({
       ownerId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
+      updatedBy: null,
       deletedAt: null,
       deletedBy: null,
       __pending: true,

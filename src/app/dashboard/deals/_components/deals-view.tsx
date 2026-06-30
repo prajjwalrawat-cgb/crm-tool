@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
-import type { ContactOption } from '@/lib/contacts/queries';
+import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { formatCurrency, fromMinorUnits, toMinorUnits } from '@/lib/deals/currency';
@@ -47,6 +47,7 @@ import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
 import { EmptyState } from './empty-state';
 import { InlineEditCell } from '../../_components/inline-edit-cell';
+import { InlineSelectCell } from '../../_components/inline-select-cell';
 import { SavedViews } from './saved-views';
 import { StageBadge } from './stage-badge';
 
@@ -58,14 +59,11 @@ type OptimisticOp =
   | { type: 'patch'; id: string; patch: Partial<DealItem> }
   | { type: 'remove'; id: string };
 
-/** Fields editable inline in the table (stage/owner have dedicated controls). */
-type EditableField =
-  | 'name'
-  | 'amount'
-  | 'expectedCloseDate'
-  | 'companyName'
-  | 'contactName'
-  | 'contactEmail';
+/**
+ * Fields editable inline in the table. Company/Contact are linked records now
+ * (edited via the form's dropdowns); stage/owner have dedicated controls.
+ */
+type EditableField = 'amount' | 'expectedCloseDate';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -82,7 +80,8 @@ export function DealsView({
   initialSearch,
   initialFilters,
   companyOptions,
-  contactOptions,
+  formCompanyOptions,
+  formContactOptions,
   teammates,
   currentUserId,
   currentRole,
@@ -93,8 +92,11 @@ export function DealsView({
   initialItems: DealRow[];
   initialSearch: string;
   initialFilters: DealFilters;
+  /** Free-text company names for the filter dropdown. */
   companyOptions: CompanyOption[];
-  contactOptions: ContactOption[];
+  /** Real, role-scoped company/contact records for the create/edit forms. */
+  formCompanyOptions: CompanyOption[];
+  formContactOptions: ContactPickerOption[];
   teammates: Teammate[];
   currentUserId: string;
   currentRole: MembershipRole;
@@ -258,12 +260,17 @@ export function DealsView({
     const amountNum = Number(String(formData.get('amount') ?? '0'));
     const currency = String(formData.get('currency') ?? 'USD');
     const expectedCloseDate = String(formData.get('expectedCloseDate') ?? '').trim() || null;
-    // Company/Contact/Email are free-text labels now (not linked records).
-    const companyNameText = String(formData.get('companyName') ?? '').trim() || null;
-    const contactNameText = String(formData.get('contactName') ?? '').trim() || null;
-    const contactEmailText = String(formData.get('contactEmail') ?? '').trim() || null;
-    const companyId = base?.companyId ?? null;
-    const contactId = base?.contactId ?? null;
+    // Company/Contact are linked records; resolve display names from the form
+    // options so the optimistic row shows the right labels until refresh.
+    const companyId = (String(formData.get('companyId') ?? '').trim() || null) ?? base?.companyId ?? null;
+    const contactId = (String(formData.get('contactId') ?? '').trim() || null) ?? base?.contactId ?? null;
+    const companyName = companyId
+      ? formCompanyOptions.find((c) => c.id === companyId)?.name ?? base?.companyName ?? null
+      : null;
+    const contact = contactId
+      ? formContactOptions.find((c) => c.id === contactId)
+      : undefined;
+    const contactName = contact?.label ?? (contactId ? base?.contactName ?? null : null);
     // ownerId is posted only when the user can reassign (owner/manager); when
     // the field is absent, keep the deal's current owner.
     const ownerIdRaw = formData.get('ownerId');
@@ -301,13 +308,14 @@ export function DealsView({
       updatedAt: new Date(),
       deletedAt: null,
       deletedBy: null,
-      companyNameText,
-      contactNameText,
-      contactEmailText,
+      companyNameText: null,
+      contactNameText: null,
+      contactEmailText: null,
       customFields: base?.customFields ?? {},
-      companyName: companyNameText ?? base?.companyName ?? null,
-      contactName: contactNameText ?? base?.contactName ?? null,
-      contactEmail: contactEmailText ?? base?.contactEmail ?? null,
+      updatedBy: currentUserId,
+      companyName,
+      contactName,
+      contactEmail: contactId ? base?.contactEmail ?? null : null,
       __pending: true,
     };
   }
@@ -368,8 +376,6 @@ export function DealsView({
     raw: string,
   ): { optimistic: Partial<DealItem>; server: Record<string, unknown> } {
     switch (field) {
-      case 'name':
-        return { optimistic: { name: raw }, server: { name: raw } };
       case 'amount': {
         const num = Number(raw) || 0;
         return {
@@ -382,38 +388,15 @@ export function DealsView({
           optimistic: { expectedCloseDate: raw || null },
           server: { expectedCloseDate: raw || null },
         };
-      case 'companyName':
-        return {
-          optimistic: { companyName: raw || null, companyNameText: raw || null },
-          server: { companyName: raw },
-        };
-      case 'contactName':
-        return {
-          optimistic: { contactName: raw || null, contactNameText: raw || null },
-          server: { contactName: raw },
-        };
-      case 'contactEmail':
-        return {
-          optimistic: { contactEmail: raw || null, contactEmailText: raw || null },
-          server: { contactEmail: raw },
-        };
     }
   }
 
   function fieldRaw(deal: DealItem, field: EditableField): string {
     switch (field) {
-      case 'name':
-        return deal.name;
       case 'amount':
         return String(fromMinorUnits(deal.amountMinor, deal.currency));
       case 'expectedCloseDate':
         return deal.expectedCloseDate ?? '';
-      case 'companyName':
-        return deal.companyName ?? '';
-      case 'contactName':
-        return deal.contactName ?? '';
-      case 'contactEmail':
-        return deal.contactEmail ?? '';
     }
   }
 
@@ -450,6 +433,60 @@ export function DealsView({
       deal.id,
       { optimistic: { ownerId }, server: { ownerId } },
       () => runPatch(deal.id, { optimistic: { ownerId: prevOwner }, server: { ownerId: prevOwner } }),
+    );
+  }
+
+  // Inline company change (clears the contact, which is company-scoped).
+  function commitCompany(deal: DealItem, companyId: string) {
+    const next = companyId || null;
+    if ((deal.companyId ?? null) === next) return;
+    const company = formCompanyOptions.find((c) => c.id === next);
+    runPatch(
+      deal.id,
+      {
+        optimistic: {
+          companyId: next,
+          companyName: company?.name ?? null,
+          contactId: null,
+          contactName: null,
+          contactEmail: null,
+        },
+        server: { companyId: next, contactId: null },
+      },
+      () =>
+        runPatch(deal.id, {
+          optimistic: {
+            companyId: deal.companyId,
+            companyName: deal.companyName,
+            contactId: deal.contactId,
+            contactName: deal.contactName,
+            contactEmail: deal.contactEmail,
+          },
+          server: { companyId: deal.companyId, contactId: deal.contactId },
+        }),
+    );
+  }
+
+  // Inline contact change (within the deal's company).
+  function commitContact(deal: DealItem, contactId: string) {
+    const next = contactId || null;
+    if ((deal.contactId ?? null) === next) return;
+    const contact = formContactOptions.find((c) => c.id === next);
+    runPatch(
+      deal.id,
+      {
+        optimistic: { contactId: next, contactName: contact?.label ?? null, contactEmail: null },
+        server: { companyId: deal.companyId, contactId: next },
+      },
+      () =>
+        runPatch(deal.id, {
+          optimistic: {
+            contactId: deal.contactId,
+            contactName: deal.contactName,
+            contactEmail: deal.contactEmail,
+          },
+          server: { companyId: deal.companyId, contactId: deal.contactId },
+        }),
     );
   }
 
@@ -544,8 +581,8 @@ export function DealsView({
                     error={createError}
                     fieldErrors={createFieldErrors}
                     resetKey={createResetKey}
-                    companyOptions={companyOptions}
-                    contactOptions={contactOptions}
+                    companyOptions={formCompanyOptions}
+                    contactOptions={formContactOptions}
                     teammates={teammates}
                     currentUserId={currentUserId}
                     currentRole={currentRole}
@@ -604,6 +641,10 @@ export function DealsView({
               currentUserId={currentUserId}
               canAssignOwner={canAssign}
               assignableTeammates={assignable}
+              companyOptions={formCompanyOptions}
+              contactOptions={formContactOptions}
+              onPatchCompany={commitCompany}
+              onPatchContact={commitContact}
               selectable={canEdit || canDelete}
               selectedIds={selectedIds}
               allSelected={allSelected}
@@ -635,8 +676,8 @@ export function DealsView({
         open={editingDeal !== null}
         onClose={() => setEditingDeal(null)}
         deal={editingDeal}
-        companyOptions={companyOptions}
-        contactOptions={contactOptions}
+        companyOptions={formCompanyOptions}
+        contactOptions={formContactOptions}
         teammates={teammates}
         currentUserId={currentUserId}
         currentRole={currentRole}
@@ -661,6 +702,10 @@ function DealsTable({
   currentUserId,
   canAssignOwner,
   assignableTeammates,
+  companyOptions,
+  contactOptions,
+  onPatchCompany,
+  onPatchContact,
   selectable,
   selectedIds,
   allSelected,
@@ -681,6 +726,10 @@ function DealsTable({
   currentUserId: string;
   canAssignOwner: boolean;
   assignableTeammates: Teammate[];
+  companyOptions: CompanyOption[];
+  contactOptions: ContactPickerOption[];
+  onPatchCompany: (deal: DealItem, companyId: string) => void;
+  onPatchContact: (deal: DealItem, contactId: string) => void;
   selectable: boolean;
   selectedIds: Set<string>;
   allSelected: boolean;
@@ -695,6 +744,7 @@ function DealsTable({
   deletePending: boolean;
 }) {
   const teammateById = new Map(teammates.map((t) => [t.id, t]));
+  const companySelectOptions = companyOptions.map((c) => ({ value: c.id, label: c.name }));
   const showActions = canEdit || canDelete;
   return (
     <>
@@ -890,32 +940,30 @@ function DealsTable({
                     />
                   </td>
                   <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
-                    <InlineEditCell
+                    <InlineSelectCell
                       ariaLabel="company"
                       disabled={!canEdit || isOptimistic}
-                      value={d.companyName ?? ''}
-                      onCommit={(v) => onPatchField(d, 'companyName', v)}
+                      value={d.companyId ?? ''}
+                      options={companySelectOptions}
+                      render={d.companyName ?? '—'}
+                      emptyLabel="— No company —"
+                      onCommit={(v) => onPatchCompany(d, v)}
                     />
                   </td>
                   <td className="hidden px-3 py-2 text-slate-600 lg:table-cell">
-                    <div className="flex flex-col leading-tight">
-                      <InlineEditCell
-                        ariaLabel="contact name"
-                        disabled={!canEdit || isOptimistic}
-                        value={d.contactName ?? ''}
-                        onCommit={(v) => onPatchField(d, 'contactName', v)}
-                      />
-                      <span className="text-[11px] text-slate-400">
-                        <InlineEditCell
-                          ariaLabel="contact email"
-                          type="text"
-                          placeholder="+ email"
-                          disabled={!canEdit || isOptimistic}
-                          value={d.contactEmail ?? ''}
-                          onCommit={(v) => onPatchField(d, 'contactEmail', v)}
-                        />
-                      </span>
-                    </div>
+                    <InlineSelectCell
+                      ariaLabel="contact"
+                      disabled={!canEdit || isOptimistic || !d.companyId}
+                      value={d.contactId ?? ''}
+                      options={contactOptions
+                        .filter((c) => c.companyId === d.companyId)
+                        .map((c) => ({ value: c.id, label: c.label }))}
+                      render={
+                        d.contactName ?? d.contactEmail ?? (d.companyId ? '—' : 'Pick a company')
+                      }
+                      emptyLabel="— No contact —"
+                      onCommit={(v) => onPatchContact(d, v)}
+                    />
                   </td>
                   <td className="hidden px-3 py-2 md:table-cell">
                     <InlineOwnerCell

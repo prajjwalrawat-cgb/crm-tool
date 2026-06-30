@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, asc, desc, eq, ilike, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import { companies, type Company } from '@/db/schema';
 import { type CompanyFilters } from '@/lib/companies/filters';
@@ -28,6 +28,35 @@ export async function listCompanyOptions(tenantId: string): Promise<CompanyOptio
       .select({ id: companies.id, name: companies.name })
       .from(companies)
       .where(and(eq(companies.tenantId, tenantId), isNull(companies.deletedAt)))
+      .orderBy(asc(companies.name)),
+  );
+}
+
+/**
+ * Company options for the deal form, scoped by role. When `restrictToOwnerId`
+ * is set (sales members), returns companies they own OR that are unassigned;
+ * owners/managers pass `undefined` to see everything.
+ */
+export async function listCompanyOptionsScoped(
+  tenantId: string,
+  restrictToOwnerId?: string,
+): Promise<CompanyOption[]> {
+  return await tenantTransaction(async (tx) =>
+    tx
+      .select({ id: companies.id, name: companies.name })
+      .from(companies)
+      .where(
+        and(
+          eq(companies.tenantId, tenantId),
+          isNull(companies.deletedAt),
+          restrictToOwnerId
+            ? or(
+                eq(companies.ownerId, restrictToOwnerId),
+                isNull(companies.ownerId),
+              )
+            : undefined,
+        ),
+      )
       .orderBy(asc(companies.name)),
   );
 }

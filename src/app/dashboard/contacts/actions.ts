@@ -121,6 +121,7 @@ export async function createContactAction(
             phone: parsed.data.phone,
             title: parsed.data.title,
             ownerId: parsed.data.ownerId ?? null,
+            updatedBy: membership.userId,
           })
           .returning();
         if (!row) return null;
@@ -221,6 +222,7 @@ export async function updateContactAction(
             email: parsed.data.email,
             phone: parsed.data.phone,
             title: parsed.data.title,
+            updatedBy: membership.userId,
           })
           .where(
             and(
@@ -328,6 +330,7 @@ export async function patchContactAction(
           if (!nextFirst && !nextLast && !nextEmail) {
             throw new Error('CONTACT_IDENTITY');
           }
+          patch.updatedBy = membership.userId;
 
           const [row] = await tx
             .update(contacts)
@@ -593,7 +596,7 @@ export async function updateContactOwnerAction(
 
         const [updated] = await tx
           .update(contacts)
-          .set({ ownerId: parsed.data.ownerId })
+          .set({ ownerId: parsed.data.ownerId, updatedBy: membership.userId })
           .where(eq(contacts.id, parsed.data.id))
           .returning();
         if (!updated) return { changed: false, contact: null as Contact | null };

@@ -27,6 +27,8 @@ export const contacts = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    /** Last user to change this contact (audit). */
+    updatedBy: text('updated_by'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: text('deleted_by'),
   },

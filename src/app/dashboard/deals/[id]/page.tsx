@@ -107,6 +107,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       }
     }
     if (deal.ownerId) authorIds.add(deal.ownerId);
+    if (deal.updatedBy) authorIds.add(deal.updatedBy);
     const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
 
     return (
@@ -191,6 +192,14 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             <DetailCard
               label="Created"
               value={dateFormatter.format(new Date(deal.createdAt))}
+            />
+            <DetailCard
+              label="Last updated"
+              value={
+                (deal.updatedBy
+                  ? `${authorLookup[deal.updatedBy] ?? 'Someone'} · `
+                  : '') + dateFormatter.format(new Date(deal.updatedAt))
+              }
             />
             {deal.closedAt ? (
               <DetailCard

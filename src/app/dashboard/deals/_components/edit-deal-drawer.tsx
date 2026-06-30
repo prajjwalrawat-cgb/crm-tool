@@ -4,7 +4,7 @@ import { Loader2, Save, Trash2 } from 'lucide-react';
 
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
-import type { ContactOption } from '@/lib/contacts/queries';
+import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
 import { fromMinorUnits, KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { Drawer } from '../../_components/drawer';
 import { OwnerFormField } from '../../_components/owner-form-field';
+import { DealCompanyContactFields } from './deal-company-contact-fields';
 
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
   return Object.fromEntries(
@@ -29,7 +30,7 @@ type Props = {
   onClose: () => void;
   deal: DealRow | null;
   companyOptions: CompanyOption[];
-  contactOptions: ContactOption[];
+  contactOptions: ContactPickerOption[];
   teammates: Teammate[];
   currentUserId: string;
   currentRole: MembershipRole;
@@ -47,6 +48,8 @@ export function EditDealDrawer({
   open,
   onClose,
   deal,
+  companyOptions,
+  contactOptions,
   teammates,
   currentUserId,
   currentRole,
@@ -210,26 +213,14 @@ export function EditDealDrawer({
           errors={fieldErrors.expectedCloseDate}
         />
 
-        <Field
-          name="companyName"
-          label="Company"
-          defaultValue={deal?.companyName ?? ''}
-          errors={fieldErrors.companyName}
-        />
-
-        <Field
-          name="contactName"
-          label="Contact"
-          defaultValue={deal?.contactName ?? ''}
-          errors={fieldErrors.contactName}
-        />
-
-        <Field
-          name="contactEmail"
-          label="Email"
-          type="email"
-          defaultValue={deal?.contactEmail ?? ''}
-          errors={fieldErrors.contactEmail}
+        <DealCompanyContactFields
+          key={`cc-${deal?.id ?? 'none'}`}
+          companyOptions={companyOptions}
+          contactOptions={contactOptions}
+          defaultCompanyId={deal?.companyId ?? null}
+          defaultContactId={deal?.contactId ?? null}
+          companyError={fieldErrors.companyId}
+          contactError={fieldErrors.contactId}
         />
 
         {canAssign ? (

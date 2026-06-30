@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
 
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
-import type { ContactOption } from '@/lib/contacts/queries';
+import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { KNOWN_CURRENCIES } from '@/lib/deals/currency';
@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { OwnerFormField } from '../../_components/owner-form-field';
+import { DealCompanyContactFields } from './deal-company-contact-fields';
 
 /** Pull `cf_*` errors out of the field-error map (first message each). */
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
@@ -31,7 +32,7 @@ type Props = {
   fieldErrors: Record<string, string[]>;
   resetKey: number;
   companyOptions: CompanyOption[];
-  contactOptions: ContactOption[];
+  contactOptions: ContactPickerOption[];
   teammates: Teammate[];
   currentUserId: string;
   currentRole: MembershipRole;
@@ -44,6 +45,8 @@ export function CreateDealForm({
   error,
   fieldErrors,
   resetKey,
+  companyOptions,
+  contactOptions,
   teammates,
   currentUserId,
   currentRole,
@@ -131,26 +134,11 @@ export function CreateDealForm({
         errors={fieldErrors.expectedCloseDate}
       />
 
-      <Field
-        name="companyName"
-        label="Company"
-        placeholder="Company name"
-        errors={fieldErrors.companyName}
-      />
-
-      <Field
-        name="contactName"
-        label="Contact"
-        placeholder="Contact name"
-        errors={fieldErrors.contactName}
-      />
-
-      <Field
-        name="contactEmail"
-        label="Email"
-        type="email"
-        placeholder="contact@company.com"
-        errors={fieldErrors.contactEmail}
+      <DealCompanyContactFields
+        companyOptions={companyOptions}
+        contactOptions={contactOptions}
+        companyError={fieldErrors.companyId}
+        contactError={fieldErrors.contactId}
       />
 
       {canAssign ? (

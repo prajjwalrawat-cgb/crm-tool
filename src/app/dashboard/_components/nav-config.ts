@@ -85,6 +85,14 @@ const ADMIN_NAV: readonly NavGroup[] = [
     ],
   },
   {
+    id: 'crm',
+    label: 'CRM',
+    items: [
+      { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
+      { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
+    ],
+  },
+  {
     id: 'insights',
     label: 'Insights',
     items: [

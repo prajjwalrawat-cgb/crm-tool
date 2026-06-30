@@ -62,6 +62,52 @@ export async function listContactOptions(tenantId: string): Promise<ContactOptio
   });
 }
 
+export type ContactPickerOption = {
+  id: string;
+  label: string;
+  companyId: string | null;
+};
+
+/**
+ * Contact options for the deal form: each carries its `companyId` so the form
+ * can filter the contact dropdown to the selected company. Scoped by role like
+ * `listCompanyOptionsScoped` (sales members see their own + unassigned).
+ */
+export async function listContactPickerOptions(
+  tenantId: string,
+  restrictToOwnerId?: string,
+): Promise<ContactPickerOption[]> {
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select({
+        id: contacts.id,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        companyId: contacts.companyId,
+      })
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.tenantId, tenantId),
+          isNull(contacts.deletedAt),
+          restrictToOwnerId
+            ? or(eq(contacts.ownerId, restrictToOwnerId), isNull(contacts.ownerId))
+            : undefined,
+        ),
+      )
+      .orderBy(
+        asc(sql`coalesce(${contacts.lastName}, ${contacts.firstName}, ${contacts.email})`),
+      ),
+  );
+
+  return rows.map((c) => {
+    const nameParts = [c.firstName, c.lastName].filter(Boolean) as string[];
+    const label = nameParts.length ? nameParts.join(' ') : c.email ?? '(unnamed)';
+    return { id: c.id, label, companyId: c.companyId };
+  });
+}
+
 export type ListContactsOptions = {
   search?: string;
   cursor?: Cursor | null;
@@ -152,6 +198,7 @@ export async function listContacts(
           ownerId: contacts.ownerId,
           createdAt: contacts.createdAt,
           updatedAt: contacts.updatedAt,
+          updatedBy: contacts.updatedBy,
           deletedAt: contacts.deletedAt,
           deletedBy: contacts.deletedBy,
           companyName: companies.name,
