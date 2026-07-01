@@ -38,12 +38,8 @@ export function SignInForm({ next }: { next?: string }) {
         <Link href="/forgot-password" className={linkClass}>
           Forgot password?
         </Link>
-        <Link
-          href={next ? `/sign-up?next=${encodeURIComponent(next)}` : '/sign-up'}
-          className={linkClass}
-        >
-          Create account
-        </Link>
+        {/* Invite-only: no public "Create account" link. New members join via
+            an invitation link (which lands on /accept-invite). */}
       </div>
     </form>
   );

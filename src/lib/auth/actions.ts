@@ -15,6 +15,7 @@ import {
   createUser,
   getUserByEmail,
   getUserById,
+  normalizeEmail,
   setUserPassword,
 } from '@/lib/auth/users';
 import {
@@ -23,7 +24,10 @@ import {
   userHasMembership,
 } from '@/lib/auth/workspaces';
 import { createTenant } from '@/lib/tenant';
-import { acceptInvitation } from '@/lib/team/invitations';
+import {
+  acceptInvitation,
+  getInvitationByToken,
+} from '@/lib/team/invitations';
 
 export type AuthFormState = {
   error?: string;
@@ -104,28 +108,51 @@ export async function signUpAction(
     return { error: 'An account with this email already exists. Sign in instead.' };
   }
 
+  // Invite-only: creating an account requires a valid, unexpired invitation
+  // addressed to this exact email. We validate the token BEFORE creating the
+  // user so a bad/missing token never leaves an orphaned, workspace-less
+  // account behind. There is no self-serve "create your own workspace" path.
+  const rawToken = formData.get('token');
+  const inviteToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+  if (!inviteToken) {
+    return {
+      error:
+        'Sign-up is invite-only. Ask a workspace admin to send you an invitation.',
+    };
+  }
+  const invite = await getInvitationByToken(inviteToken);
+  if (!invite) {
+    return { error: 'This invitation is invalid or has expired.' };
+  }
+  if (normalizeEmail(parsed.data.email) !== invite.invitation.email) {
+    return {
+      error: 'This invitation was sent to a different email address.',
+    };
+  }
+
   const passwordHash = await hashPassword(parsed.data.password);
-  const inviteToken = formData.get('token');
   const user = await createUser({
     email: parsed.data.email,
     passwordHash,
     firstName: parsed.data.firstName ?? null,
     lastName: parsed.data.lastName ?? null,
-    emailVerified: typeof inviteToken === 'string' && inviteToken.length > 0,
+    emailVerified: true,
   });
 
-  let tid: string | null = null;
-  if (typeof inviteToken === 'string' && inviteToken.length > 0) {
-    const res = await acceptInvitation({
-      token: inviteToken,
-      userId: user.id,
-      userEmail: user.email,
-    });
-    if (res.ok) tid = res.tenant.id;
+  const res = await acceptInvitation({
+    token: inviteToken,
+    userId: user.id,
+    userEmail: user.email,
+  });
+  if (!res.ok) {
+    // The invite was valid moments ago but couldn't be consumed (e.g. it was
+    // just revoked or accepted elsewhere). The account exists but has no
+    // workspace; send them to sign-in with a clear message.
+    return { error: res.message };
   }
 
-  await setSession({ sub: user.id, tid });
-  redirect(tid ? '/dashboard' : '/select-org');
+  await setSession({ sub: user.id, tid: res.tenant.id });
+  redirect('/dashboard');
 }
 
 /* ----------------------------- SIGN OUT ---------------------------- */

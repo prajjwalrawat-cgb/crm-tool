@@ -43,13 +43,13 @@ export const listUserWorkspaces = cache(
 
 /**
  * Workspace creation is restricted to the OWNER of the currently-active
- * workspace. A brand-new user with no workspace yet may create their first
- * one (bootstrap), otherwise they could never get in. Members, managers, and
- * admins of the active workspace cannot create new ones.
+ * workspace. Invite-only: a brand-new user with no workspace yet may NOT
+ * self-serve a tenant — they must be invited into one. Members, managers,
+ * and admins of the active workspace also cannot create new ones.
  */
 export async function canCreateWorkspace(userId: string): Promise<boolean> {
   const ws = await listUserWorkspaces(userId);
-  if (ws.length === 0) return true; // bootstrap: first workspace
+  if (ws.length === 0) return false; // invite-only: no self-serve bootstrap
   const membership = await getCurrentMembership();
   return membership?.role === 'owner';
 }
