@@ -34,6 +34,7 @@ import {
   updateDealSchema,
 } from '@/lib/deals/schema';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import { personaOf } from '@/lib/personas';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
@@ -181,6 +182,9 @@ export async function createDealAction(
         expectedCloseDate: formData.get('expectedCloseDate'),
         companyId: formData.get('companyId') || null,
         contactId: formData.get('contactId') || null,
+        unitPrice: formData.get('unitPrice'),
+        quantity: formData.get('quantity'),
+        offerPrice: formData.get('offerPrice'),
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -245,7 +249,22 @@ export async function createDealAction(
         };
       }
 
-      const amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
+      // Per-unit pricing: when both are provided, Amount is derived server-side
+      // (never trust the client's amount) and the unit price + qty are stored.
+      let amountMinor: number;
+      let unitPriceMinor: number | null = null;
+      let quantity: number | null = null;
+      if (parsed.data.unitPrice !== undefined && parsed.data.quantity !== undefined) {
+        unitPriceMinor = toMinorUnits(parsed.data.unitPrice, parsed.data.currency);
+        quantity = parsed.data.quantity;
+        amountMinor = unitPriceMinor * quantity;
+      } else {
+        amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
+      }
+      const offerPriceMinor =
+        parsed.data.offerPrice !== undefined
+          ? toMinorUnits(parsed.data.offerPrice, parsed.data.currency)
+          : null;
       const closedAt =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost'
           ? new Date()
@@ -262,6 +281,9 @@ export async function createDealAction(
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,
             amountMinor,
+            unitPriceMinor,
+            quantity,
+            offerPriceMinor,
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt,
@@ -339,6 +361,9 @@ export async function updateDealAction(
         expectedCloseDate: formData.get('expectedCloseDate'),
         companyId: formData.get('companyId') || null,
         contactId: formData.get('contactId') || null,
+        unitPrice: formData.get('unitPrice'),
+        quantity: formData.get('quantity'),
+        offerPrice: formData.get('offerPrice'),
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -381,7 +406,20 @@ export async function updateDealAction(
         };
       }
 
-      const amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
+      let amountMinor: number;
+      let unitPriceMinor: number | null = null;
+      let quantity: number | null = null;
+      if (parsed.data.unitPrice !== undefined && parsed.data.quantity !== undefined) {
+        unitPriceMinor = toMinorUnits(parsed.data.unitPrice, parsed.data.currency);
+        quantity = parsed.data.quantity;
+        amountMinor = unitPriceMinor * quantity;
+      } else {
+        amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
+      }
+      const offerPriceMinor =
+        parsed.data.offerPrice !== undefined
+          ? toMinorUnits(parsed.data.offerPrice, parsed.data.currency)
+          : null;
       const isClosedStage =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
 
@@ -442,6 +480,9 @@ export async function updateDealAction(
             description: parsed.data.description ?? null,
             stage: parsed.data.stage,
             amountMinor,
+            unitPriceMinor,
+            quantity,
+            offerPriceMinor,
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt: nextClosedAt,
@@ -953,6 +994,15 @@ export async function patchDealAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      // Amount is derived (unit price × qty) either when the workspace has
+      // per-unit pricing on, OR when this deal already carries a unit price +
+      // qty (kept even after the toggle is turned off). In both cases a direct
+      // amount patch is rejected so it can never desync.
+      const settingsUnitPricing =
+        d.amount !== undefined
+          ? (await getOrgSettings(tenant.id)).dealUnitPricingEnabled
+          : false;
+
       // Resolve linked company/contact (tenant + role scope) before the write.
       let linkPatch: Record<string, unknown> = {};
       if (d.companyId !== undefined || d.contactId !== undefined) {
@@ -974,7 +1024,9 @@ export async function patchDealAction(
         };
       }
 
-      const updated = await tenantTransaction(async (tx) => {
+      let updated: typeof deals.$inferSelect | null;
+      try {
+        updated = await tenantTransaction(async (tx) => {
         const [previous] = await tx
           .select()
           .from(deals)
@@ -987,6 +1039,14 @@ export async function patchDealAction(
           )
           .limit(1);
         if (!previous) return null;
+
+        if (
+          d.amount !== undefined &&
+          (settingsUnitPricing ||
+            (previous.unitPriceMinor != null && previous.quantity != null))
+        ) {
+          throw new Error('AMOUNT_DERIVED');
+        }
 
         const patch: Record<string, unknown> = { ...linkPatch };
         if (d.name !== undefined) patch.name = d.name;
@@ -1046,7 +1106,16 @@ export async function patchDealAction(
           });
         }
         return row;
-      });
+        });
+      } catch (err) {
+        if (err instanceof Error && err.message === 'AMOUNT_DERIVED') {
+          return {
+            ok: false,
+            message: 'Amount is set by Per Unit Price × Qty on the deal.',
+          };
+        }
+        throw err;
+      }
 
       if (!updated) return { ok: false, message: 'Deal not found.' };
       revalidatePath('/dashboard/deals');

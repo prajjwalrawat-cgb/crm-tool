@@ -669,6 +669,16 @@ function polar(cx: number, cy: number, r: number, a: number) {
   return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
 }
 
+/**
+ * Fixed-precision formatter for path coordinates. `Math.cos/sin` can differ in
+ * the last bit between the server and client, which makes the emitted SVG `d`
+ * strings differ and triggers a React hydration mismatch. Rounding to 3 dp
+ * (sub-pixel on a 100x100 viewBox) makes both sides byte-identical.
+ */
+function f(n: number): string {
+  return n.toFixed(3);
+}
+
 function buildArcPath(
   cx: number,
   cy: number,
@@ -682,19 +692,19 @@ function buildArcPath(
   const o1 = polar(cx, cy, rOuter, endAngle);
   if (rInner === 0) {
     return [
-      `M ${cx} ${cy}`,
-      `L ${o0.x} ${o0.y}`,
-      `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${o1.x} ${o1.y}`,
+      `M ${f(cx)} ${f(cy)}`,
+      `L ${f(o0.x)} ${f(o0.y)}`,
+      `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${f(o1.x)} ${f(o1.y)}`,
       'Z',
     ].join(' ');
   }
   const i1 = polar(cx, cy, rInner, endAngle);
   const i0 = polar(cx, cy, rInner, startAngle);
   return [
-    `M ${o0.x} ${o0.y}`,
-    `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${o1.x} ${o1.y}`,
-    `L ${i1.x} ${i1.y}`,
-    `A ${rInner} ${rInner} 0 ${largeArc} 0 ${i0.x} ${i0.y}`,
+    `M ${f(o0.x)} ${f(o0.y)}`,
+    `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${f(o1.x)} ${f(o1.y)}`,
+    `L ${f(i1.x)} ${f(i1.y)}`,
+    `A ${rInner} ${rInner} 0 ${largeArc} 0 ${f(i0.x)} ${f(i0.y)}`,
     'Z',
   ].join(' ');
 }

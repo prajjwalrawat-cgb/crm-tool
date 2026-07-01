@@ -11,6 +11,7 @@ import {
   SelectRow,
   SettingsForm,
   SettingsSection,
+  ToggleRow,
 } from '../../_components/settings-form';
 
 type Values = {
@@ -18,6 +19,7 @@ type Values = {
   defaultReportRange: string;
   dashboardMetrics: string;
   fiscalYearStartMonth: number;
+  dealUnitPricingEnabled: boolean;
 };
 
 const REPORT_RANGE_OPTIONS = [
@@ -54,11 +56,15 @@ export function PipelineForm({ initial }: { initial: Values }) {
     const read = (name: string) =>
       (root.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)
         ?.value ?? '';
+    const readBool = (name: string) =>
+      (root.querySelector(`input[name="${name}"]`) as HTMLInputElement | null)
+        ?.checked ?? false;
     return {
       defaultDealStage: read('defaultDealStage') as Values['defaultDealStage'],
       defaultReportRange: read('defaultReportRange'),
       dashboardMetrics: read('dashboardMetrics'),
       fiscalYearStartMonth: Number(read('fiscalYearStartMonth')) || 1,
+      dealUnitPricingEnabled: readBool('dealUnitPricingEnabled'),
     };
   }, [initial]);
 
@@ -104,6 +110,12 @@ export function PipelineForm({ initial }: { initial: Values }) {
             description="Comma-separated metric ids shown on the main dashboard. Order matters."
             defaultValue={initial.dashboardMetrics}
             placeholder="pipeline,won,wonRecent,activity"
+          />
+          <ToggleRow
+            name="dealUnitPricingEnabled"
+            label="Per-unit deal pricing"
+            description="Show Per Unit Price and Quantity on the deal form; Amount is calculated automatically (unit price x quantity)."
+            defaultChecked={initial.dealUnitPricingEnabled}
           />
         </SettingsSection>
       </SettingsForm>

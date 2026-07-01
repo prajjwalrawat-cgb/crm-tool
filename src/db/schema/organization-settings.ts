@@ -73,6 +73,11 @@ export const organizationSettings = pgTable('organization_settings', {
   density: text('density').notNull().default('comfortable'),
   reducedMotion: boolean('reduced_motion').notNull().default(false),
 
+  /** When true, deals use per-unit pricing (Amount = unit price x quantity). */
+  dealUnitPricingEnabled: boolean('deal_unit_pricing_enabled')
+    .notNull()
+    .default(false),
+
   defaultDealStage: text('default_deal_stage').notNull().default('lead'),
   defaultReportRange: text('default_report_range').notNull().default('last_30d'),
   dashboardMetrics: text('dashboard_metrics')

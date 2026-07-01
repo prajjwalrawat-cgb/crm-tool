@@ -42,6 +42,34 @@ export const createDealSchema = z.object({
     .number({ message: 'Enter a valid amount' })
     .min(0, 'Amount cannot be negative')
     .max(999_999_999_999, 'Amount is too large'),
+  // Optional per-unit pricing (only sent when the workspace enables it).
+  // Amount is recomputed from these server-side when both are present.
+  unitPrice: z.preprocess(
+    (v) => (v == null || v === '' ? undefined : v),
+    z.coerce
+      .number({ message: 'Unit price must be a number' })
+      .min(0, 'Cannot be negative')
+      .max(999_999_999_999)
+      .optional(),
+  ),
+  quantity: z.preprocess(
+    (v) => (v == null || v === '' ? undefined : v),
+    z.coerce
+      .number({ message: 'Qty must be a number' })
+      .int('Whole numbers only')
+      .min(0)
+      .max(1_000_000)
+      .optional(),
+  ),
+  // Optional quoted/offered figure (major units). Independent of Amount.
+  offerPrice: z.preprocess(
+    (v) => (v == null || v === '' ? undefined : v),
+    z.coerce
+      .number({ message: 'Offer price must be a number' })
+      .min(0, 'Cannot be negative')
+      .max(999_999_999_999, 'Offer price is too large')
+      .optional(),
+  ),
   currency: z.enum(KNOWN_CURRENCIES, { message: 'Pick a supported currency' }),
   expectedCloseDate: z
     .string()

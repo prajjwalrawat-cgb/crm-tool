@@ -87,6 +87,9 @@ type RawJoinedRow = {
   description: string | null;
   stage: DealStage;
   amountMinor: number;
+  unitPriceMinor: number | null;
+  quantity: number | null;
+  offerPriceMinor: number | null;
   currency: string;
   expectedCloseDate: string | null;
   closedAt: Date | null;
@@ -116,6 +119,9 @@ const DEALS_PROJECTION = {
   description: deals.description,
   stage: deals.stage,
   amountMinor: deals.amountMinor,
+  unitPriceMinor: deals.unitPriceMinor,
+  quantity: deals.quantity,
+  offerPriceMinor: deals.offerPriceMinor,
   currency: deals.currency,
   expectedCloseDate: deals.expectedCloseDate,
   closedAt: deals.closedAt,

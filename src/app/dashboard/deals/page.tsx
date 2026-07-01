@@ -4,6 +4,7 @@ import { listContactPickerOptions } from '@/lib/contacts/queries';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { parseDealFilters } from '@/lib/deals/filters';
 import { listDealCompanyOptions, listDeals } from '@/lib/deals/queries';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { personaOf } from '@/lib/personas';
@@ -45,6 +46,7 @@ export default async function DealsPage({
       formContactOptions,
       teammates,
       customFieldDefs,
+      orgSettings,
     ] = await Promise.all([
       listDeals(tenant.id, {
         search,
@@ -61,6 +63,7 @@ export default async function DealsPage({
       listContactPickerOptions(tenant.id, restrictToOwnerOrUnassigned),
       listTeammates(tenant.id, tenant.name),
       listCustomFieldDefs(tenant.id, 'deal'),
+      getOrgSettings(tenant.id),
     ]);
 
     return (
@@ -88,6 +91,7 @@ export default async function DealsPage({
           nextCursor={page.nextCursor}
           pageSize={page.size}
           customFieldDefs={customFieldDefs}
+          unitPricingEnabled={orgSettings.dealUnitPricingEnabled}
         />
       </main>
     );

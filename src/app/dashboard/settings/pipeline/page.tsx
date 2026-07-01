@@ -25,6 +25,7 @@ export default async function PipelineSettingsPage() {
           defaultReportRange: settings.defaultReportRange,
           dashboardMetrics: settings.dashboardMetrics,
           fiscalYearStartMonth: settings.fiscalYearStartMonth,
+          dealUnitPricingEnabled: settings.dealUnitPricingEnabled,
         }}
       />
     );

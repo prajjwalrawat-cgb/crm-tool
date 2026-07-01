@@ -88,6 +88,7 @@ export function DealsView({
   nextCursor,
   pageSize,
   customFieldDefs,
+  unitPricingEnabled,
 }: {
   initialItems: DealRow[];
   initialSearch: string;
@@ -103,6 +104,7 @@ export function DealsView({
   nextCursor: string | null;
   pageSize: PageSize;
   customFieldDefs: CustomFieldDef[];
+  unitPricingEnabled: boolean;
 }) {
   const router = useRouter();
   const canEdit = canManageDeals(currentRole);
@@ -259,6 +261,15 @@ export function DealsView({
     const stage: DealStage = isDealStage(stageRaw) ? stageRaw : 'lead';
     const amountNum = Number(String(formData.get('amount') ?? '0'));
     const currency = String(formData.get('currency') ?? 'USD');
+    const unitPriceRaw = String(formData.get('unitPrice') ?? '').trim();
+    const quantityRaw = String(formData.get('quantity') ?? '').trim();
+    const unitPriceMinor = unitPriceRaw !== ''
+      ? toMinorUnits(Number(unitPriceRaw) || 0, currency)
+      : base?.unitPriceMinor ?? null;
+    const quantity = quantityRaw !== '' ? Number(quantityRaw) || 0 : base?.quantity ?? null;
+    const offerPriceRaw = String(formData.get('offerPrice') ?? '').trim();
+    const offerPriceMinor =
+      offerPriceRaw !== '' ? toMinorUnits(Number(offerPriceRaw) || 0, currency) : null;
     const expectedCloseDate = String(formData.get('expectedCloseDate') ?? '').trim() || null;
     // Company/Contact are linked records; resolve display names from the form
     // options so the optimistic row shows the right labels until refresh.
@@ -299,6 +310,9 @@ export function DealsView({
         (String(formData.get('description') ?? '').trim() || base?.description) ?? null,
       stage,
       amountMinor,
+      unitPriceMinor,
+      quantity,
+      offerPriceMinor,
       currency,
       expectedCloseDate,
       closedAt,
@@ -587,6 +601,7 @@ export function DealsView({
                     currentUserId={currentUserId}
                     currentRole={currentRole}
                     customFieldDefs={customFieldDefs}
+                    unitPricingEnabled={unitPricingEnabled}
                   />
                 )}
               </CreateDrawer>
@@ -637,6 +652,7 @@ export function DealsView({
               items={optimisticItems}
               canEdit={canEdit}
               canDelete={canDelete}
+              unitPricingEnabled={unitPricingEnabled}
               teammates={teammates}
               currentUserId={currentUserId}
               canAssignOwner={canAssign}
@@ -682,6 +698,7 @@ export function DealsView({
         currentUserId={currentUserId}
         currentRole={currentRole}
         customFieldDefs={customFieldDefs}
+        unitPricingEnabled={unitPricingEnabled}
         onSubmit={handleEditSubmit}
         onDelete={handleDeleteFromDrawer}
         pending={editPending}
@@ -698,6 +715,7 @@ function DealsTable({
   items,
   canEdit,
   canDelete,
+  unitPricingEnabled,
   teammates,
   currentUserId,
   canAssignOwner,
@@ -722,6 +740,7 @@ function DealsTable({
   items: DealItem[];
   canEdit: boolean;
   canDelete: boolean;
+  unitPricingEnabled: boolean;
   teammates: Teammate[];
   currentUserId: string;
   canAssignOwner: boolean;
@@ -926,14 +945,31 @@ function DealsTable({
                       <StageBadge stage={d.stage} />
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
+                  <td
+                    className="whitespace-nowrap px-3 py-2 text-right font-mono"
+                    title={
+                      unitPricingEnabled ||
+                      (d.unitPriceMinor != null && d.quantity != null)
+                        ? 'Amount is calculated from Per Unit Price × Qty — edit those on the deal'
+                        : undefined
+                    }
+                  >
                     <InlineEditCell
                       ariaLabel="amount"
                       type="number"
                       step="0.01"
                       min="0"
                       align="right"
-                      disabled={!canEdit || isOptimistic}
+                      // Amount is derived (price × qty) when the workspace has
+                      // unit pricing on, OR the deal already carries unit price +
+                      // qty (even after the workspace toggle is turned off) — so
+                      // it isn't editable inline; edit via the deal form.
+                      disabled={
+                        !canEdit ||
+                        isOptimistic ||
+                        unitPricingEnabled ||
+                        (d.unitPriceMinor != null && d.quantity != null)
+                      }
                       value={String(fromMinorUnits(d.amountMinor, d.currency))}
                       render={() => formatCurrency(d.amountMinor, d.currency)}
                       onCommit={(v) => onPatchField(d, 'amount', v)}

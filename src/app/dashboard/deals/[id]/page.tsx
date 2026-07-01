@@ -166,6 +166,20 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               value={formatCurrency(deal.amountMinor, deal.currency)}
               mono
             />
+            {deal.unitPriceMinor != null && deal.quantity != null ? (
+              <DetailCard
+                label="Unit price × Qty"
+                value={`${formatCurrency(deal.unitPriceMinor, deal.currency)} × ${deal.quantity}`}
+                mono
+              />
+            ) : null}
+            {deal.offerPriceMinor != null ? (
+              <DetailCard
+                label="Offer price"
+                value={formatCurrency(deal.offerPriceMinor, deal.currency)}
+                mono
+              />
+            ) : null}
             <DetailCard
               label="Expected close"
               value={

@@ -8,12 +8,12 @@ import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
-import { KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
 import { cn } from '@/lib/utils';
 
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { OwnerFormField } from '../../_components/owner-form-field';
+import { DealAmountFields } from './deal-amount-fields';
 import { DealCompanyContactFields } from './deal-company-contact-fields';
 
 /** Pull `cf_*` errors out of the field-error map (first message each). */
@@ -37,6 +37,7 @@ type Props = {
   currentUserId: string;
   currentRole: MembershipRole;
   customFieldDefs: CustomFieldDef[];
+  unitPricingEnabled: boolean;
 };
 
 export function CreateDealForm({
@@ -51,6 +52,7 @@ export function CreateDealForm({
   currentUserId,
   currentRole,
   customFieldDefs,
+  unitPricingEnabled,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -102,30 +104,12 @@ export function CreateDealForm({
         ))}
       </SelectField>
 
-      <div className="grid grid-cols-[1fr_88px] gap-3">
-        <Field
-          name="amount"
-          label="Amount"
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="0.00"
-          defaultValue="0"
-          errors={fieldErrors.amount}
-        />
-        <SelectField
-          name="currency"
-          label="Currency"
-          errors={fieldErrors.currency}
-          defaultValue="INR"
-        >
-          {KNOWN_CURRENCIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </SelectField>
-      </div>
+      <DealAmountFields
+        unitPricingEnabled={unitPricingEnabled}
+        defaultCurrency="INR"
+        defaultAmount="0"
+        errors={fieldErrors}
+      />
 
       <Field
         name="expectedCloseDate"

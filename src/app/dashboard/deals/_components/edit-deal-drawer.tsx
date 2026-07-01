@@ -6,7 +6,7 @@ import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
-import { fromMinorUnits, KNOWN_CURRENCIES } from '@/lib/deals/currency';
+import { fromMinorUnits } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
 import type { Teammate } from '@/lib/teammates/queries';
@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { Drawer } from '../../_components/drawer';
 import { OwnerFormField } from '../../_components/owner-form-field';
+import { DealAmountFields } from './deal-amount-fields';
 import { DealCompanyContactFields } from './deal-company-contact-fields';
 
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
@@ -35,6 +36,7 @@ type Props = {
   currentUserId: string;
   currentRole: MembershipRole;
   customFieldDefs: CustomFieldDef[];
+  unitPricingEnabled: boolean;
   onSubmit: (formData: FormData) => void;
   onDelete: () => void;
   pending: boolean;
@@ -54,6 +56,7 @@ export function EditDealDrawer({
   currentUserId,
   currentRole,
   customFieldDefs,
+  unitPricingEnabled,
   onSubmit,
   onDelete,
   pending,
@@ -80,6 +83,21 @@ export function EditDealDrawer({
   const initialAmount = deal
     ? fromMinorUnits(deal.amountMinor, deal.currency).toString()
     : '0';
+  const initialUnitPrice =
+    deal && deal.unitPriceMinor != null
+      ? fromMinorUnits(deal.unitPriceMinor, deal.currency).toString()
+      : '';
+  const initialQuantity =
+    deal && deal.quantity != null ? String(deal.quantity) : '';
+  const initialOfferPrice =
+    deal && deal.offerPriceMinor != null
+      ? fromMinorUnits(deal.offerPriceMinor, deal.currency).toString()
+      : '';
+  // A deal that already carries unit price + qty is always unit-priced, even
+  // if the workspace later turned the toggle off — so we keep showing the
+  // fields (and keep Amount derived) rather than losing that data.
+  const dealHasUnitPricing =
+    deal != null && deal.unitPriceMinor != null && deal.quantity != null;
   // Drizzle returns the date column as 'YYYY-MM-DD' string or null. Pass it
   // through to the date input as-is — no Date parsing needed.
   const initialDate = deal?.expectedCloseDate ?? '';
@@ -181,29 +199,15 @@ export function EditDealDrawer({
           ))}
         </Select>
 
-        <div className="grid grid-cols-[1fr_88px] gap-3">
-          <Field
-            name="amount"
-            label="Amount"
-            type="number"
-            step="0.01"
-            min="0"
-            defaultValue={initialAmount}
-            errors={fieldErrors.amount}
-          />
-          <Select
-            name="currency"
-            label="Currency"
-            defaultValue={deal?.currency ?? 'USD'}
-            errors={fieldErrors.currency}
-          >
-            {KNOWN_CURRENCIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <DealAmountFields
+          unitPricingEnabled={unitPricingEnabled || dealHasUnitPricing}
+          defaultCurrency={deal?.currency ?? 'USD'}
+          defaultAmount={initialAmount}
+          defaultUnitPrice={initialUnitPrice}
+          defaultQuantity={initialQuantity}
+          defaultOfferPrice={initialOfferPrice}
+          errors={fieldErrors}
+        />
 
         <Field
           name="expectedCloseDate"

@@ -160,12 +160,24 @@ export function ToggleRow({
           </div>
         ) : null}
       </div>
-      <input
-        type="checkbox"
-        name={name}
-        defaultChecked={defaultChecked}
-        className="mt-1 h-4 w-4 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500/40 dark:border-[#1F1F1F] dark:bg-[#111111]"
-      />
+      <span className="relative mt-0.5 inline-flex shrink-0 cursor-pointer">
+        <input
+          type="checkbox"
+          name={name}
+          defaultChecked={defaultChecked}
+          className="peer sr-only"
+        />
+        {/* Track */}
+        <span
+          aria-hidden
+          className="h-5 w-9 rounded-full bg-slate-200 transition-colors peer-checked:bg-indigo-600 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500/40 dark:bg-[#27272A] dark:peer-checked:bg-indigo-500"
+        />
+        {/* Thumb */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"
+        />
+      </span>
     </label>
   );
 }

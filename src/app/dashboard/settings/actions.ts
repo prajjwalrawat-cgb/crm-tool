@@ -182,10 +182,11 @@ const pipelineSchema = z.object({
   defaultReportRange: z.enum(REPORT_RANGES).optional(),
   dashboardMetrics: z.string().max(400).optional(),
   fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
+  dealUnitPricingEnabled: z.boolean().optional(),
 });
 
 export async function updatePipelineSettingsAction(input: unknown) {
-  return updateSlice(pipelineSchema, input, (p) => ({
+  const res = await updateSlice(pipelineSchema, input, (p) => ({
     ...(p.defaultDealStage !== undefined && {
       defaultDealStage: p.defaultDealStage,
     }),
@@ -198,7 +199,14 @@ export async function updatePipelineSettingsAction(input: unknown) {
     ...(p.fiscalYearStartMonth !== undefined && {
       fiscalYearStartMonth: p.fiscalYearStartMonth,
     }),
+    ...(p.dealUnitPricingEnabled !== undefined && {
+      dealUnitPricingEnabled: p.dealUnitPricingEnabled,
+    }),
   }));
+  // The per-unit-pricing toggle changes the deal form/list, so refresh those.
+  revalidatePath('/dashboard/deals');
+  revalidatePath('/dashboard/deals/board');
+  return res;
 }
 
 /* ----- Currency + Locale ----- */

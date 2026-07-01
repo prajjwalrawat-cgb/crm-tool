@@ -3,6 +3,7 @@ import {
   bigint,
   date,
   index,
+  integer,
   jsonb,
   pgTable,
   smallint,
@@ -48,6 +49,12 @@ export const deals = pgTable(
     // Currency stored as integer minor units (e.g. cents) to avoid float
     // rounding. bigint covers values well past any realistic deal size.
     amountMinor: bigint('amount_minor', { mode: 'number' }).notNull().default(0),
+    // Optional unit pricing: amount = unit_price_minor * quantity (when the
+    // workspace has deal_unit_pricing_enabled).
+    unitPriceMinor: bigint('unit_price_minor', { mode: 'number' }),
+    quantity: integer('quantity'),
+    // Optional quoted/offered figure, independent of Amount. NULL = not set.
+    offerPriceMinor: bigint('offer_price_minor', { mode: 'number' }),
     // ISO 4217 three-letter code (e.g. "USD", "EUR", "INR").
     currency: text('currency').notNull().default('USD'),
     expectedCloseDate: date('expected_close_date'),
