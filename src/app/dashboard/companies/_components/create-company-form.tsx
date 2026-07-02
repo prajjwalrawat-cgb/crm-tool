@@ -55,7 +55,7 @@ export function CreateCompanyForm({
     >
       <Field
         name="name"
-        label="Name"
+        label="Company Name"
         required
         placeholder="Acme Corp"
         errors={fieldErrors.name}

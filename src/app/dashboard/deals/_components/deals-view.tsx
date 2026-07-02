@@ -1,8 +1,8 @@
 ﻿'use client';
 
-import { ChevronDown, ExternalLink, Loader2, Pencil, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Eye, EyeOff, ExternalLink, Loader2, MoreVertical, Pencil, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   useEffect,
   useOptimistic,
@@ -10,6 +10,7 @@ import {
   useState,
   useTransition,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
 import type { MembershipRole } from '@/db/schema';
@@ -19,7 +20,11 @@ import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { marginPctToBps } from '@/lib/deals/approval';
 import { formatCurrency, fromMinorUnits, toMinorUnits } from '@/lib/deals/currency';
-import type { DealFilters } from '@/lib/deals/filters';
+import {
+  type DealFilters,
+  DEAL_FILTER_URL_KEYS,
+  dealFiltersToSearchParams,
+} from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
 import type { PageSize } from '@/lib/pagination/page-size';
 import {
@@ -108,6 +113,20 @@ export function DealsView({
   unitPricingEnabled: boolean;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Shared with the per-column header menus: rewrite the URL filter params
+  // (same contract as DealFilterBar) so column filters and the top filter bar
+  // stay in sync.
+  const pushFilters = (next: DealFilters) => {
+    const merged = new URLSearchParams(searchParams.toString());
+    for (const k of DEAL_FILTER_URL_KEYS) merged.delete(k);
+    merged.delete('cursor');
+    for (const [k, v] of dealFiltersToSearchParams(next).entries()) {
+      merged.set(k, v);
+    }
+    const qs = merged.toString();
+    router.replace(`/dashboard/deals${qs ? `?${qs}` : ''}`, { scroll: false });
+  };
   const canEdit = canManageDeals(currentRole);
   const canDelete = canDeleteDeals(currentRole);
   // Inline owner reassignment: owner + manager only; a manager may not assign
@@ -688,6 +707,9 @@ export function DealsView({
               assignableTeammates={assignable}
               companyOptions={formCompanyOptions}
               contactOptions={formContactOptions}
+              filters={initialFilters}
+              filterCompanyOptions={companyOptions}
+              onPushFilters={pushFilters}
               onPatchCompany={commitCompany}
               onPatchContact={commitContact}
               selectable={canEdit || canDelete}
@@ -740,6 +762,430 @@ export function DealsView({
   );
 }
 
+const COLUMN_STORAGE_KEY = 'deals.hiddenColumns';
+
+// Toggleable columns (Name + Actions are always shown).
+const TABLE_COLUMNS = [
+  { key: 'stage', label: 'Stage' },
+  { key: 'amount', label: 'Amount' },
+  { key: 'company', label: 'Company' },
+  { key: 'contact', label: 'Contact' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'closeDate', label: 'Close date' },
+] as const;
+
+/**
+ * Per-column header menu (the ⋮ on each column). Offers: a column-specific
+ * filter (optional), "Hide column", and a restore list of any hidden columns
+ * — so hidden columns are always reachable, even from the always-on Name
+ * header (which passes no `onHide`).
+ */
+function HeaderMenu({
+  colKey,
+  label,
+  align = 'left',
+  hidden,
+  onHide,
+  onShow,
+  filter,
+}: {
+  colKey: string;
+  label: string;
+  align?: 'left' | 'right';
+  hidden: Set<string>;
+  onHide?: (key: string) => void;
+  onShow: (key: string) => void;
+  filter?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Position the menu with FIXED coordinates via a portal so it can't be
+  // clipped by the table's overflow containers (the earlier absolute menu got
+  // cut off / couldn't scroll). Recompute on scroll/resize while open.
+  useEffect(() => {
+    if (!open) return;
+    const MENU_WIDTH = 224; // matches w-56
+    const place = () => {
+      const el = triggerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const left =
+        align === 'right' ? r.right - MENU_WIDTH : r.left;
+      setCoords({
+        top: r.bottom + 4,
+        left: Math.min(
+          Math.max(8, left),
+          window.innerWidth - MENU_WIDTH - 8,
+        ),
+      });
+    };
+    place();
+    const onScrollResize = () => place();
+    window.addEventListener('scroll', onScrollResize, true);
+    window.addEventListener('resize', onScrollResize);
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => {
+      window.removeEventListener('scroll', onScrollResize, true);
+      window.removeEventListener('resize', onScrollResize);
+      document.removeEventListener('mousedown', onDoc);
+    };
+  }, [open, align]);
+
+  const hiddenList = TABLE_COLUMNS.filter((c) => hidden.has(c.key));
+
+  const menu =
+    open && coords
+      ? createPortal(
+          <div
+            ref={menuRef}
+            style={{ position: 'fixed', top: coords.top, left: coords.left }}
+            className="z-50 max-h-[70vh] w-56 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 text-left text-[12px] font-normal normal-case tracking-normal text-slate-700 shadow-lg"
+          >
+            {filter ? (
+              <div className="border-b border-slate-100 p-1">{filter}</div>
+            ) : null}
+            {onHide ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onHide(colKey);
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-slate-50"
+              >
+                <EyeOff className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+                Hide column
+              </button>
+            ) : null}
+            {hiddenList.length > 0 ? (
+              <div className="mt-1 border-t border-slate-100 pt-1">
+                <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-slate-400">
+                  Hidden columns
+                </div>
+                {hiddenList.map((c) => (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => onShow(c.key)}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-slate-50"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+                    Show {c.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <div
+      ref={triggerRef}
+      className={cn(
+        'relative flex items-center gap-1',
+        align === 'right' && 'justify-end',
+      )}
+    >
+      <span>{label}</span>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={`${label} column options`}
+        className={cn(
+          'rounded p-0.5 transition hover:bg-slate-200 hover:text-slate-600',
+          open ? 'text-slate-600' : 'text-slate-300',
+        )}
+      >
+        <MoreVertical className="h-3.5 w-3.5" aria-hidden />
+      </button>
+      {menu}
+    </div>
+  );
+}
+
+/* ----- per-column filter bodies (rendered inside the header menu) ----- */
+
+function StageFilterBody({
+  filters,
+  onPush,
+}: {
+  filters: DealFilters;
+  onPush: (f: DealFilters) => void;
+}) {
+  const selected = new Set(filters.stages ?? []);
+  const toggle = (s: DealStage) => {
+    const next = new Set(selected);
+    if (next.has(s)) next.delete(s);
+    else next.add(s);
+    onPush({ ...filters, stages: next.size ? Array.from(next) : undefined });
+  };
+  return (
+    <div>
+      <div className="px-1 pb-1 text-[10px] uppercase tracking-wide text-slate-400">
+        Filter by stage
+      </div>
+      {DEAL_STAGES.map((s) => (
+        <label
+          key={s}
+          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-50"
+        >
+          <input
+            type="checkbox"
+            checked={selected.has(s)}
+            onChange={() => toggle(s)}
+            className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          {DEAL_STAGE_LABELS[s]}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function AmountFilterBody({
+  filters,
+  onPush,
+}: {
+  filters: DealFilters;
+  onPush: (f: DealFilters) => void;
+}) {
+  const [min, setMin] = useState(
+    filters.amountMinorMin != null ? String(filters.amountMinorMin / 100) : '',
+  );
+  const [max, setMax] = useState(
+    filters.amountMinorMax != null ? String(filters.amountMinorMax / 100) : '',
+  );
+  const apply = () =>
+    onPush({
+      ...filters,
+      amountMinorMin: min ? Math.round(Number(min) * 100) : undefined,
+      amountMinorMax: max ? Math.round(Number(max) * 100) : undefined,
+    });
+  return (
+    <div className="p-1">
+      <div className="pb-1 text-[10px] uppercase tracking-wide text-slate-400">
+        Filter by amount
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <input
+          type="number"
+          inputMode="decimal"
+          value={min}
+          onChange={(e) => setMin(e.target.value)}
+          placeholder="Min"
+          className="w-full rounded border border-slate-200 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+        />
+        <input
+          type="number"
+          inputMode="decimal"
+          value={max}
+          onChange={(e) => setMax(e.target.value)}
+          placeholder="Max"
+          className="w-full rounded border border-slate-200 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+        />
+      </div>
+      <div className="mt-1.5 flex justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            setMin('');
+            setMax('');
+            onPush({ ...filters, amountMinorMin: undefined, amountMinorMax: undefined });
+          }}
+          className="rounded px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          onClick={apply}
+          className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-500"
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DateFilterBody({
+  filters,
+  onPush,
+}: {
+  filters: DealFilters;
+  onPush: (f: DealFilters) => void;
+}) {
+  const [from, setFrom] = useState(filters.expectedCloseFrom ?? '');
+  const [to, setTo] = useState(filters.expectedCloseTo ?? '');
+  const apply = () =>
+    onPush({
+      ...filters,
+      expectedCloseFrom: from || undefined,
+      expectedCloseTo: to || undefined,
+    });
+  return (
+    <div className="p-1">
+      <div className="pb-1 text-[10px] uppercase tracking-wide text-slate-400">
+        Filter by close date
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <input
+          type="date"
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          className="w-full rounded border border-slate-200 px-1.5 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+        />
+        <input
+          type="date"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          className="w-full rounded border border-slate-200 px-1.5 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+        />
+      </div>
+      <div className="mt-1.5 flex justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            setFrom('');
+            setTo('');
+            onPush({ ...filters, expectedCloseFrom: undefined, expectedCloseTo: undefined });
+          }}
+          className="rounded px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          onClick={apply}
+          className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-500"
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OwnerFilterBody({
+  filters,
+  teammates,
+  onPush,
+}: {
+  filters: DealFilters;
+  teammates: Teammate[];
+  onPush: (f: DealFilters) => void;
+}) {
+  const [q, setQ] = useState('');
+  const selected = new Set(filters.ownerIds ?? []);
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onPush({ ...filters, ownerIds: next.size ? Array.from(next) : undefined });
+  };
+  const list = teammates
+    .filter((t) => t.displayName.toLowerCase().includes(q.trim().toLowerCase()))
+    .slice(0, 50);
+  return (
+    <div className="p-1">
+      <div className="pb-1 text-[10px] uppercase tracking-wide text-slate-400">
+        Filter by owner
+      </div>
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search…"
+        className="mb-1 w-full rounded border border-slate-200 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+      />
+      <ul className="max-h-48 overflow-y-auto">
+        {list.map((t) => (
+          <li key={t.id}>
+            <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={selected.has(t.id)}
+                onChange={() => toggle(t.id)}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="truncate">{t.displayName}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CompanyFilterBody({
+  filters,
+  options,
+  onPush,
+}: {
+  filters: DealFilters;
+  options: CompanyOption[];
+  onPush: (f: DealFilters) => void;
+}) {
+  const [q, setQ] = useState('');
+  const selected = new Set(filters.companyIds ?? []);
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onPush({ ...filters, companyIds: next.size ? Array.from(next) : undefined });
+  };
+  const list = options
+    .filter((o) => o.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .slice(0, 50);
+  return (
+    <div className="p-1">
+      <div className="pb-1 text-[10px] uppercase tracking-wide text-slate-400">
+        Filter by company
+      </div>
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search…"
+        className="mb-1 w-full rounded border border-slate-200 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+      />
+      <ul className="max-h-48 overflow-y-auto">
+        {list.length === 0 ? (
+          <li className="px-2 py-1.5 text-[11px] text-slate-400">No matches</li>
+        ) : (
+          list.map((c) => (
+            <li key={c.id}>
+              <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={selected.has(c.id)}
+                  onChange={() => toggle(c.id)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="truncate">{c.name}</span>
+              </label>
+            </li>
+          ))
+        )}
+      </ul>
+    </div>
+  );
+}
+
 function DealsTable({
   items,
   canEdit,
@@ -753,6 +1199,9 @@ function DealsTable({
   contactOptions,
   onPatchCompany,
   onPatchContact,
+  filters,
+  filterCompanyOptions,
+  onPushFilters,
   selectable,
   selectedIds,
   allSelected,
@@ -778,6 +1227,9 @@ function DealsTable({
   contactOptions: ContactPickerOption[];
   onPatchCompany: (deal: DealItem, companyId: string) => void;
   onPatchContact: (deal: DealItem, contactId: string) => void;
+  filters: DealFilters;
+  filterCompanyOptions: CompanyOption[];
+  onPushFilters: (next: DealFilters) => void;
   selectable: boolean;
   selectedIds: Set<string>;
   allSelected: boolean;
@@ -794,6 +1246,35 @@ function DealsTable({
   const teammateById = new Map(teammates.map((t) => [t.id, t]));
   const companySelectOptions = companyOptions.map((c) => ({ value: c.id, label: c.name }));
   const showActions = canEdit || canDelete;
+
+  // Column show/hide (Excel-style). Name + Actions are always shown; the rest
+  // are user-toggleable and the choice persists in localStorage. We start with
+  // everything visible so SSR and the first client paint match, then hydrate
+  // the saved set after mount (avoids a hydration mismatch).
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLUMN_STORAGE_KEY);
+      if (raw) setHiddenCols(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      /* ignore malformed storage */
+    }
+  }, []);
+  const toggleColumn = (key: string) => {
+    setHiddenCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+  const vis = (key: string) => !hiddenCols.has(key);
+
   return (
     <>
       {/* Mobile / narrow viewports: stacked card list. The table below
@@ -885,39 +1366,111 @@ function DealsTable({
                       className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                     />
                   ) : null}
-                  Name
+                  <HeaderMenu
+                    colKey="name"
+                    label="Name"
+                    hidden={hiddenCols}
+                    onShow={toggleColumn}
+                  />
                 </span>
               </th>
-              <th scope="col" className="px-3 py-1.5 text-left font-semibold">
-                Stage
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-right font-semibold">
-                Amount
-              </th>
-              <th
-                scope="col"
-                className="hidden px-3 py-1.5 text-left font-semibold md:table-cell"
-              >
-                Company
-              </th>
-              <th
-                scope="col"
-                className="hidden px-3 py-1.5 text-left font-semibold lg:table-cell"
-              >
-                Contact
-              </th>
-              <th
-                scope="col"
-                className="hidden px-3 py-1.5 text-left font-semibold md:table-cell"
-              >
-                Owner
-              </th>
-              <th
-                scope="col"
-                className="hidden px-3 py-1.5 text-right font-semibold sm:table-cell"
-              >
-                Close date
-              </th>
+              {vis('stage') ? (
+                <th scope="col" className="px-3 py-1.5 text-left font-semibold">
+                  <HeaderMenu
+                    colKey="stage"
+                    label="Stage"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                    filter={<StageFilterBody filters={filters} onPush={onPushFilters} />}
+                  />
+                </th>
+              ) : null}
+              {vis('amount') ? (
+                <th scope="col" className="px-3 py-1.5 text-right font-semibold">
+                  <HeaderMenu
+                    colKey="amount"
+                    label="Amount"
+                    align="right"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                    filter={<AmountFilterBody filters={filters} onPush={onPushFilters} />}
+                  />
+                </th>
+              ) : null}
+              {vis('company') ? (
+                <th
+                  scope="col"
+                  className="hidden px-3 py-1.5 text-left font-semibold md:table-cell"
+                >
+                  <HeaderMenu
+                    colKey="company"
+                    label="Company"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                    filter={
+                      <CompanyFilterBody
+                        filters={filters}
+                        options={filterCompanyOptions}
+                        onPush={onPushFilters}
+                      />
+                    }
+                  />
+                </th>
+              ) : null}
+              {vis('contact') ? (
+                <th
+                  scope="col"
+                  className="hidden px-3 py-1.5 text-left font-semibold lg:table-cell"
+                >
+                  <HeaderMenu
+                    colKey="contact"
+                    label="Contact"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                  />
+                </th>
+              ) : null}
+              {vis('owner') ? (
+                <th
+                  scope="col"
+                  className="hidden px-3 py-1.5 text-left font-semibold md:table-cell"
+                >
+                  <HeaderMenu
+                    colKey="owner"
+                    label="Owner"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                    filter={
+                      <OwnerFilterBody
+                        filters={filters}
+                        teammates={teammates}
+                        onPush={onPushFilters}
+                      />
+                    }
+                  />
+                </th>
+              ) : null}
+              {vis('closeDate') ? (
+                <th
+                  scope="col"
+                  className="hidden px-3 py-1.5 text-right font-semibold sm:table-cell"
+                >
+                  <HeaderMenu
+                    colKey="closeDate"
+                    label="Close date"
+                    align="right"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                    filter={<DateFilterBody filters={filters} onPush={onPushFilters} />}
+                  />
+                </th>
+              ) : null}
               {showActions ? (
                 <th
                   scope="col"
@@ -963,6 +1516,7 @@ function DealsTable({
                       )}
                     </div>
                   </td>
+                  {vis('stage') ? (
                   <td className="px-3 py-2">
                     {canEdit && !isOptimistic ? (
                       <InlineStageSelect
@@ -974,6 +1528,8 @@ function DealsTable({
                       <StageBadge stage={d.stage} />
                     )}
                   </td>
+                  ) : null}
+                  {vis('amount') ? (
                   <td
                     className="whitespace-nowrap px-3 py-2 text-right font-mono"
                     title={
@@ -1004,6 +1560,8 @@ function DealsTable({
                       onCommit={(v) => onPatchField(d, 'amount', v)}
                     />
                   </td>
+                  ) : null}
+                  {vis('company') ? (
                   <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
                     <InlineSelectCell
                       ariaLabel="company"
@@ -1015,6 +1573,8 @@ function DealsTable({
                       onCommit={(v) => onPatchCompany(d, v)}
                     />
                   </td>
+                  ) : null}
+                  {vis('contact') ? (
                   <td className="hidden px-3 py-2 text-slate-600 lg:table-cell">
                     <InlineSelectCell
                       ariaLabel="contact"
@@ -1030,6 +1590,8 @@ function DealsTable({
                       onCommit={(v) => onPatchContact(d, v)}
                     />
                   </td>
+                  ) : null}
+                  {vis('owner') ? (
                   <td className="hidden px-3 py-2 md:table-cell">
                     <InlineOwnerCell
                       deal={d}
@@ -1040,6 +1602,8 @@ function DealsTable({
                       onSelect={(ownerId) => onPatchOwner(d, ownerId)}
                     />
                   </td>
+                  ) : null}
+                  {vis('closeDate') ? (
                   <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 sm:table-cell">
                     <InlineEditCell
                       ariaLabel="close date"
@@ -1053,6 +1617,7 @@ function DealsTable({
                       onCommit={(v) => onPatchField(d, 'expectedCloseDate', v)}
                     />
                   </td>
+                  ) : null}
                   {showActions ? (
                     <td className="sticky right-0 z-[1] whitespace-nowrap bg-white/95 px-3 py-2 text-right backdrop-blur group-hover:bg-slate-50/95">
                       <RowActions

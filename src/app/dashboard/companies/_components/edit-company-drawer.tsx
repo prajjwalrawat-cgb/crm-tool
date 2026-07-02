@@ -118,7 +118,7 @@ export function EditCompanyDrawer({
 
         <Field
           name="name"
-          label="Name"
+          label="Company Name"
           required
           defaultValue={company?.name ?? ''}
           errors={fieldErrors.name}
