@@ -512,6 +512,7 @@ export async function listDealsForBoard(
     'qualified',
     'proposal',
     'negotiation',
+    'hold',
     'won',
     'lost',
   ];
@@ -523,6 +524,7 @@ export async function listDealsForBoard(
         qualified: [],
         proposal: [],
         negotiation: [],
+        hold: [],
         won: [],
         lost: [],
       };
@@ -531,6 +533,7 @@ export async function listDealsForBoard(
         qualified: 0,
         proposal: 0,
         negotiation: 0,
+        hold: 0,
         won: 0,
         lost: 0,
       };

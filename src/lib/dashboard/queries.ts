@@ -42,6 +42,7 @@ const ALL_STAGES: DealStage[] = [
   'qualified',
   'proposal',
   'negotiation',
+  'hold',
   'won',
   'lost',
 ];

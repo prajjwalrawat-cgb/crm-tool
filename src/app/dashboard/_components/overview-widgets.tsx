@@ -147,6 +147,7 @@ const STAGE_COLORS: Record<DealStage, { bar: string; dot: string }> = {
   qualified: { bar: 'bg-blue-300', dot: 'bg-blue-500' },
   proposal: { bar: 'bg-indigo-400', dot: 'bg-indigo-500' },
   negotiation: { bar: 'bg-amber-300', dot: 'bg-amber-500' },
+  hold: { bar: 'bg-orange-300', dot: 'bg-orange-500' },
   won: { bar: 'bg-emerald-400', dot: 'bg-emerald-500' },
   lost: { bar: 'bg-rose-300', dot: 'bg-rose-500' },
 };

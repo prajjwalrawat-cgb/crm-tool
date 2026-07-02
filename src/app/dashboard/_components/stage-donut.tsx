@@ -47,13 +47,21 @@ import { useStudioRegistration } from './edit-mode/edit-mode-context';
  * activation pattern as the other charts.
  */
 
-type Stage = 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost';
+type Stage =
+  | 'lead'
+  | 'qualified'
+  | 'proposal'
+  | 'negotiation'
+  | 'hold'
+  | 'won'
+  | 'lost';
 
 const STAGE_ORDER: readonly Stage[] = [
   'lead',
   'qualified',
   'proposal',
   'negotiation',
+  'hold',
   'won',
   'lost',
 ];
@@ -63,6 +71,7 @@ const STAGE_LABELS: Record<Stage, string> = {
   qualified: 'Qualified',
   proposal: 'Proposal',
   negotiation: 'Negotiation',
+  hold: 'Hold',
   won: 'Won',
   lost: 'Lost',
 };
@@ -75,6 +84,7 @@ const STAGE_FILL: Record<
   qualified: { light: '#a5b4fc', dark: 'rgba(99,102,241,0.55)', dot: 'bg-indigo-300', bar: 'bg-indigo-300 dark:bg-indigo-400/55' },
   proposal: { light: '#a78bfa', dark: 'rgba(139,92,246,0.65)', dot: 'bg-violet-400', bar: 'bg-violet-400 dark:bg-violet-400/65' },
   negotiation: { light: '#fcd34d', dark: 'rgba(245,158,11,0.7)', dot: 'bg-amber-400', bar: 'bg-amber-400 dark:bg-amber-400/70' },
+  hold: { light: '#fdba74', dark: 'rgba(249,115,22,0.65)', dot: 'bg-orange-400', bar: 'bg-orange-400 dark:bg-orange-400/65' },
   won: { light: '#6ee7b7', dark: 'rgba(16,185,129,0.8)', dot: 'bg-emerald-400', bar: 'bg-emerald-400 dark:bg-emerald-400/80' },
   lost: { light: '#fca5a5', dark: 'rgba(244,63,94,0.55)', dot: 'bg-rose-400', bar: 'bg-rose-400 dark:bg-rose-400/55' },
 };

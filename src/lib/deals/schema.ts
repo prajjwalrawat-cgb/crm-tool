@@ -7,6 +7,7 @@ export const DEAL_STAGES = [
   'qualified',
   'proposal',
   'negotiation',
+  'hold',
   'won',
   'lost',
 ] as const;
@@ -18,6 +19,7 @@ export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   qualified: 'Qualified',
   proposal: 'Proposal',
   negotiation: 'Negotiation',
+  hold: 'Hold',
   won: 'Won',
   lost: 'Lost',
 };

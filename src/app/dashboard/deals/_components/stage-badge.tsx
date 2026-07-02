@@ -8,6 +8,7 @@ const STAGE_STYLES: Record<DealStage, string> = {
     'bg-indigo-100 text-indigo-700',
   negotiation:
     'bg-amber-100 text-amber-800',
+  hold: 'bg-orange-100 text-orange-700',
   won: 'bg-emerald-100 text-emerald-700',
   lost: 'bg-red-100 text-red-700',
 };

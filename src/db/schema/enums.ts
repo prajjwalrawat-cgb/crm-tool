@@ -19,6 +19,7 @@ export const dealStage = pgEnum('deal_stage', [
   'qualified',
   'proposal',
   'negotiation',
+  'hold',
   'won',
   'lost',
 ]);
