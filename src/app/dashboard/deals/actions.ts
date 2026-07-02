@@ -190,7 +190,6 @@ export async function createDealAction(
         contactId: formData.get('contactId') || null,
         unitPrice: formData.get('unitPrice'),
         quantity: formData.get('quantity'),
-        offerPrice: formData.get('offerPrice'),
         marginPct: formData.get('marginPct'),
         ownerId: formData.get('ownerId'),
       };
@@ -268,10 +267,6 @@ export async function createDealAction(
       } else {
         amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       }
-      const offerPriceMinor =
-        parsed.data.offerPrice !== undefined
-          ? toMinorUnits(parsed.data.offerPrice, parsed.data.currency)
-          : null;
       const marginBps =
         parsed.data.marginPct !== undefined
           ? marginPctToBps(parsed.data.marginPct)
@@ -300,7 +295,6 @@ export async function createDealAction(
             amountMinor,
             unitPriceMinor,
             quantity,
-            offerPriceMinor,
             marginBps,
             ...(approval && {
               approvalStatus: approval.approvalStatus,
@@ -386,7 +380,6 @@ export async function updateDealAction(
         contactId: formData.get('contactId') || null,
         unitPrice: formData.get('unitPrice'),
         quantity: formData.get('quantity'),
-        offerPrice: formData.get('offerPrice'),
         marginPct: formData.get('marginPct'),
         ownerId: formData.get('ownerId'),
       };
@@ -440,10 +433,6 @@ export async function updateDealAction(
       } else {
         amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       }
-      const offerPriceMinor =
-        parsed.data.offerPrice !== undefined
-          ? toMinorUnits(parsed.data.offerPrice, parsed.data.currency)
-          : null;
       const marginBps =
         parsed.data.marginPct !== undefined
           ? marginPctToBps(parsed.data.marginPct)
@@ -521,7 +510,6 @@ export async function updateDealAction(
             amountMinor,
             unitPriceMinor,
             quantity,
-            offerPriceMinor,
             marginBps,
             ...(approvalPatch && {
               approvalStatus: approvalPatch.approvalStatus,

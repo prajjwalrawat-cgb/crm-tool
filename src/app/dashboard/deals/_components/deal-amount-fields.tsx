@@ -21,7 +21,6 @@ export function DealAmountFields({
   defaultAmount,
   defaultUnitPrice,
   defaultQuantity,
-  defaultOfferPrice,
   defaultMarginPct,
   errors,
 }: {
@@ -30,7 +29,6 @@ export function DealAmountFields({
   defaultAmount?: string;
   defaultUnitPrice?: string;
   defaultQuantity?: string;
-  defaultOfferPrice?: string;
   defaultMarginPct?: string;
   errors: Record<string, string[]>;
 }) {
@@ -46,26 +44,6 @@ export function DealAmountFields({
           <option key={c} value={c}>{c}</option>
         ))}
       </select>
-    </div>
-  );
-
-  // Optional quoted/offered figure — shown in both pricing modes.
-  const offerPrice = (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor="offerPrice" className={labelCls}>
-        Offer Price <span className="font-normal text-slate-400">(optional)</span>
-      </label>
-      <input
-        id="offerPrice"
-        name="offerPrice"
-        type="number"
-        step="0.01"
-        min="0"
-        defaultValue={defaultOfferPrice ?? ''}
-        placeholder="0.00"
-        className={cn(inputCls, errors.offerPrice?.length && 'border-red-300')}
-      />
-      {errors.offerPrice?.length ? <p className="text-xs text-red-600">{errors.offerPrice.join(' ')}</p> : null}
     </div>
   );
 
@@ -116,8 +94,8 @@ export function DealAmountFields({
           {currency}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          {offerPrice}
           {margin}
+          <div />
         </div>
       </>
     );
@@ -175,8 +153,8 @@ export function DealAmountFields({
         {currency}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        {offerPrice}
         {margin}
+        <div />
       </div>
     </>
   );

@@ -90,10 +90,6 @@ export function EditDealDrawer({
       : '';
   const initialQuantity =
     deal && deal.quantity != null ? String(deal.quantity) : '';
-  const initialOfferPrice =
-    deal && deal.offerPriceMinor != null
-      ? fromMinorUnits(deal.offerPriceMinor, deal.currency).toString()
-      : '';
   const initialMarginPct =
     deal && deal.marginBps != null ? marginBpsToPct(deal.marginBps).toString() : '';
   // A deal that already carries unit price + qty is always unit-priced, even
@@ -208,7 +204,6 @@ export function EditDealDrawer({
           defaultAmount={initialAmount}
           defaultUnitPrice={initialUnitPrice}
           defaultQuantity={initialQuantity}
-          defaultOfferPrice={initialOfferPrice}
           defaultMarginPct={initialMarginPct}
           errors={fieldErrors}
         />

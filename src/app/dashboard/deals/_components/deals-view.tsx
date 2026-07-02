@@ -268,9 +268,8 @@ export function DealsView({
       ? toMinorUnits(Number(unitPriceRaw) || 0, currency)
       : base?.unitPriceMinor ?? null;
     const quantity = quantityRaw !== '' ? Number(quantityRaw) || 0 : base?.quantity ?? null;
-    const offerPriceRaw = String(formData.get('offerPrice') ?? '').trim();
-    const offerPriceMinor =
-      offerPriceRaw !== '' ? toMinorUnits(Number(offerPriceRaw) || 0, currency) : null;
+    // Offer Price was removed from the form; preserve any stored value.
+    const offerPriceMinor = base?.offerPriceMinor ?? null;
     const marginRaw = String(formData.get('marginPct') ?? '').trim();
     const marginBps = marginRaw !== '' ? marginPctToBps(Number(marginRaw) || 0) : null;
     const expectedCloseDate = String(formData.get('expectedCloseDate') ?? '').trim() || null;
