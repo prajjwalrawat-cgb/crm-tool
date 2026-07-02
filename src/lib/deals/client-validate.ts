@@ -1,0 +1,28 @@
+/**
+ * Client-side pre-submit validation for the deal create/edit forms. Mirrors
+ * the required-field rules in `createDealSchema` so we can block the server
+ * action BEFORE it fires — a failed round-trip would otherwise reset the form
+ * (React 19 resets a form after its action runs) and silently blank the
+ * controlled Company/Contact selects. Returns field errors keyed the same way
+ * the server does (`name`, `marginPct`, …); empty object = OK to submit.
+ */
+export function validateDealForm(fd: FormData): Record<string, string[]> {
+  const errs: Record<string, string[]> = {};
+
+  const name = String(fd.get('name') ?? '').trim();
+  if (!name) errs.name = ['Name is required'];
+
+  const marginRaw = String(fd.get('marginPct') ?? '').trim();
+  if (!marginRaw) {
+    errs.marginPct = ['Margin is required'];
+  } else {
+    const n = Number(marginRaw);
+    if (!Number.isFinite(n) || n <= 0) {
+      errs.marginPct = ['Margin must be greater than 0'];
+    } else if (n > 100) {
+      errs.marginPct = ['Margin cannot exceed 100%'];
+    }
+  }
+
+  return errs;
+}

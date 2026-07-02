@@ -267,10 +267,7 @@ export async function createDealAction(
       } else {
         amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       }
-      const marginBps =
-        parsed.data.marginPct !== undefined
-          ? marginPctToBps(parsed.data.marginPct)
-          : null;
+      const marginBps = marginPctToBps(parsed.data.marginPct);
       const closedAt =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost'
           ? new Date()
@@ -433,10 +430,7 @@ export async function updateDealAction(
       } else {
         amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       }
-      const marginBps =
-        parsed.data.marginPct !== undefined
-          ? marginPctToBps(parsed.data.marginPct)
-          : null;
+      const marginBps = marginPctToBps(parsed.data.marginPct);
       const isClosedStage =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
 

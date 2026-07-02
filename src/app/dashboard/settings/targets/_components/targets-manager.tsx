@@ -62,8 +62,10 @@ export function TargetsManager({
           <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-[#0A0A0A] dark:text-[#A1A1AA]">
             <tr>
               <th className="px-3 py-2 font-medium">Team member</th>
-              <th className="px-3 py-2 font-medium">Revenue target ({currency})</th>
-              <th className="px-3 py-2 font-medium">Margin target ({currency})</th>
+              <th className="px-3 py-2 font-medium">Revenue target (INR)</th>
+              {/*make INR currency when currency will set accordinly from setting currency and locale */}
+              <th className="px-3 py-2 font-medium">Margin target (INR)</th>  
+              {/*right now if i chage currecy from setting it will only visually change sign of currency everywhere but will not re-valuate every thing according to currecy selected */}
               <th className="px-3 py-2" />
             </tr>
           </thead>

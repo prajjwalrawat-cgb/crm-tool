@@ -1,13 +1,14 @@
 ﻿'use client';
 
 import { Loader2, Plus } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
+import { validateDealForm } from '@/lib/deals/client-validate';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
 import { cn } from '@/lib/utils';
 
@@ -55,10 +56,32 @@ export function CreateDealForm({
   unitPricingEnabled,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
+  // Client-side validation errors, shown alongside server fieldErrors. We
+  // validate before dispatching so an invalid submit never fires the server
+  // action (which would reset the form and blank the Company/Contact selects).
+  const [clientErrors, setClientErrors] = useState<Record<string, string[]>>({});
+  const [clientMsg, setClientMsg] = useState<string | null>(null);
+  const errs = { ...fieldErrors, ...clientErrors };
 
   useEffect(() => {
     formRef.current?.reset();
+    setClientErrors({});
+    setClientMsg(null);
   }, [resetKey]);
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const found = validateDealForm(fd);
+    if (Object.keys(found).length > 0) {
+      setClientErrors(found);
+      setClientMsg('Please fix the highlighted fields.');
+      return;
+    }
+    setClientErrors({});
+    setClientMsg(null);
+    onSubmit(fd);
+  }
 
   // Only owner + manager can assign a deal to someone else. A manager may
   // not assign to an owner, so they get the team minus owners.
@@ -71,7 +94,7 @@ export function CreateDealForm({
   return (
     <form
       ref={formRef}
-      action={onSubmit}
+      onSubmit={handleSubmit}
       className="flex flex-col gap-4"
       noValidate
     >
@@ -85,7 +108,7 @@ export function CreateDealForm({
         required
         placeholder="Acme — annual contract"
         autoFocus
-        errors={fieldErrors.name}
+        errors={errs.name}
       />
 
       <TextareaField
@@ -93,10 +116,10 @@ export function CreateDealForm({
         label="Description"
         placeholder="Decision criteria, blockers, next steps…"
         rows={3}
-        errors={fieldErrors.description}
+        errors={errs.description}
       />
 
-      <SelectField name="stage" label="Stage" errors={fieldErrors.stage} defaultValue="lead">
+      <SelectField name="stage" label="Stage" errors={errs.stage} defaultValue="lead">
         {DEAL_STAGES.map((stage) => (
           <option key={stage} value={stage}>
             {DEAL_STAGE_LABELS[stage]}
@@ -108,42 +131,42 @@ export function CreateDealForm({
         unitPricingEnabled={unitPricingEnabled}
         defaultCurrency="INR"
         defaultAmount="0"
-        errors={fieldErrors}
+        errors={errs}
       />
 
       <Field
         name="expectedCloseDate"
         label="Expected close date"
         type="date"
-        errors={fieldErrors.expectedCloseDate}
+        errors={errs.expectedCloseDate}
       />
 
       <DealCompanyContactFields
         companyOptions={companyOptions}
         contactOptions={contactOptions}
-        companyError={fieldErrors.companyId}
-        contactError={fieldErrors.contactId}
+        companyError={errs.companyId}
+        contactError={errs.contactId}
       />
 
       {canAssign ? (
         <OwnerFormField
           teammates={assignable}
           currentUserId={currentUserId}
-          errors={fieldErrors.ownerId}
+          errors={errs.ownerId}
         />
       ) : (
         // Members/admins can't reassign — their new deal is owned by them.
         <input type="hidden" name="ownerId" value={currentUserId} />
       )}
 
-      <CustomFieldInputs defs={customFieldDefs} errors={customErrors(fieldErrors)} />
+      <CustomFieldInputs defs={customFieldDefs} errors={customErrors(errs)} />
 
-      {error ? (
+      {error || clientMsg ? (
         <p
           role="alert"
           className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"
         >
-          {error}
+          {error ?? clientMsg}
         </p>
       ) : null}
 

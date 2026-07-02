@@ -63,15 +63,15 @@ export const createDealSchema = z.object({
       .max(1_000_000)
       .optional(),
   ),
-  // Optional gross margin percentage (0–100, up to 2 decimals). Stored as
-  // basis points server-side; margin value = amount × margin%.
+  // Required gross margin percentage (must be > 0 — a deal with revenue always
+  // carries some margin). 0–100, up to 2 decimals. Stored as basis points
+  // server-side; margin value = amount × margin%.
   marginPct: z.preprocess(
     (v) => (v == null || v === '' ? undefined : v),
     z.coerce
-      .number({ message: 'Margin must be a number' })
-      .min(0, 'Cannot be negative')
-      .max(100, 'Margin cannot exceed 100%')
-      .optional(),
+      .number({ message: 'Margin is required' })
+      .gt(0, 'Margin must be greater than 0')
+      .max(100, 'Margin cannot exceed 100%'),
   ),
   currency: z.enum(KNOWN_CURRENCIES, { message: 'Pick a supported currency' }),
   expectedCloseDate: z

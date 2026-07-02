@@ -51,7 +51,7 @@ export function DealAmountFields({
   const margin = (
     <div className="flex flex-col gap-1.5">
       <label htmlFor="marginPct" className={labelCls}>
-        Margin % <span className="font-normal text-slate-400">(optional)</span>
+        Margin % <span className="text-red-500">*</span>
       </label>
       <div className="relative">
         <input
@@ -61,8 +61,9 @@ export function DealAmountFields({
           step="0.01"
           min="0"
           max="100"
+          required
           defaultValue={defaultMarginPct ?? ''}
-          placeholder="0"
+          placeholder="e.g. 30"
           className={cn(inputCls, 'w-full pr-7', errors.marginPct?.length && 'border-red-300')}
         />
         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-400">

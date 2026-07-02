@@ -1,12 +1,14 @@
 ﻿'use client';
 
 import { Loader2, Save, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 
 import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
 import { marginBpsToPct } from '@/lib/deals/approval';
+import { validateDealForm } from '@/lib/deals/client-validate';
 import { fromMinorUnits } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
@@ -66,6 +68,28 @@ export function EditDealDrawer({
   fieldErrors,
   canDelete,
 }: Props) {
+  // Client-side validation errors, shown alongside any server fieldErrors.
+  // Validating here lets us block the submit BEFORE the server action fires —
+  // a rejected round-trip would reset the form and blank the Company/Contact
+  // selects (see client-validate.ts).
+  const [clientErrors, setClientErrors] = useState<Record<string, string[]>>({});
+  const [clientMsg, setClientMsg] = useState<string | null>(null);
+  const errs = { ...fieldErrors, ...clientErrors };
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const found = validateDealForm(fd);
+    if (Object.keys(found).length > 0) {
+      setClientErrors(found);
+      setClientMsg('Please fix the highlighted fields.');
+      return;
+    }
+    setClientErrors({});
+    setClientMsg(null);
+    onSubmit(fd);
+  }
+
   // Only owner + manager can reassign a deal; a manager may not assign to an
   // owner, so they get the team minus owners. Anyone else doesn't see the
   // field and the edit leaves the owner unchanged.
@@ -163,7 +187,7 @@ export function EditDealDrawer({
       <form
         id="edit-deal-form"
         key={deal?.id ?? 'empty'}
-        action={onSubmit}
+        onSubmit={handleSubmit}
         className="flex flex-col gap-4"
         noValidate
       >
@@ -174,7 +198,7 @@ export function EditDealDrawer({
           label="Name"
           required
           defaultValue={deal?.name ?? ''}
-          errors={fieldErrors.name}
+          errors={errs.name}
         />
 
         <TextareaField
@@ -182,14 +206,14 @@ export function EditDealDrawer({
           label="Description"
           rows={3}
           defaultValue={deal?.description ?? ''}
-          errors={fieldErrors.description}
+          errors={errs.description}
         />
 
         <Select
           name="stage"
           label="Stage"
           defaultValue={deal?.stage ?? 'lead'}
-          errors={fieldErrors.stage}
+          errors={errs.stage}
         >
           {DEAL_STAGES.map((s) => (
             <option key={s} value={s}>
@@ -205,7 +229,7 @@ export function EditDealDrawer({
           defaultUnitPrice={initialUnitPrice}
           defaultQuantity={initialQuantity}
           defaultMarginPct={initialMarginPct}
-          errors={fieldErrors}
+          errors={errs}
         />
 
         <Field
@@ -213,7 +237,7 @@ export function EditDealDrawer({
           label="Expected close date"
           type="date"
           defaultValue={initialDate}
-          errors={fieldErrors.expectedCloseDate}
+          errors={errs.expectedCloseDate}
         />
 
         <DealCompanyContactFields
@@ -222,8 +246,8 @@ export function EditDealDrawer({
           contactOptions={contactOptions}
           defaultCompanyId={deal?.companyId ?? null}
           defaultContactId={deal?.contactId ?? null}
-          companyError={fieldErrors.companyId}
-          contactError={fieldErrors.contactId}
+          companyError={errs.companyId}
+          contactError={errs.contactId}
         />
 
         {canAssign ? (
@@ -231,22 +255,22 @@ export function EditDealDrawer({
             teammates={assignable}
             currentUserId={currentUserId}
             defaultOwnerId={deal?.ownerId ?? null}
-            errors={fieldErrors.ownerId}
+            errors={errs.ownerId}
           />
         ) : null}
 
         <CustomFieldInputs
           defs={customFieldDefs}
           values={(deal?.customFields ?? {}) as CustomValues}
-          errors={customErrors(fieldErrors)}
+          errors={customErrors(errs)}
         />
 
-        {error ? (
+        {error || clientMsg ? (
           <p
             role="alert"
             className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"
           >
-            {error}
+            {error ?? clientMsg}
           </p>
         ) : null}
       </form>
