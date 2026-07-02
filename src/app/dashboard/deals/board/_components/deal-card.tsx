@@ -110,6 +110,12 @@ export const DealCard = memo(function DealCard({
         </p>
       ) : null}
 
+      {deal.stage === 'won' && deal.approvalStatus === 'pending' ? (
+        <span className="mt-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+          Pending approval
+        </span>
+      ) : null}
+
       <div className="mt-2 flex items-center justify-between text-xs">
         <span className="font-mono">
           {formatCurrency(deal.amountMinor, deal.currency)}

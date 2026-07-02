@@ -14,7 +14,7 @@ import {
 
 import { companies } from './companies';
 import { contacts } from './contacts';
-import { dealStage } from './enums';
+import { dealApprovalStatus, dealStage } from './enums';
 import { tenants } from './tenants';
 
 export const deals = pgTable(
@@ -55,6 +55,22 @@ export const deals = pgTable(
     quantity: integer('quantity'),
     // Optional quoted/offered figure, independent of Amount. NULL = not set.
     offerPriceMinor: bigint('offer_price_minor', { mode: 'number' }),
+    // Optional gross margin as basis points (30% = 3000). NULL = not set.
+    // A deal's margin value = amountMinor * marginBps / 10000.
+    marginBps: integer('margin_bps'),
+    /**
+     * Manager-approval gate for the Won stage. A deal moved to Won by a
+     * sales rep is 'pending' until a manager approves; moved by a
+     * manager/admin/owner it is auto-'approved'. Only Won + 'approved'
+     * deals count toward sales-target achievement. 'none' for any deal
+     * not currently at Won. 'rejected' is a transient audit marker set
+     * when a manager rejects (the deal is reopened to Negotiation).
+     */
+    approvalStatus: dealApprovalStatus('approval_status')
+      .notNull()
+      .default('none'),
+    approvedBy: text('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
     // ISO 4217 three-letter code (e.g. "USD", "EUR", "INR").
     currency: text('currency').notNull().default('USD'),
     expectedCloseDate: date('expected_close_date'),

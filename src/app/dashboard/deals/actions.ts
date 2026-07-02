@@ -19,6 +19,11 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
+import {
+  approvalForTransition,
+  approvalOnEnterWon,
+  marginPctToBps,
+} from '@/lib/deals/approval';
 import { KNOWN_CURRENCIES, toMinorUnits } from '@/lib/deals/currency';
 import {
   BULK_UPLOAD_HEADERS,
@@ -36,6 +41,7 @@ import {
 import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { personaOf } from '@/lib/personas';
+import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
@@ -185,6 +191,7 @@ export async function createDealAction(
         unitPrice: formData.get('unitPrice'),
         quantity: formData.get('quantity'),
         offerPrice: formData.get('offerPrice'),
+        marginPct: formData.get('marginPct'),
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -265,9 +272,19 @@ export async function createDealAction(
         parsed.data.offerPrice !== undefined
           ? toMinorUnits(parsed.data.offerPrice, parsed.data.currency)
           : null;
+      const marginBps =
+        parsed.data.marginPct !== undefined
+          ? marginPctToBps(parsed.data.marginPct)
+          : null;
       const closedAt =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost'
           ? new Date()
+          : null;
+      // A deal created directly at Won needs an approval state; anywhere else
+      // it's 'none' (schema default). Manager/admin/owner → auto-approved.
+      const approval =
+        parsed.data.stage === 'won'
+          ? approvalOnEnterWon(membership.role, membership.userId, new Date())
           : null;
 
       const created = await tenantTransaction(async (tx) => {
@@ -284,6 +301,12 @@ export async function createDealAction(
             unitPriceMinor,
             quantity,
             offerPriceMinor,
+            marginBps,
+            ...(approval && {
+              approvalStatus: approval.approvalStatus,
+              approvedBy: approval.approvedBy,
+              approvedAt: approval.approvedAt,
+            }),
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt,
@@ -364,6 +387,7 @@ export async function updateDealAction(
         unitPrice: formData.get('unitPrice'),
         quantity: formData.get('quantity'),
         offerPrice: formData.get('offerPrice'),
+        marginPct: formData.get('marginPct'),
         ownerId: formData.get('ownerId'),
       };
       for (const key of ['description', 'expectedCloseDate', 'ownerId'] as const) {
@@ -420,6 +444,10 @@ export async function updateDealAction(
         parsed.data.offerPrice !== undefined
           ? toMinorUnits(parsed.data.offerPrice, parsed.data.currency)
           : null;
+      const marginBps =
+        parsed.data.marginPct !== undefined
+          ? marginPctToBps(parsed.data.marginPct)
+          : null;
       const isClosedStage =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
 
@@ -467,6 +495,17 @@ export async function updateDealAction(
         if (isClosedStage && !previous.closedAt) nextClosedAt = new Date();
         if (!isClosedStage && previous.closedAt) nextClosedAt = null;
 
+        // Approval follows the stage transition: entering Won as a rep →
+        // pending, as a manager → approved; leaving Won → cleared. Staying at
+        // Won returns null so an unrelated edit never disturbs an approval.
+        const approvalPatch = approvalForTransition(
+          previous.stage,
+          parsed.data.stage,
+          membership.role,
+          membership.userId,
+          new Date(),
+        );
+
         const [updated] = await tx
           .update(deals)
           .set({
@@ -483,6 +522,12 @@ export async function updateDealAction(
             unitPriceMinor,
             quantity,
             offerPriceMinor,
+            marginBps,
+            ...(approvalPatch && {
+              approvalStatus: approvalPatch.approvalStatus,
+              approvedBy: approvalPatch.approvedBy,
+              approvedAt: approvalPatch.approvedAt,
+            }),
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt: nextClosedAt,
@@ -642,11 +687,26 @@ export async function updateDealStageAction(
         if (isClosed && !previous.closedAt) nextClosedAt = new Date();
         if (!isClosed && previous.closedAt) nextClosedAt = null;
 
+        // Manager-approval gate: moving to Won as a rep → pending; as a
+        // manager/admin/owner → auto-approved. Moving away from Won clears it.
+        const approvalPatch = approvalForTransition(
+          previous.stage,
+          parsed.data.stage,
+          membership.role,
+          membership.userId,
+          new Date(),
+        );
+
         const [updated] = await tx
           .update(deals)
           .set({
             stage: parsed.data.stage,
             closedAt: nextClosedAt,
+            ...(approvalPatch && {
+              approvalStatus: approvalPatch.approvalStatus,
+              approvedBy: approvalPatch.approvedBy,
+              approvedAt: approvalPatch.approvedAt,
+            }),
             updatedBy: membership.userId,
           })
           .where(
@@ -773,6 +833,371 @@ export async function updateDealStageAction(
       revalidatePath(`/dashboard/deals/${result.row.id}`);
       if (result.changed) revalidatePath('/dashboard/activity');
       return { ok: true, deal: result.row, changed: result.changed };
+    },
+  );
+}
+
+/* -------- APPROVE / REJECT (manager gate at Won) -------- */
+
+/**
+ * Approve a Won deal that is awaiting manager sign-off. Only valid when the
+ * deal is currently at the Won stage and 'pending'. Approval is what makes a
+ * won deal count toward sales-target achievement.
+ */
+export async function approveDealAction(id: string): Promise<SimpleResult> {
+  const gate = await checkPermission('approveDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  const parsedId = dealIdSchema.safeParse({ id });
+  if (!parsedId.success) return { ok: false, message: 'Invalid deal id.' };
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const ok = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select({
+            id: deals.id,
+            name: deals.name,
+            stage: deals.stage,
+            approvalStatus: deals.approvalStatus,
+          })
+          .from(deals)
+          .where(
+            and(
+              eq(deals.id, parsedId.data.id),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return false;
+        if (previous.stage !== 'won' || previous.approvalStatus !== 'pending') {
+          return false;
+        }
+
+        const [updated] = await tx
+          .update(deals)
+          .set({
+            approvalStatus: 'approved',
+            approvedBy: membership.userId,
+            approvedAt: new Date(),
+            updatedBy: membership.userId,
+          })
+          .where(and(eq(deals.id, previous.id), eq(deals.tenantId, tenant.id)))
+          .returning();
+        if (!updated) return false;
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'deal',
+          entityId: updated.id,
+          action: 'deal_approved',
+          metadata: { name: updated.name },
+        });
+
+        const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
+        if (serialized) {
+          await publishRealtimeEvent(tx, {
+            type: 'deal.updated',
+            tenantId: tenant.id,
+            deal: serialized,
+          });
+        }
+        return true;
+      });
+
+      if (!ok) {
+        return {
+          ok: false,
+          message: 'This deal is not awaiting approval.',
+        };
+      }
+      revalidatePath('/dashboard/deals');
+      revalidatePath('/dashboard/deals/board');
+      revalidatePath(`/dashboard/deals/${parsedId.data.id}`);
+      revalidatePath('/dashboard/activity');
+      return { ok: true };
+    },
+  );
+}
+
+/**
+ * Reject a Won deal awaiting sign-off. Per the agreed model this REOPENS the
+ * deal to the Negotiation stage (clears the win + closedAt) so the rep can
+ * rework it; the rejection is recorded for audit.
+ */
+export async function rejectDealAction(input: {
+  id: string;
+  reason?: string;
+}): Promise<SimpleResult> {
+  const gate = await checkPermission('approveDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  const parsedId = dealIdSchema.safeParse({ id: input.id });
+  if (!parsedId.success) return { ok: false, message: 'Invalid deal id.' };
+  const reason =
+    typeof input.reason === 'string' && input.reason.trim()
+      ? input.reason.trim().slice(0, 500)
+      : null;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const ok = await tenantTransaction(async (tx) => {
+        const [previous] = await tx
+          .select({
+            id: deals.id,
+            name: deals.name,
+            stage: deals.stage,
+            approvalStatus: deals.approvalStatus,
+          })
+          .from(deals)
+          .where(
+            and(
+              eq(deals.id, parsedId.data.id),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!previous) return false;
+        if (previous.stage !== 'won' || previous.approvalStatus !== 'pending') {
+          return false;
+        }
+
+        const [updated] = await tx
+          .update(deals)
+          .set({
+            stage: 'negotiation',
+            closedAt: null,
+            approvalStatus: 'rejected',
+            approvedBy: membership.userId,
+            approvedAt: new Date(),
+            updatedBy: membership.userId,
+          })
+          .where(and(eq(deals.id, previous.id), eq(deals.tenantId, tenant.id)))
+          .returning();
+        if (!updated) return false;
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'deal',
+          entityId: updated.id,
+          action: 'deal_rejected',
+          metadata: { name: updated.name, ...(reason && { reason }) },
+        });
+
+        const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
+        if (serialized) {
+          await publishRealtimeEvent(tx, {
+            type: 'deal.stage_changed',
+            tenantId: tenant.id,
+            deal: serialized,
+            from: 'won',
+            to: 'negotiation',
+          });
+        }
+        return true;
+      });
+
+      if (!ok) {
+        return { ok: false, message: 'This deal is not awaiting approval.' };
+      }
+      revalidatePath('/dashboard/deals');
+      revalidatePath('/dashboard/deals/board');
+      revalidatePath(`/dashboard/deals/${parsedId.data.id}`);
+      revalidatePath('/dashboard/activity');
+      return { ok: true };
+    },
+  );
+}
+
+/* -------- BULK APPROVE / REJECT -------- */
+
+const bulkIdsSchema = z.object({
+  ids: z.array(z.uuid()).min(1, 'Select at least one deal').max(200),
+});
+
+export type BulkApprovalResult =
+  | { ok: true; count: number }
+  | { ok: false; message: string };
+
+/**
+ * Approve many pending Won deals at once. Skips any id that isn't currently
+ * Won + pending. Returns how many were actually approved.
+ */
+export async function bulkApproveDealsAction(
+  ids: string[],
+): Promise<BulkApprovalResult> {
+  const gate = await checkPermission('approveDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const parsed = bulkIdsSchema.safeParse({ ids });
+  if (!parsed.success) return { ok: false, message: 'No deals selected.' };
+  const { tenant, membership } = gate;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const count = await tenantTransaction(async (tx) => {
+        let n = 0;
+        for (const id of parsed.data.ids) {
+          const [previous] = await tx
+            .select({
+              id: deals.id,
+              name: deals.name,
+              stage: deals.stage,
+              approvalStatus: deals.approvalStatus,
+            })
+            .from(deals)
+            .where(
+              and(
+                eq(deals.id, id),
+                eq(deals.tenantId, tenant.id),
+                isNull(deals.deletedAt),
+              ),
+            )
+            .limit(1);
+          if (
+            !previous ||
+            previous.stage !== 'won' ||
+            previous.approvalStatus !== 'pending'
+          ) {
+            continue;
+          }
+          const [updated] = await tx
+            .update(deals)
+            .set({
+              approvalStatus: 'approved',
+              approvedBy: membership.userId,
+              approvedAt: new Date(),
+              updatedBy: membership.userId,
+            })
+            .where(and(eq(deals.id, id), eq(deals.tenantId, tenant.id)))
+            .returning();
+          if (!updated) continue;
+          await recordActivity(tx, {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            entityType: 'deal',
+            entityId: updated.id,
+            action: 'deal_approved',
+            metadata: { name: updated.name },
+          });
+          const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
+          if (serialized) {
+            await publishRealtimeEvent(tx, {
+              type: 'deal.updated',
+              tenantId: tenant.id,
+              deal: serialized,
+            });
+          }
+          n++;
+        }
+        return n;
+      });
+
+      revalidatePath('/dashboard/deals');
+      revalidatePath('/dashboard/deals/board');
+      revalidatePath('/dashboard/deals/approvals');
+      revalidatePath('/dashboard/activity');
+      return { ok: true, count };
+    },
+  );
+}
+
+/**
+ * Reject many pending Won deals at once — each is reopened to Negotiation.
+ * Skips any id that isn't currently Won + pending.
+ */
+export async function bulkRejectDealsAction(input: {
+  ids: string[];
+  reason?: string;
+}): Promise<BulkApprovalResult> {
+  const gate = await checkPermission('approveDeals');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const parsed = bulkIdsSchema.safeParse({ ids: input.ids });
+  if (!parsed.success) return { ok: false, message: 'No deals selected.' };
+  const { tenant, membership } = gate;
+  const reason =
+    typeof input.reason === 'string' && input.reason.trim()
+      ? input.reason.trim().slice(0, 500)
+      : null;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const count = await tenantTransaction(async (tx) => {
+        let n = 0;
+        for (const id of parsed.data.ids) {
+          const [previous] = await tx
+            .select({
+              id: deals.id,
+              name: deals.name,
+              stage: deals.stage,
+              approvalStatus: deals.approvalStatus,
+            })
+            .from(deals)
+            .where(
+              and(
+                eq(deals.id, id),
+                eq(deals.tenantId, tenant.id),
+                isNull(deals.deletedAt),
+              ),
+            )
+            .limit(1);
+          if (
+            !previous ||
+            previous.stage !== 'won' ||
+            previous.approvalStatus !== 'pending'
+          ) {
+            continue;
+          }
+          const [updated] = await tx
+            .update(deals)
+            .set({
+              stage: 'negotiation',
+              closedAt: null,
+              approvalStatus: 'rejected',
+              approvedBy: membership.userId,
+              approvedAt: new Date(),
+              updatedBy: membership.userId,
+            })
+            .where(and(eq(deals.id, id), eq(deals.tenantId, tenant.id)))
+            .returning();
+          if (!updated) continue;
+          await recordActivity(tx, {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            entityType: 'deal',
+            entityId: updated.id,
+            action: 'deal_rejected',
+            metadata: { name: updated.name, ...(reason && { reason }) },
+          });
+          const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
+          if (serialized) {
+            await publishRealtimeEvent(tx, {
+              type: 'deal.stage_changed',
+              tenantId: tenant.id,
+              deal: serialized,
+              from: 'won',
+              to: 'negotiation',
+            });
+          }
+          n++;
+        }
+        return n;
+      });
+
+      revalidatePath('/dashboard/deals');
+      revalidatePath('/dashboard/deals/board');
+      revalidatePath('/dashboard/deals/approvals');
+      revalidatePath('/dashboard/activity');
+      return { ok: true, count };
     },
   );
 }

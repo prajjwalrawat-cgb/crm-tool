@@ -43,6 +43,10 @@ export type DealFilters = {
   unassigned?: boolean;
   /** Filter to deals owned by these teammates (OR within the group). */
   ownerIds?: string[];
+  /** Won deals still awaiting manager approval (stage=won + pending). */
+  awaitingApproval?: boolean;
+  /** Won deals that have been manager-approved (stage=won + approved). */
+  approvedOnly?: boolean;
 };
 
 const URL_FILTER_KEYS = [
@@ -59,6 +63,7 @@ const URL_FILTER_KEYS = [
   'mine',
   'unassigned',
   'owner',
+  'approval',
 ] as const;
 
 /**
@@ -125,6 +130,8 @@ export function parseDealFilters(
     mine: flag(raw.mine),
     unassigned: flag(raw.unassigned),
     ownerIds: ownerIds.length > 0 ? ownerIds : undefined,
+    awaitingApproval: raw.approval === 'pending',
+    approvedOnly: raw.approval === 'approved',
   };
 }
 
@@ -161,6 +168,8 @@ export function dealFiltersToSearchParams(
   if (filters.ownerIds && filters.ownerIds.length > 0) {
     out.set('owner', filters.ownerIds.join(','));
   }
+  if (filters.awaitingApproval) out.set('approval', 'pending');
+  else if (filters.approvedOnly) out.set('approval', 'approved');
   return out;
 }
 
@@ -175,6 +184,8 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       (filters.companyIds && filters.companyIds.length > 0) ||
       filters.mine ||
       filters.unassigned ||
-      (filters.ownerIds && filters.ownerIds.length > 0),
+      (filters.ownerIds && filters.ownerIds.length > 0) ||
+      filters.awaitingApproval ||
+      filters.approvedOnly,
   );
 }

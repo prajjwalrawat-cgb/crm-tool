@@ -47,6 +47,14 @@ const PERMISSIONS = {
    * since that depends on the target's role, not just the actor's).
    */
   assignDeals: ['owner', 'manager'],
+  /**
+   * Approving (or rejecting) a deal at the Won stage. Managers and above.
+   * A deal moved to Won by a plain member sits 'pending' until one of these
+   * roles approves it; approval is what makes it count toward sales targets.
+   */
+  approveDeals: ['owner', 'admin', 'manager'],
+  /** Setting per-member annual sales targets. Admin tier only. */
+  manageTargets: ['owner', 'admin'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -88,6 +96,8 @@ export const canManageDeals = (role: RoleArg) => can(role, 'manageDeals');
 export const canDeleteDeals = (role: RoleArg) => can(role, 'deleteDeals');
 export const canRestoreDeals = (role: RoleArg) => can(role, 'restoreDeals');
 export const canAssignDeals = (role: RoleArg) => can(role, 'assignDeals');
+export const canApproveDeals = (role: RoleArg) => can(role, 'approveDeals');
+export const canManageTargets = (role: RoleArg) => can(role, 'manageTargets');
 
 export const canHardDeleteCompanies = (role: RoleArg) =>
   can(role, 'hardDeleteCompanies');

@@ -47,6 +47,10 @@ export const ACTIVITY_ACTIONS = [
   'email_sent',
   /** Email send attempt failed. */
   'email_failed',
+  /** A manager approved a Won deal (counts toward sales targets). */
+  'deal_approved',
+  /** A manager rejected a Won deal (reopened to Negotiation). */
+  'deal_rejected',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

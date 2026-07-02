@@ -17,7 +17,13 @@ import {
 } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { companies, contacts, deals, type Deal } from '@/db/schema';
+import {
+  companies,
+  contacts,
+  deals,
+  type Deal,
+  type DealApprovalStatus,
+} from '@/db/schema';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
 import {
   buildPage,
@@ -90,6 +96,10 @@ type RawJoinedRow = {
   unitPriceMinor: number | null;
   quantity: number | null;
   offerPriceMinor: number | null;
+  marginBps: number | null;
+  approvalStatus: DealApprovalStatus;
+  approvedBy: string | null;
+  approvedAt: Date | null;
   currency: string;
   expectedCloseDate: string | null;
   closedAt: Date | null;
@@ -122,6 +132,10 @@ const DEALS_PROJECTION = {
   unitPriceMinor: deals.unitPriceMinor,
   quantity: deals.quantity,
   offerPriceMinor: deals.offerPriceMinor,
+  marginBps: deals.marginBps,
+  approvalStatus: deals.approvalStatus,
+  approvedBy: deals.approvedBy,
+  approvedAt: deals.approvedAt,
   currency: deals.currency,
   expectedCloseDate: deals.expectedCloseDate,
   closedAt: deals.closedAt,
@@ -263,6 +277,18 @@ export async function listDeals(
   if (f.ownerIds && f.ownerIds.length > 0) {
     conditions.push(inArray(deals.ownerId, f.ownerIds));
   }
+  if (f.awaitingApproval) {
+    conditions.push(
+      eq(deals.stage, 'won'),
+      eq(deals.approvalStatus, 'pending'),
+    );
+  }
+  if (f.approvedOnly) {
+    conditions.push(
+      eq(deals.stage, 'won'),
+      eq(deals.approvalStatus, 'approved'),
+    );
+  }
   // Hard scope: members see only their deals + unassigned. URL params
   // cannot widen this — they're additive within the allowed set.
   if (options.restrictToOwnerOrUnassigned) {
@@ -316,6 +342,92 @@ export async function getDealById(
       .limit(1),
   );
   return rows[0] ? shapeDealRow(rows[0]) : null;
+}
+
+/**
+ * All Won deals awaiting manager approval, newest-closed first. Used by the
+ * dedicated Approvals queue. No pagination — the pending set is small by
+ * nature (a manager clears it). Callers gate access to approver roles.
+ */
+export async function listDealsAwaitingApproval(
+  tenantId: string,
+): Promise<DealRow[]> {
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select(DEALS_PROJECTION)
+      .from(deals)
+      .leftJoin(companies, eq(deals.companyId, companies.id))
+      .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .where(
+        and(
+          eq(deals.tenantId, tenantId),
+          isNull(deals.deletedAt),
+          eq(deals.stage, 'won'),
+          eq(deals.approvalStatus, 'pending'),
+        ),
+      )
+      .orderBy(desc(deals.closedAt))
+      .limit(200),
+  );
+  return rows.map(shapeDealRow);
+}
+
+/**
+ * Recently manager-approved Won deals, most-recently-approved first. Powers
+ * the "Recently approved" section of the Approvals page so owners/managers
+ * can see what was approved and when (approvedBy / approvedAt).
+ */
+export async function listRecentlyApprovedDeals(
+  tenantId: string,
+  limit = 50,
+): Promise<DealRow[]> {
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select(DEALS_PROJECTION)
+      .from(deals)
+      .leftJoin(companies, eq(deals.companyId, companies.id))
+      .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .where(
+        and(
+          eq(deals.tenantId, tenantId),
+          isNull(deals.deletedAt),
+          eq(deals.stage, 'won'),
+          eq(deals.approvalStatus, 'approved'),
+        ),
+      )
+      .orderBy(desc(deals.approvedAt))
+      .limit(limit),
+  );
+  return rows.map(shapeDealRow);
+}
+
+/**
+ * Recently manager-rejected deals, most-recently-rejected first. A rejected
+ * deal is reopened to Negotiation but keeps `approval_status = 'rejected'`
+ * plus the reviewer (`approvedBy`) and time (`approvedAt`) as an audit marker
+ * — until the deal is next edited/moved, which clears it.
+ */
+export async function listRecentlyRejectedDeals(
+  tenantId: string,
+  limit = 50,
+): Promise<DealRow[]> {
+  const rows = await tenantTransaction(async (tx) =>
+    tx
+      .select(DEALS_PROJECTION)
+      .from(deals)
+      .leftJoin(companies, eq(deals.companyId, companies.id))
+      .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .where(
+        and(
+          eq(deals.tenantId, tenantId),
+          isNull(deals.deletedAt),
+          eq(deals.approvalStatus, 'rejected'),
+        ),
+      )
+      .orderBy(desc(deals.approvedAt))
+      .limit(limit),
+  );
+  return rows.map(shapeDealRow);
 }
 
 export async function listDeletedDeals(
@@ -462,6 +574,18 @@ export async function listDealsForBoard(
       }
       if (f.ownerIds && f.ownerIds.length > 0) {
         sharedConds.push(inArray(deals.ownerId, f.ownerIds));
+      }
+      if (f.awaitingApproval) {
+        sharedConds.push(
+          eq(deals.stage, 'won'),
+          eq(deals.approvalStatus, 'pending'),
+        );
+      }
+      if (f.approvedOnly) {
+        sharedConds.push(
+          eq(deals.stage, 'won'),
+          eq(deals.approvalStatus, 'approved'),
+        );
       }
       if (options.restrictToOwnerOrUnassigned) {
         const me = options.restrictToOwnerOrUnassigned;

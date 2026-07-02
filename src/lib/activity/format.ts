@@ -80,6 +80,21 @@ export function formatActivity(row: ActivityRow): FormattedActivity {
       }
       return { sentence: `${base}` };
     }
+    case 'deal_approved':
+      return {
+        sentence: name
+          ? `${actor} approved deal ${name}`
+          : `${actor} approved a deal`,
+      };
+    case 'deal_rejected': {
+      const reason = typeof meta.reason === 'string' ? meta.reason : null;
+      return {
+        sentence: name
+          ? `${actor} rejected deal ${name} (reopened to Negotiation)`
+          : `${actor} rejected a deal`,
+        detail: reason ? `Reason: ${reason}` : undefined,
+      };
+    }
     case 'invited': {
       const email = typeof meta.email === 'string' ? meta.email : 'a teammate';
       const role = typeof meta.role === 'string' ? meta.role : null;

@@ -17,6 +17,7 @@ import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
+import { marginPctToBps } from '@/lib/deals/approval';
 import { formatCurrency, fromMinorUnits, toMinorUnits } from '@/lib/deals/currency';
 import type { DealFilters } from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
@@ -26,7 +27,7 @@ import {
   DEAL_STAGES,
   DEAL_STAGE_LABELS,
 } from '@/lib/deals/schema';
-import { canDeleteDeals, canManageDeals } from '@/lib/rbac';
+import { canApproveDeals, canDeleteDeals, canManageDeals } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
@@ -270,6 +271,8 @@ export function DealsView({
     const offerPriceRaw = String(formData.get('offerPrice') ?? '').trim();
     const offerPriceMinor =
       offerPriceRaw !== '' ? toMinorUnits(Number(offerPriceRaw) || 0, currency) : null;
+    const marginRaw = String(formData.get('marginPct') ?? '').trim();
+    const marginBps = marginRaw !== '' ? marginPctToBps(Number(marginRaw) || 0) : null;
     const expectedCloseDate = String(formData.get('expectedCloseDate') ?? '').trim() || null;
     // Company/Contact are linked records; resolve display names from the form
     // options so the optimistic row shows the right labels until refresh.
@@ -300,6 +303,29 @@ export function DealsView({
       ? previousClosedAt ?? new Date()
       : null;
 
+    // Optimistic approval state mirrors the server rule; realtime/refresh
+    // reconciles the authoritative value.
+    const wasWon = base?.stage === 'won';
+    const nowWon = stage === 'won';
+    let approvalStatus: DealItem['approvalStatus'] = base?.approvalStatus ?? 'none';
+    let approvedBy = base?.approvedBy ?? null;
+    let approvedAt = base?.approvedAt ?? null;
+    if (nowWon && !wasWon) {
+      if (canApproveDeals(currentRole)) {
+        approvalStatus = 'approved';
+        approvedBy = currentUserId;
+        approvedAt = new Date();
+      } else {
+        approvalStatus = 'pending';
+        approvedBy = null;
+        approvedAt = null;
+      }
+    } else if (!nowWon) {
+      approvalStatus = 'none';
+      approvedBy = null;
+      approvedAt = null;
+    }
+
     return {
       id: base?.id ?? `optimistic-${crypto.randomUUID()}`,
       tenantId: base?.tenantId ?? '',
@@ -313,6 +339,10 @@ export function DealsView({
       unitPriceMinor,
       quantity,
       offerPriceMinor,
+      marginBps,
+      approvalStatus,
+      approvedBy,
+      approvedAt,
       currency,
       expectedCloseDate,
       closedAt,

@@ -1,5 +1,6 @@
 import {
   Activity,
+  BadgeCheck,
   BarChart3,
   Banknote,
   Boxes,
@@ -80,6 +81,8 @@ const ADMIN_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
+      { href: '/dashboard/deals/approvals', label: 'Approvals', icon: BadgeCheck },
+      { href: '/dashboard/targets', label: 'Targets', icon: Target },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
       { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
     ],
@@ -132,6 +135,8 @@ const MANAGER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
+      { href: '/dashboard/deals/approvals', label: 'Approvals', icon: BadgeCheck },
+      { href: '/dashboard/targets', label: 'Targets', icon: Target },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
       { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
     ],
@@ -193,6 +198,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
         label: 'My Performance',
         icon: Target,
       },
+      { href: '/dashboard/targets', label: 'My Targets', icon: Gauge },
     ],
   },
   {

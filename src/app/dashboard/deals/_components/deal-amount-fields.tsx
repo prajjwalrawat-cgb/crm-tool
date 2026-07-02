@@ -22,6 +22,7 @@ export function DealAmountFields({
   defaultUnitPrice,
   defaultQuantity,
   defaultOfferPrice,
+  defaultMarginPct,
   errors,
 }: {
   unitPricingEnabled: boolean;
@@ -30,6 +31,7 @@ export function DealAmountFields({
   defaultUnitPrice?: string;
   defaultQuantity?: string;
   defaultOfferPrice?: string;
+  defaultMarginPct?: string;
   errors: Record<string, string[]>;
 }) {
   const [unitPrice, setUnitPrice] = useState(defaultUnitPrice ?? '');
@@ -67,6 +69,32 @@ export function DealAmountFields({
     </div>
   );
 
+  // Optional gross margin percentage — shown in both pricing modes.
+  const margin = (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor="marginPct" className={labelCls}>
+        Margin % <span className="font-normal text-slate-400">(optional)</span>
+      </label>
+      <div className="relative">
+        <input
+          id="marginPct"
+          name="marginPct"
+          type="number"
+          step="0.01"
+          min="0"
+          max="100"
+          defaultValue={defaultMarginPct ?? ''}
+          placeholder="0"
+          className={cn(inputCls, 'w-full pr-7', errors.marginPct?.length && 'border-red-300')}
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-400">
+          %
+        </span>
+      </div>
+      {errors.marginPct?.length ? <p className="text-xs text-red-600">{errors.marginPct.join(' ')}</p> : null}
+    </div>
+  );
+
   if (!unitPricingEnabled) {
     return (
       <>
@@ -87,7 +115,10 @@ export function DealAmountFields({
           </div>
           {currency}
         </div>
-        {offerPrice}
+        <div className="grid grid-cols-2 gap-3">
+          {offerPrice}
+          {margin}
+        </div>
       </>
     );
   }
@@ -143,7 +174,10 @@ export function DealAmountFields({
         </div>
         {currency}
       </div>
-      {offerPrice}
+      <div className="grid grid-cols-2 gap-3">
+        {offerPrice}
+        {margin}
+      </div>
     </>
   );
 }

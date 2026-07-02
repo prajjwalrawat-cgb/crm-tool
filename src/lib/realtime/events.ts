@@ -358,12 +358,13 @@ export function serializeDates<T extends Record<string, unknown>>(
  */
 export type DeserializedDeal = Omit<
   SerializedDeal,
-  'createdAt' | 'updatedAt' | 'closedAt' | 'deletedAt'
+  'createdAt' | 'updatedAt' | 'closedAt' | 'deletedAt' | 'approvedAt'
 > & {
   createdAt: Date;
   updatedAt: Date;
   closedAt: Date | null;
   deletedAt: Date | null;
+  approvedAt: Date | null;
 };
 
 export function deserializeDeal(d: SerializedDeal): DeserializedDeal {
@@ -373,5 +374,6 @@ export function deserializeDeal(d: SerializedDeal): DeserializedDeal {
     updatedAt: new Date(d.updatedAt),
     closedAt: d.closedAt ? new Date(d.closedAt) : null,
     deletedAt: d.deletedAt ? new Date(d.deletedAt) : null,
+    approvedAt: d.approvedAt ? new Date(d.approvedAt) : null,
   };
 }

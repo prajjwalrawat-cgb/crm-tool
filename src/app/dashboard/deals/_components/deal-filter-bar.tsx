@@ -117,6 +117,24 @@ export function DealFilterBar({
       pushFilters({ ...initialFilters, unassigned: next, mine: false }),
     [initialFilters, pushFilters],
   );
+  const setAwaitingApproval = useCallback(
+    (next: boolean) =>
+      pushFilters({
+        ...initialFilters,
+        awaitingApproval: next,
+        approvedOnly: false,
+      }),
+    [initialFilters, pushFilters],
+  );
+  const setApprovedOnly = useCallback(
+    (next: boolean) =>
+      pushFilters({
+        ...initialFilters,
+        approvedOnly: next,
+        awaitingApproval: false,
+      }),
+    [initialFilters, pushFilters],
+  );
 
   const clearAll = useCallback(
     () => pushFilters({}),
@@ -160,6 +178,16 @@ export function DealFilterBar({
           label="Stale only"
           active={!!initialFilters.stale}
           onClick={() => setStale(!initialFilters.stale)}
+        />
+        <ToggleChip
+          label="Awaiting approval"
+          active={!!initialFilters.awaitingApproval}
+          onClick={() => setAwaitingApproval(!initialFilters.awaitingApproval)}
+        />
+        <ToggleChip
+          label="Approved"
+          active={!!initialFilters.approvedOnly}
+          onClick={() => setApprovedOnly(!initialFilters.approvedOnly)}
         />
         <CompanyPopover
           selectedIds={initialFilters.companyIds ?? []}

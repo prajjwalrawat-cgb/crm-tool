@@ -6,6 +6,7 @@ import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
+import { marginBpsToPct } from '@/lib/deals/approval';
 import { fromMinorUnits } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
@@ -93,6 +94,8 @@ export function EditDealDrawer({
     deal && deal.offerPriceMinor != null
       ? fromMinorUnits(deal.offerPriceMinor, deal.currency).toString()
       : '';
+  const initialMarginPct =
+    deal && deal.marginBps != null ? marginBpsToPct(deal.marginBps).toString() : '';
   // A deal that already carries unit price + qty is always unit-priced, even
   // if the workspace later turned the toggle off — so we keep showing the
   // fields (and keep Amount derived) rather than losing that data.
@@ -206,6 +209,7 @@ export function EditDealDrawer({
           defaultUnitPrice={initialUnitPrice}
           defaultQuantity={initialQuantity}
           defaultOfferPrice={initialOfferPrice}
+          defaultMarginPct={initialMarginPct}
           errors={fieldErrors}
         />
 

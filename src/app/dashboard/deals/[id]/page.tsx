@@ -14,9 +14,10 @@ import { listCommentsForEntity } from '@/lib/comments/queries';
 import { formatCurrency } from '@/lib/deals/currency';
 import { getDealById } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
 import { listNotesForEntity } from '@/lib/notes/queries';
-import { canAssignDeals, canManageDeals } from '@/lib/rbac';
+import { canApproveDeals, canAssignDeals, canManageDeals } from '@/lib/rbac';
 import { listTasksForEntity } from '@/lib/tasks/queries';
 import { listTeammates } from '@/lib/teammates/queries';
 import { getEntityTimeline } from '@/lib/timeline/queries';
@@ -31,6 +32,7 @@ import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { RelationshipHealthCard } from '../../_components/relationship-health-card';
 import { StageBadge } from '../_components/stage-badge';
+import { DealApprovalControls } from './_components/deal-approval-controls';
 import { DealInlineHeader } from './_components/deal-inline-header';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { SummaryCard } from './_components/summary-card';
@@ -87,6 +89,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     // Assigning a deal owner is owner/manager only; a manager can't assign
     // to an owner, so they pick from the team minus owners.
     const canAssign = canAssignDeals(membership.role);
+    const canApprove = canApproveDeals(membership.role);
     const assignableTeammates =
       membership.role === 'owner'
         ? teammates
@@ -179,6 +182,35 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 value={formatCurrency(deal.offerPriceMinor, deal.currency)}
                 mono
               />
+            ) : null}
+            {deal.marginBps != null ? (
+              <DetailCard
+                label="Margin"
+                value={`${marginBpsToPct(deal.marginBps)}% · ${formatCurrency(
+                  marginMinor(deal.amountMinor, deal.marginBps),
+                  deal.currency,
+                )}`}
+                mono
+              />
+            ) : null}
+            {deal.stage === 'won' ? (
+              <DetailCard
+                label="Approval"
+                value={
+                  deal.approvalStatus === 'approved'
+                    ? 'Approved'
+                    : deal.approvalStatus === 'pending'
+                      ? 'Pending manager approval'
+                      : deal.approvalStatus === 'rejected'
+                        ? 'Rejected'
+                        : '—'
+                }
+              />
+            ) : null}
+            {canApprove &&
+            deal.stage === 'won' &&
+            deal.approvalStatus === 'pending' ? (
+              <DealApprovalControls dealId={deal.id} />
             ) : null}
             <DetailCard
               label="Expected close"
