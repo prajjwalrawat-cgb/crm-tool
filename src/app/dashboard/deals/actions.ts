@@ -95,7 +95,7 @@ async function resolveDealLinks(
   | { ok: false; message: string; field: 'companyId' | 'contactId' }
 > {
   const cId = companyId;
-  let ctId = contactId;
+  const ctId = contactId;
 
   if (cId) {
     const [c] = await tenantTransaction((tx) =>
@@ -115,9 +115,9 @@ async function resolveDealLinks(
     if (restrictToOwnerId && c.ownerId && c.ownerId !== restrictToOwnerId) {
       return { ok: false, message: "You can't link that company.", field: 'companyId' };
     }
-  } else {
-    ctId = null; // No company → no contact.
   }
+  // A contact may be linked WITHOUT a company (an individual customer). We no
+  // longer force ctId = null here; the contact is validated below on its own.
 
   if (ctId) {
     const [ct] = await tenantTransaction((tx) =>
