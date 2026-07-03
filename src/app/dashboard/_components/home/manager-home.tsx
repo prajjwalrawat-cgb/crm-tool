@@ -42,6 +42,7 @@ import { StageConversionBars } from '../stage-conversion-bars';
 import { StageDonut } from '../stage-donut';
 
 import { Greeting } from './greeting';
+import { RepFilter } from './rep-filter';
 
 /**
  * Manager Home — people + performance visibility.
@@ -194,7 +195,13 @@ export async function ManagerHome({
         className="mb-3"
       />
 
-      <ViewToggle view={view} focusedRepName={focusedRep?.displayName ?? null} />
+      <div className="flex flex-wrap items-center gap-2">
+        <RepFilter
+          teammates={teammates.map((t) => ({ id: t.id, displayName: t.displayName }))}
+          value={view}
+        />
+        <ViewToggle view={view} focusedRepName={focusedRep?.displayName ?? null} />
+      </div>
 
       {/* KPI strip — team-level numbers always (not affected by rep toggle) */}
       <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">

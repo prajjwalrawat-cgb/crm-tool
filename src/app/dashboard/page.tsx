@@ -43,6 +43,7 @@ export default async function DashboardPage({
         tenantId: tenant.id,
         tenantName: tenant.name,
         userId,
+        view: parseManagerView(sp.view),
       });
     }
 

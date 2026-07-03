@@ -1,12 +1,46 @@
 'use client';
 
-import { Check, ChevronsUpDown, Plus } from 'lucide-react';
+import { Check, ChevronsUpDown, Loader2, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { useFormStatus } from 'react-dom';
 
 import { setActiveTenantAction } from '@/lib/auth/actions';
 
 export type WorkspaceLite = { tenantId: string; name: string };
+
+/**
+ * One workspace row. Lives inside its own <form> so `useFormStatus` reflects
+ * only THIS workspace's switch — showing a spinner on the row you clicked while
+ * the server action redirects.
+ */
+function WorkspaceRow({
+  name,
+  isCurrent,
+}: {
+  name: string;
+  isCurrent: boolean;
+}) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-busy={pending}
+      className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 disabled:opacity-70 dark:text-[#FAFAFA] dark:hover:bg-slate-800/40"
+    >
+      <span className="truncate">{name}</span>
+      {pending ? (
+        <Loader2
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-indigo-500 dark:text-indigo-400"
+          aria-hidden
+        />
+      ) : isCurrent ? (
+        <Check className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" aria-hidden />
+      ) : null}
+    </button>
+  );
+}
 
 export function WorkspaceSwitcher({
   currentTenantId,
@@ -51,15 +85,10 @@ export function WorkspaceSwitcher({
               key={ws.tenantId}
               action={setActiveTenantAction.bind(null, ws.tenantId)}
             >
-              <button
-                type="submit"
-                className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-[#FAFAFA] dark:hover:bg-slate-800/40"
-              >
-                <span className="truncate">{ws.name}</span>
-                {ws.tenantId === currentTenantId ? (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" aria-hidden />
-                ) : null}
-              </button>
+              <WorkspaceRow
+                name={ws.name}
+                isCurrent={ws.tenantId === currentTenantId}
+              />
             </form>
           ))}
           {canCreate ? (

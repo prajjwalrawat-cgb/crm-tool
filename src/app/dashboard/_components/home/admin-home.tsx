@@ -40,6 +40,8 @@ import {
 } from '@/lib/ops/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
+import type { OwnerScope } from '@/lib/reports/types';
+import { listTeammates } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 import { RevenueTrendChart } from '../revenue-trend-chart';
@@ -47,6 +49,7 @@ import { StageConversionBars } from '../stage-conversion-bars';
 import { StageDonut } from '../stage-donut';
 
 import { Greeting } from './greeting';
+import { RepFilter } from './rep-filter';
 
 /**
  * Admin Home — operational + business visibility for the org's
@@ -62,11 +65,18 @@ export async function AdminHome({
   tenantId,
   tenantName,
   userId,
+  view,
 }: {
   tenantId: string;
   tenantName: string;
   userId: string;
+  view: { mode: 'team' } | { mode: 'rep'; userId: string };
 }) {
+  // The org-level KPIs + ops health stay org-wide; the pipeline funnel, donut
+  // and revenue trend rescope to a single rep when one is selected.
+  const ownerScope: OwnerScope =
+    view.mode === 'rep' ? { type: 'user', userId: view.userId } : { type: 'all' };
+
   const [
     user,
     settings,
@@ -80,6 +90,7 @@ export async function AdminHome({
     inbox,
     recs,
     risks,
+    teammates,
     savedChartView,
     savedStageConversionView,
     savedStageDonutView,
@@ -89,10 +100,13 @@ export async function AdminHome({
     getDashboardOverview(tenantId),
     pipelineByStageRunner(
       tenantId,
-      { range: 'last_90d', owner: { type: 'all' } },
+      { range: 'last_90d', owner: ownerScope },
       { currentUserId: userId },
     ),
-    getRevenueTrend(tenantId, { days: 90, ownerId: null }),
+    getRevenueTrend(tenantId, {
+      days: 90,
+      ownerId: view.mode === 'rep' ? view.userId : null,
+    }),
     getWorkflowHealth(tenantId, 7),
     getWorkflowStats(tenantId, 24),
     getAiInvocationStats(tenantId, 24),
@@ -100,10 +114,20 @@ export async function AdminHome({
     getInboxCounts(tenantId),
     getRecommendationInsight(tenantId, userId),
     getRiskFlagInsight(tenantId, userId),
+    listTeammates(tenantId, tenantName),
     readRevenueTrendView({ tenantId, userId }),
     readStageConversionView({ tenantId, userId }),
     readStageDonutView({ tenantId, userId }),
   ]);
+
+  const focusedRep =
+    view.mode === 'rep'
+      ? teammates.find((t) => t.id === view.userId) ?? null
+      : null;
+  const scopeLabel =
+    view.mode === 'rep'
+      ? focusedRep?.displayName ?? 'Selected rep'
+      : null;
 
   const money = (m: number) =>
     settings.compactNumbers
@@ -123,8 +147,12 @@ export async function AdminHome({
         firstName={user?.firstName}
         tenantName={tenantName}
         personaLabel="Administrator"
-        className="mb-5"
+        className="mb-3"
       />
+
+      <div className="mb-4">
+        <RepFilter teammates={teammates} value={view} />
+      </div>
 
       {/* Org-level numbers at a glance */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -142,7 +170,7 @@ export async function AdminHome({
         <RevenueTrendChart
           data={trend}
           currency={settings}
-          title="Organization revenue trend"
+          title={scopeLabel ? `${scopeLabel} · revenue trend` : 'Organization revenue trend'}
           subtitle={`Last 90 days · ${tenantName}`}
           initialConfig={savedChartView?.config ?? null}
           initialTitleOverride={savedChartView?.title ?? null}
@@ -155,7 +183,7 @@ export async function AdminHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-2"
-          title="Organization pipeline by stage"
+          title={scopeLabel ? `${scopeLabel} pipeline by stage` : 'Organization pipeline by stage'}
           subtitle="Revenue-weighted bars · stage-to-stage conversion"
           initialConfig={savedStageConversionView?.config ?? null}
           initialTitleOverride={savedStageConversionView?.title ?? null}
@@ -165,8 +193,8 @@ export async function AdminHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-1"
-          title="Organization-wide"
-          subtitle="Deal-count distribution across all owners"
+          title={scopeLabel ? `${scopeLabel} — deals` : 'Organization-wide'}
+          subtitle={scopeLabel ? 'Deal-count distribution' : 'Deal-count distribution across all owners'}
           initialConfig={savedStageDonutView?.config ?? null}
           initialTitleOverride={savedStageDonutView?.title ?? null}
           persona="admin"
