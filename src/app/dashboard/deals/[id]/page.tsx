@@ -131,6 +131,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             currency: deal.currency,
             expectedCloseDate: deal.expectedCloseDate ?? null,
           }}
+          initialLostReason={deal.lostReason}
           dealId={deal.id}
           companyId={deal.companyId ?? null}
           contactId={deal.contactId ?? null}
@@ -164,6 +165,16 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               entityId={deal.id}
             />
             <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
+            {deal.stage === 'lost' && deal.lostReason ? (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
+                <div className="text-[10px] uppercase tracking-wide text-rose-700 dark:text-rose-300">
+                  Lost reason
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-sm text-rose-900 dark:text-rose-100">
+                  {deal.lostReason}
+                </div>
+              </div>
+            ) : null}
             <DetailCard
               label="Amount"
               value={formatCurrency(deal.amountMinor, deal.currency)}

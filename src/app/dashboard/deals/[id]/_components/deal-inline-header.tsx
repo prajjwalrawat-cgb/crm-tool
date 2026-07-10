@@ -15,6 +15,7 @@ import { DEAL_STAGES, DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/sche
 import { useRealtimeEventOfType } from '@/hooks/use-realtime-events';
 import { cn } from '@/lib/utils';
 
+import { LostReasonModal } from '../../_components/lost-reason-modal';
 import { StageBadge } from '../../_components/stage-badge';
 
 /**
@@ -47,6 +48,7 @@ type Editable = {
 
 export function DealInlineHeader({
   initial,
+  initialLostReason,
   dealId,
   companyId,
   contactId,
@@ -54,6 +56,7 @@ export function DealInlineHeader({
   tenantId,
 }: {
   initial: Editable;
+  initialLostReason: string | null;
   dealId: string;
   companyId: string | null;
   contactId: string | null;
@@ -64,6 +67,11 @@ export function DealInlineHeader({
   const [draft, setDraft] = useState<Editable>(initial);
   const [committed, setCommitted] = useState<Editable>(initial);
   const [pending, startTransition] = useTransition();
+  // Current lost reason — sent through on every save while the deal is Lost so
+  // an unrelated edit doesn't drop it; updated when the prompt captures a new
+  // one. A permanent copy also lives in the activity log.
+  const [lostReason, setLostReason] = useState(initialLostReason ?? '');
+  const [lostPromptOpen, setLostPromptOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Reconcile from realtime when another tab/user updates the deal.
@@ -87,36 +95,55 @@ export function DealInlineHeader({
     draft.currency !== committed.currency ||
     draft.expectedCloseDate !== committed.expectedCloseDate;
 
+  const doSave = useCallback(
+    (reasonOverride?: string) => {
+      const optimistic = { ...draft };
+      // Optimistic UI update: commit locally; revert on failure.
+      setCommitted(optimistic);
+      setEditing(false);
+      if (reasonOverride !== undefined) setLostReason(reasonOverride);
+
+      startTransition(async () => {
+        const formData = new FormData();
+        formData.set('id', dealId);
+        formData.set('name', optimistic.name);
+        formData.set('stage', optimistic.stage);
+        formData.set('amount', optimistic.amountMajor || '0');
+        formData.set('currency', optimistic.currency);
+        formData.set('expectedCloseDate', optimistic.expectedCloseDate ?? '');
+        formData.set('companyId', companyId ?? '');
+        formData.set('contactId', contactId ?? '');
+        // While Lost, always resend the reason (new one, or the existing one)
+        // so a plain amount/name edit doesn't clear it.
+        if (optimistic.stage === 'lost') {
+          const r = reasonOverride ?? lostReason;
+          if (r) formData.set('lostReason', r);
+        }
+        const result = await updateDealAction(formData);
+        if (!result.ok) {
+          toast.error(result.message);
+          // Revert.
+          setCommitted(committed);
+          setDraft(committed);
+          return;
+        }
+      });
+    },
+    [committed, companyId, contactId, dealId, draft, lostReason],
+  );
+
   const save = useCallback(() => {
     if (!isDirty || pending) {
       setEditing(false);
       return;
     }
-    const optimistic = { ...draft };
-    // Optimistic UI update: commit locally; revert on failure.
-    setCommitted(optimistic);
-    setEditing(false);
-
-    startTransition(async () => {
-      const formData = new FormData();
-      formData.set('id', dealId);
-      formData.set('name', optimistic.name);
-      formData.set('stage', optimistic.stage);
-      formData.set('amount', optimistic.amountMajor || '0');
-      formData.set('currency', optimistic.currency);
-      formData.set('expectedCloseDate', optimistic.expectedCloseDate ?? '');
-      formData.set('companyId', companyId ?? '');
-      formData.set('contactId', contactId ?? '');
-      const result = await updateDealAction(formData);
-      if (!result.ok) {
-        toast.error(result.message);
-        // Revert.
-        setCommitted(committed);
-        setDraft(committed);
-        return;
-      }
-    });
-  }, [committed, companyId, contactId, dealId, draft, isDirty, pending]);
+    // Prompt for a reason when moving the deal INTO the Lost stage.
+    if (draft.stage === 'lost' && committed.stage !== 'lost') {
+      setLostPromptOpen(true);
+      return;
+    }
+    doSave();
+  }, [committed.stage, doSave, draft.stage, isDirty, pending]);
 
   const cancel = useCallback(() => {
     setDraft(committed);
@@ -293,6 +320,17 @@ export function DealInlineHeader({
           )
         ) : null}
       </div>
+
+      {lostPromptOpen ? (
+        <LostReasonModal
+          dealName={draft.name}
+          onCancel={() => setLostPromptOpen(false)}
+          onConfirm={(reason) => {
+            setLostPromptOpen(false);
+            doSave(reason);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

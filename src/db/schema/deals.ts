@@ -71,6 +71,8 @@ export const deals = pgTable(
       .default('none'),
     approvedBy: text('approved_by'),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
+    /** Why the deal was lost. Free text; NULL unless stage = 'lost'. */
+    lostReason: text('lost_reason'),
     // ISO 4217 three-letter code (e.g. "USD", "EUR", "INR").
     currency: text('currency').notNull().default('USD'),
     expectedCloseDate: date('expected_close_date'),

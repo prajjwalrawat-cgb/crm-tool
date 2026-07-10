@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import { DealFilterBar } from '../../_components/deal-filter-bar';
 import { FilterChips, type FilterChip } from '../../../_components/filter-chips';
 import { updateDealStageAction } from '../../actions';
+import { LostReasonModal } from '../../_components/lost-reason-modal';
 import { type BoardCard, DealCard } from './deal-card';
 import { BoardColumn } from './board-column';
 
@@ -206,6 +207,13 @@ export function BoardView({
   const [activeCard, setActiveCard] = useState<BoardCard | null>(null);
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // A drag onto the Lost column, held until the reason modal is confirmed.
+  const [lostPrompt, setLostPrompt] = useState<{
+    dealId: string;
+    snapshot: LocalBoard;
+    next: LocalBoard;
+    dealName: string;
+  } | null>(null);
 
   // Track the most recent server-acknowledged board so a *late* error from a
   // prior request rolls back to the right state, not an even older one.
@@ -291,6 +299,45 @@ export function BoardView({
     [board],
   );
 
+  // Fire the stage change + reconcile optimistic state. Shared by normal drags
+  // and the Lost-reason modal (which passes a `reason`).
+  const commitStage = useCallback(
+    (
+      dealId: string,
+      toStage: DealStage,
+      snapshot: LocalBoard,
+      next: LocalBoard,
+      reason?: string,
+    ) => {
+      const seq = ++dragSeqRef.current;
+      setError(null);
+      startTransition(async () => {
+        const result = await updateDealStageAction({
+          id: dealId,
+          stage: toStage,
+          reason,
+        });
+        // If the user has issued a newer drag in the meantime, ignore this
+        // outcome — the newer drag's transition owns the state now.
+        if (seq !== dragSeqRef.current) return;
+
+        if (!result.ok) {
+          setBoard(snapshot);
+          lastKnownGoodRef.current = snapshot;
+          setError(result.message);
+          return;
+        }
+
+        // Success: clear the pending flag on the moved card. The full
+        // server-side board will arrive on the next render via revalidatePath
+        // and overwrite this local state.
+        setBoard((curr) => clearPendingForCard(curr, dealId));
+        lastKnownGoodRef.current = clearPendingForCard(next, dealId);
+      });
+    },
+    [startTransition],
+  );
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setActiveCard(null);
@@ -317,31 +364,19 @@ export function BoardView({
       const snapshot = lastKnownGoodRef.current;
       const next = moveBetween(board, dealId, fromStage, toStage);
       setBoard(next);
-
-      const seq = ++dragSeqRef.current;
       setError(null);
 
-      startTransition(async () => {
-        const result = await updateDealStageAction({ id: dealId, stage: toStage });
-        // If the user has issued a newer drag in the meantime, ignore this
-        // outcome — the newer drag's transition owns the state now.
-        if (seq !== dragSeqRef.current) return;
+      // Moving to Lost: show the card in place but hold the commit until a
+      // reason is entered. Cancel rolls the card back.
+      if (toStage === 'lost') {
+        const dealName = next.lost.find((d) => d.id === dealId)?.name ?? 'this deal';
+        setLostPrompt({ dealId, snapshot, next, dealName });
+        return;
+      }
 
-        if (!result.ok) {
-          setBoard(snapshot);
-          lastKnownGoodRef.current = snapshot;
-          setError(result.message);
-          return;
-        }
-
-        // Success: clear the pending flag on the moved card. The full
-        // server-side board will arrive on the next render via revalidatePath
-        // and overwrite this local state.
-        setBoard((curr) => clearPendingForCard(curr, dealId));
-        lastKnownGoodRef.current = clearPendingForCard(next, dealId);
-      });
+      commitStage(dealId, toStage, snapshot, next);
     },
-    [board],
+    [board, commitStage],
   );
 
   const handleDragCancel = useCallback(() => {
@@ -411,6 +446,28 @@ export function BoardView({
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {lostPrompt ? (
+        <LostReasonModal
+          dealName={lostPrompt.dealName}
+          onCancel={() => {
+            // Roll the card back out of Lost.
+            setBoard(lostPrompt.snapshot);
+            lastKnownGoodRef.current = lostPrompt.snapshot;
+            setLostPrompt(null);
+          }}
+          onConfirm={(reason) => {
+            commitStage(
+              lostPrompt.dealId,
+              'lost',
+              lostPrompt.snapshot,
+              lostPrompt.next,
+              reason,
+            );
+            setLostPrompt(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

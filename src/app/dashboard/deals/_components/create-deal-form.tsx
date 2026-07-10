@@ -61,6 +61,7 @@ export function CreateDealForm({
   // action (which would reset the form and blank the Company/Contact selects).
   const [clientErrors, setClientErrors] = useState<Record<string, string[]>>({});
   const [clientMsg, setClientMsg] = useState<string | null>(null);
+  const [stageValue, setStageValue] = useState('lead');
   const errs = { ...fieldErrors, ...clientErrors };
 
   useEffect(() => {
@@ -119,13 +120,29 @@ export function CreateDealForm({
         errors={errs.description}
       />
 
-      <SelectField name="stage" label="Stage" errors={errs.stage} defaultValue="lead">
+      <SelectField
+        name="stage"
+        label="Stage"
+        errors={errs.stage}
+        defaultValue="lead"
+        onChange={setStageValue}
+      >
         {DEAL_STAGES.map((stage) => (
           <option key={stage} value={stage}>
             {DEAL_STAGE_LABELS[stage]}
           </option>
         ))}
       </SelectField>
+
+      {stageValue === 'lost' ? (
+        <TextareaField
+          name="lostReason"
+          label="Lost reason *"
+          placeholder="Why was this deal lost?"
+          rows={2}
+          errors={errs.lostReason}
+        />
+      ) : null}
 
       <DealAmountFields
         unitPricingEnabled={unitPricingEnabled}
@@ -315,6 +332,7 @@ type SelectFieldProps = {
   defaultValue: string;
   errors?: string[];
   emptyHint?: string;
+  onChange?: (value: string) => void;
   children: React.ReactNode;
 };
 
@@ -324,6 +342,7 @@ function SelectField({
   defaultValue,
   errors,
   emptyHint,
+  onChange,
   children,
 }: SelectFieldProps) {
   const hasError = Boolean(errors?.length);
@@ -338,6 +357,7 @@ function SelectField({
         id={name}
         name={name}
         defaultValue={defaultValue}
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
         aria-invalid={hasError || undefined}
         aria-describedby={errorId}
         className={cn(

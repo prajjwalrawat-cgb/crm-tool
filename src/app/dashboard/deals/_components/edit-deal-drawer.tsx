@@ -74,6 +74,7 @@ export function EditDealDrawer({
   // selects (see client-validate.ts).
   const [clientErrors, setClientErrors] = useState<Record<string, string[]>>({});
   const [clientMsg, setClientMsg] = useState<string | null>(null);
+  const [stageValue, setStageValue] = useState<string>(deal?.stage ?? 'lead');
   const errs = { ...fieldErrors, ...clientErrors };
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -214,6 +215,7 @@ export function EditDealDrawer({
           label="Stage"
           defaultValue={deal?.stage ?? 'lead'}
           errors={errs.stage}
+          onChange={setStageValue}
         >
           {DEAL_STAGES.map((s) => (
             <option key={s} value={s}>
@@ -221,6 +223,16 @@ export function EditDealDrawer({
             </option>
           ))}
         </Select>
+
+        {stageValue === 'lost' ? (
+          <TextareaField
+            name="lostReason"
+            label="Lost reason *"
+            rows={2}
+            defaultValue={deal?.lostReason ?? ''}
+            errors={errs.lostReason}
+          />
+        ) : null}
 
         <DealAmountFields
           unitPricingEnabled={unitPricingEnabled || dealHasUnitPricing}
@@ -387,10 +399,11 @@ type SelectProps = {
   label: string;
   defaultValue: string;
   errors?: string[];
+  onChange?: (value: string) => void;
   children: React.ReactNode;
 };
 
-function Select({ name, label, defaultValue, errors, children }: SelectProps) {
+function Select({ name, label, defaultValue, errors, onChange, children }: SelectProps) {
   const hasError = Boolean(errors?.length);
   const errorId = hasError ? `${name}-error` : undefined;
 
@@ -403,6 +416,7 @@ function Select({ name, label, defaultValue, errors, children }: SelectProps) {
         id={name}
         name={name}
         defaultValue={defaultValue}
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
         aria-invalid={hasError || undefined}
         aria-describedby={errorId}
         className={cn(

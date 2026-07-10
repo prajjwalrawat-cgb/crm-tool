@@ -51,6 +51,7 @@ import { BulkUploadButton } from './bulk-upload-button';
 import { CreateDealForm } from './create-deal-form';
 import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
+import { LostReasonModal } from './lost-reason-modal';
 import { EmptyState } from './empty-state';
 import { InlineEditCell } from '../../_components/inline-edit-cell';
 import { InlineSelectCell } from '../../_components/inline-select-cell';
@@ -175,6 +176,8 @@ export function DealsView({
   const [editingDeal, setEditingDeal] = useState<DealRow | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string[]>>({});
+  // Deal awaiting a "lost reason" before it's moved to the Lost stage.
+  const [lostPrompt, setLostPrompt] = useState<DealRow | null>(null);
 
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -320,6 +323,10 @@ export function DealsView({
     const closedAt = isClosed
       ? previousClosedAt ?? new Date()
       : null;
+    const lostReason =
+      stage === 'lost'
+        ? String(formData.get('lostReason') ?? '').trim() || base?.lostReason || null
+        : null;
 
     // Optimistic approval state mirrors the server rule; realtime/refresh
     // reconciles the authoritative value.
@@ -361,6 +368,7 @@ export function DealsView({
       approvalStatus,
       approvedBy,
       approvedAt,
+      lostReason,
       currency,
       expectedCloseDate,
       closedAt,
@@ -559,7 +567,7 @@ export function DealsView({
   function handleStageChange(
     deal: DealRow,
     nextStage: DealStage,
-    opts?: { undo?: boolean },
+    opts?: { undo?: boolean; reason?: string },
   ) {
     if (deal.stage === nextStage) return;
     const prevStage = deal.stage;
@@ -570,6 +578,7 @@ export function DealsView({
         nextStage === 'won' || nextStage === 'lost'
           ? deal.closedAt ?? new Date()
           : null,
+      lostReason: nextStage === 'lost' ? opts?.reason ?? deal.lostReason ?? null : null,
       updatedAt: new Date(),
       __pending: true,
     };
@@ -578,6 +587,7 @@ export function DealsView({
       const result = await updateDealStageAction({
         id: deal.id,
         stage: nextStage,
+        reason: opts?.reason,
       });
       if (!result.ok) {
         toast.error(`Couldn't change stage: ${result.message}`);
@@ -593,6 +603,17 @@ export function DealsView({
         });
       }
     });
+  }
+
+  // Moving a deal to "Lost" prompts for a reason first (via the modal); every
+  // other stage change applies immediately.
+  function requestStageChange(deal: DealRow, next: DealStage) {
+    if (deal.stage === next) return;
+    if (next === 'lost') {
+      setLostPrompt(deal);
+      return;
+    }
+    handleStageChange(deal, next);
   }
 
   const showEmpty = optimisticItems.length === 0;
@@ -723,7 +744,7 @@ export function DealsView({
                 setEditingDeal(d);
               }}
               onDelete={handleDelete}
-              onStageChange={handleStageChange}
+              onStageChange={requestStageChange}
               onPatchField={commitField}
               onPatchOwner={commitOwner}
               stagePending={stagePending}
@@ -758,6 +779,18 @@ export function DealsView({
         fieldErrors={editFieldErrors}
         canDelete={canDelete}
       />
+
+      {lostPrompt ? (
+        <LostReasonModal
+          dealName={lostPrompt.name}
+          pending={stagePending}
+          onCancel={() => setLostPrompt(null)}
+          onConfirm={(reason) => {
+            handleStageChange(lostPrompt, 'lost', { reason });
+            setLostPrompt(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -82,6 +82,7 @@ export async function loadSerializedDeal(
       approvalStatus: deals.approvalStatus,
       approvedBy: deals.approvedBy,
       approvedAt: deals.approvedAt,
+      lostReason: deals.lostReason,
       currency: deals.currency,
       expectedCloseDate: deals.expectedCloseDate,
       closedAt: deals.closedAt,

@@ -100,6 +100,7 @@ type RawJoinedRow = {
   approvalStatus: DealApprovalStatus;
   approvedBy: string | null;
   approvedAt: Date | null;
+  lostReason: string | null;
   currency: string;
   expectedCloseDate: string | null;
   closedAt: Date | null;
@@ -136,6 +137,7 @@ const DEALS_PROJECTION = {
   approvalStatus: deals.approvalStatus,
   approvedBy: deals.approvedBy,
   approvedAt: deals.approvedAt,
+  lostReason: deals.lostReason,
   currency: deals.currency,
   expectedCloseDate: deals.expectedCloseDate,
   closedAt: deals.closedAt,

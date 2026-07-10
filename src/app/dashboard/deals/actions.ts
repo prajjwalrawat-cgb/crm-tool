@@ -268,6 +268,10 @@ export async function createDealAction(
         amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       }
       const marginBps = marginPctToBps(parsed.data.marginPct);
+      const lostReason =
+        parsed.data.stage === 'lost'
+          ? String(formData.get('lostReason') ?? '').trim().slice(0, 1000) || null
+          : null;
       const closedAt =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost'
           ? new Date()
@@ -293,6 +297,7 @@ export async function createDealAction(
             unitPriceMinor,
             quantity,
             marginBps,
+            lostReason,
             ...(approval && {
               approvalStatus: approval.approvalStatus,
               approvedBy: approval.approvedBy,
@@ -433,6 +438,11 @@ export async function updateDealAction(
       const marginBps = marginPctToBps(parsed.data.marginPct);
       const isClosedStage =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
+      // Lost reason from the edit form; only kept while the deal is 'lost'.
+      const lostReason =
+        parsed.data.stage === 'lost'
+          ? String(formData.get('lostReason') ?? '').trim().slice(0, 1000) || null
+          : null;
 
       // Assignment: only owner/manager may change the owner, and a manager may
       // not assign to an owner. For anyone else, leave the owner untouched
@@ -505,6 +515,7 @@ export async function updateDealAction(
             unitPriceMinor,
             quantity,
             marginBps,
+            lostReason,
             ...(approvalPatch && {
               approvalStatus: approvalPatch.approvalStatus,
               approvedBy: approvalPatch.approvedBy,
@@ -540,6 +551,7 @@ export async function updateDealAction(
               name: updated.name,
               from: previous.stage,
               to: updated.stage,
+              ...(lostReason && { reason: lostReason }),
             },
           });
           if (serialized) {
@@ -598,11 +610,14 @@ export async function updateDealAction(
 const updateStageSchema = z.object({
   id: z.uuid({ message: 'Invalid deal id' }),
   stage: z.enum(DEAL_STAGES, { message: 'Invalid stage' }),
+  // Free-text reason captured when moving a deal to 'lost'.
+  reason: z.string().max(1000).optional(),
 });
 
 export type UpdateDealStageInput = {
   id: string;
   stage: string;
+  reason?: string;
 };
 
 export type UpdateDealStageResult =
@@ -679,11 +694,20 @@ export async function updateDealStageAction(
           new Date(),
         );
 
+        // Lost reason: stored when entering 'lost', cleared when leaving it.
+        const lostReason =
+          parsed.data.stage === 'lost'
+            ? parsed.data.reason?.trim()
+              ? parsed.data.reason.trim().slice(0, 1000)
+              : null
+            : null;
+
         const [updated] = await tx
           .update(deals)
           .set({
             stage: parsed.data.stage,
             closedAt: nextClosedAt,
+            lostReason,
             ...(approvalPatch && {
               approvalStatus: approvalPatch.approvalStatus,
               approvedBy: approvalPatch.approvedBy,
@@ -713,6 +737,7 @@ export async function updateDealStageAction(
             name: updated.name,
             from: previous.stage,
             to: updated.stage,
+            ...(lostReason && { reason: lostReason }),
           },
         });
 
@@ -1822,6 +1847,18 @@ export async function bulkUploadDealsAction(
         const description = cell('description') || null;
         const isClosedStage = stage === 'won' || stage === 'lost';
 
+        // A row imported at the "lost" stage must carry a reason (matches the
+        // interactive flow, where marking a deal Lost always asks why).
+        const lostReasonCell = cell('lostReason');
+        if (stage === 'lost' && !lostReasonCell) {
+          errors.push({
+            row: i + 1,
+            message: 'Missing "lostReason" — required when stage is "lost".',
+          });
+          continue;
+        }
+        const lostReason = stage === 'lost' ? lostReasonCell.slice(0, 1000) : null;
+
         toInsert.push({
           tenantId: tenant.id,
           companyId: null,
@@ -1834,6 +1871,7 @@ export async function bulkUploadDealsAction(
           currency,
           expectedCloseDate,
           closedAt: isClosedStage ? new Date() : null,
+          lostReason,
           ownerId: membership.userId,
         });
       }

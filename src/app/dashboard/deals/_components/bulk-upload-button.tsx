@@ -158,13 +158,14 @@ function FormatHelp() {
         (required),{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">description</code>,{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">stage</code>{' '}
-        (lead, qualified, proposal, negotiation, won, lost),{' '}
+        (lead, qualified, proposal, negotiation, hold, won, lost),{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">amount</code>,{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">currency</code>,{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">expectedCloseDate</code>{' '}
         (YYYY-MM-DD),{' '}
-        <code className="rounded bg-white px-1 py-0.5 text-[10px]">companyName</code>{' '}
-        (must already exist).
+        <code className="rounded bg-white px-1 py-0.5 text-[10px]">companyName</code>,{' '}
+        <code className="rounded bg-white px-1 py-0.5 text-[10px]">lostReason</code>{' '}
+        (required when stage is <code className="rounded bg-white px-1 py-0.5 text-[10px]">lost</code>).
       </p>
       <p className="mt-1.5 text-slate-500">
         Rows with missing required fields are skipped and reported individually.
@@ -222,6 +223,7 @@ const TEMPLATE_HEADERS = [
   'currency',
   'expectedCloseDate',
   'companyName',
+  'lostReason',
 ];
 const TEMPLATE_SAMPLE_ROW = [
   'Acme — annual contract',
@@ -231,6 +233,7 @@ const TEMPLATE_SAMPLE_ROW = [
   'USD',
   '2026-08-15',
   'Acme Inc',
+  '',
 ];
 const TEMPLATE_CSV = `${TEMPLATE_HEADERS.join(',')}\n${TEMPLATE_SAMPLE_ROW.map(csvEscape).join(',')}\n`;
 const TEMPLATE_DATA_URL = `data:text/csv;charset=utf-8,${encodeURIComponent(TEMPLATE_CSV)}`;

@@ -67,18 +67,20 @@ export function formatActivity(row: ActivityRow): FormattedActivity {
     case 'stage_changed': {
       const from = typeof meta.from === 'string' ? meta.from : null;
       const to = typeof meta.to === 'string' ? meta.to : null;
+      const reason = typeof meta.reason === 'string' ? meta.reason : null;
       const base = name
         ? `${actor} moved deal ${name}`
         : `${actor} moved a deal`;
+      // A lost-deal reason is the permanent audit trail (the deal's own
+      // lost_reason column is cleared if it later leaves the Lost stage).
+      const detail = reason ? `Reason: ${reason}` : undefined;
       if (from && to) {
-        return {
-          sentence: `${base} from ${from} to ${to}`,
-        };
+        return { sentence: `${base} from ${from} to ${to}`, detail };
       }
       if (to) {
-        return { sentence: `${base} to ${to}` };
+        return { sentence: `${base} to ${to}`, detail };
       }
-      return { sentence: `${base}` };
+      return { sentence: `${base}`, detail };
     }
     case 'deal_approved':
       return {

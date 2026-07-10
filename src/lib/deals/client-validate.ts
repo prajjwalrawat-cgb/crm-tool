@@ -24,5 +24,12 @@ export function validateDealForm(fd: FormData): Record<string, string[]> {
     }
   }
 
+  // A deal marked Lost must carry a reason.
+  if (String(fd.get('stage') ?? '') === 'lost') {
+    if (!String(fd.get('lostReason') ?? '').trim()) {
+      errs.lostReason = ['A reason is required when marking a deal Lost'];
+    }
+  }
+
   return errs;
 }

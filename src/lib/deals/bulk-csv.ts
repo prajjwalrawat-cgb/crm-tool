@@ -99,6 +99,7 @@ export const BULK_UPLOAD_HEADERS = [
   'currency',
   'expectedCloseDate',
   'companyName',
+  'lostReason',
 ] as const;
 
 export type BulkUploadHeader = (typeof BULK_UPLOAD_HEADERS)[number];
@@ -132,6 +133,10 @@ export function normalizeHeader(raw: string): BulkUploadHeader | null {
     case 'companyname':
     case 'company':
       return 'companyName';
+    case 'lostreason':
+    case 'reason':
+    case 'lossreason':
+      return 'lostReason';
     default:
       return null;
   }
