@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
 import { updateDealAction } from '@/app/dashboard/deals/actions';
+import { marginBpsToPct } from '@/lib/deals/approval';
 import { formatCurrency, KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import { DEAL_STAGES, DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/schema';
 import { useRealtimeEventOfType } from '@/hooks/use-realtime-events';
@@ -44,6 +45,8 @@ type Editable = {
   amountMajor: string;
   currency: string;
   expectedCloseDate: string | null;
+  /** Margin percent as a string (e.g. "20"). Required, same as the edit form. */
+  marginPct: string;
 };
 
 export function DealInlineHeader({
@@ -83,6 +86,10 @@ export function DealInlineHeader({
       amountMajor: (event.deal.amountMinor / 100).toFixed(2),
       currency: event.deal.currency,
       expectedCloseDate: event.deal.expectedCloseDate ?? null,
+      marginPct:
+        event.deal.marginBps != null
+          ? String(marginBpsToPct(event.deal.marginBps))
+          : '',
     };
     setCommitted(next);
     if (!editing) setDraft(next);
@@ -93,7 +100,8 @@ export function DealInlineHeader({
     draft.stage !== committed.stage ||
     draft.amountMajor !== committed.amountMajor ||
     draft.currency !== committed.currency ||
-    draft.expectedCloseDate !== committed.expectedCloseDate;
+    draft.expectedCloseDate !== committed.expectedCloseDate ||
+    draft.marginPct !== committed.marginPct;
 
   const doSave = useCallback(
     (reasonOverride?: string) => {
@@ -113,6 +121,7 @@ export function DealInlineHeader({
         formData.set('expectedCloseDate', optimistic.expectedCloseDate ?? '');
         formData.set('companyId', companyId ?? '');
         formData.set('contactId', contactId ?? '');
+        formData.set('marginPct', optimistic.marginPct);
         // While Lost, always resend the reason (new one, or the existing one)
         // so a plain amount/name edit doesn't clear it.
         if (optimistic.stage === 'lost') {
@@ -137,13 +146,19 @@ export function DealInlineHeader({
       setEditing(false);
       return;
     }
+    // Margin is required (> 0), same rule as the edit form.
+    const m = Number(draft.marginPct);
+    if (!Number.isFinite(m) || m <= 0 || m > 100) {
+      toast.error('Enter a valid Margin % (greater than 0).');
+      return;
+    }
     // Prompt for a reason when moving the deal INTO the Lost stage.
     if (draft.stage === 'lost' && committed.stage !== 'lost') {
       setLostPromptOpen(true);
       return;
     }
     doSave();
-  }, [committed.stage, doSave, draft.stage, isDirty, pending]);
+  }, [committed.stage, doSave, draft.marginPct, draft.stage, isDirty, pending]);
 
   const cancel = useCallback(() => {
     setDraft(committed);
@@ -242,6 +257,23 @@ export function DealInlineHeader({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide">
+                  Margin&nbsp;%<span className="text-red-500">*</span>
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={draft.marginPct}
+                  onChange={(e) =>
+                    setDraft({ ...draft, marginPct: e.target.value })
+                  }
+                  placeholder="e.g. 30"
+                  className="w-20 rounded-md border border-slate-200 bg-white px-2 py-1 text-right font-mono text-[12.5px] dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA]"
+                />
               </label>
               <label className="flex items-center gap-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wide">Close</span>

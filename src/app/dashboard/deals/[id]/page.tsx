@@ -130,6 +130,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             amountMajor: (deal.amountMinor / 100).toFixed(2),
             currency: deal.currency,
             expectedCloseDate: deal.expectedCloseDate ?? null,
+            marginPct:
+              deal.marginBps != null ? String(marginBpsToPct(deal.marginBps)) : '',
           }}
           initialLostReason={deal.lostReason}
           dealId={deal.id}
