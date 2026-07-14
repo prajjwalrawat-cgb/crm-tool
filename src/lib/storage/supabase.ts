@@ -31,6 +31,10 @@ export function invoiceBucket(): string {
   return process.env.SUPABASE_INVOICE_BUCKET ?? 'invoice-items';
 }
 
+export function dealDocumentsBucket(): string {
+  return process.env.SUPABASE_DEAL_DOCS_BUCKET ?? 'deal-documents';
+}
+
 export function isStorageConfigured(): boolean {
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -54,4 +58,49 @@ export async function uploadInvoiceImage(input: {
   }
 
   return client.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+}
+
+/**
+ * Upload an arbitrary deal document (proposal / contract / pricing sheet /
+ * other). Stored under a tenant + deal scoped path so objects are easy to
+ * find and clean up. Returns both the public URL (for preview/download) and
+ * the object path (needed to delete the object when the row is removed).
+ */
+export async function uploadDealDocument(input: {
+  tenantId: string;
+  dealId: string;
+  bytes: Uint8Array;
+  contentType: string;
+  fileName: string;
+}): Promise<{ url: string; path: string }> {
+  const client = getClient();
+  const bucket = dealDocumentsBucket();
+  // Keep a readable, collision-proof key; sanitize the original name.
+  const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
+  const path = `${input.tenantId}/${input.dealId}/${randomUUID()}-${safeName}`;
+
+  const { error } = await client.storage
+    .from(bucket)
+    .upload(path, input.bytes, {
+      contentType: input.contentType,
+      upsert: false,
+    });
+  if (error) {
+    throw new Error(`Storage upload failed: ${error.message}`);
+  }
+
+  return {
+    url: client.storage.from(bucket).getPublicUrl(path).data.publicUrl,
+    path,
+  };
+}
+
+/** Best-effort removal of a stored object. Never throws — logs and moves on. */
+export async function deleteDealDocument(path: string): Promise<void> {
+  try {
+    const client = getClient();
+    await client.storage.from(dealDocumentsBucket()).remove([path]);
+  } catch {
+    // The DB row is the source of truth; a dangling object is tolerable.
+  }
 }

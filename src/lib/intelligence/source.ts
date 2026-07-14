@@ -244,11 +244,67 @@ export async function buildDealSummarySource(
       dueDate: string | null;
     }>;
 
-    return { deal, activityRows, emailRows, taskRows };
+    // Real gap signals: full counts, overdue tasks, stakeholders, and how
+    // long the deal has been in its current stage. Counts + a current-stage
+    // entry timestamp are stable (no continuous clock field), so they flip
+    // the cache when the deal actually evolves — which is exactly when the
+    // AI next-actions / confidence should be recomputed.
+    const gapRows = (await tx.execute(sql`
+      SELECT
+        (SELECT count(*)::int FROM activity_logs a
+           WHERE a.tenant_id = ${tenantId}::uuid
+             AND a.entity_type = 'deal' AND a.entity_id = ${dealId}::text) AS activity_count,
+        (SELECT count(*)::int FROM email_messages e
+           WHERE e.tenant_id = ${tenantId}::uuid
+             AND e.entity_type = 'deal' AND e.entity_id = ${dealId}::uuid) AS email_count,
+        (SELECT count(*)::int FROM tasks t
+           WHERE t.tenant_id = ${tenantId}::uuid
+             AND t.entity_type = 'deal' AND t.entity_id = ${dealId}::uuid
+             AND t.deleted_at IS NULL
+             AND t.status IN ('todo','in_progress')
+             AND t.due_date IS NOT NULL AND t.due_date < current_date) AS overdue_task_count,
+        (SELECT count(*)::int FROM deal_contacts dc
+           WHERE dc.tenant_id = ${tenantId}::uuid AND dc.deal_id = ${dealId}::uuid) AS stakeholder_count,
+        (SELECT to_char(entered_at, 'YYYY-MM-DD"T"HH24:MI:SS')
+           FROM deal_stage_history h
+           WHERE h.tenant_id = ${tenantId}::uuid AND h.deal_id = ${dealId}::uuid
+             AND h.exited_at IS NULL
+           ORDER BY entered_at DESC LIMIT 1) AS stage_entered_at
+    `)) as unknown as Array<{
+      activity_count: number;
+      email_count: number;
+      overdue_task_count: number;
+      stakeholder_count: number;
+      stage_entered_at: string | null;
+    }>;
+
+    // Primary stakeholder (for a targeted "follow up with X" next action).
+    const primaryRows = (await tx.execute(sql`
+      SELECT ct.first_name, ct.last_name, ct.email
+      FROM deal_contacts dc
+      JOIN contacts ct ON ct.id = dc.contact_id
+      WHERE dc.tenant_id = ${tenantId}::uuid
+        AND dc.deal_id = ${dealId}::uuid
+        AND dc.is_primary
+      LIMIT 1
+    `)) as unknown as Array<{
+      first_name: string | null;
+      last_name: string | null;
+      email: string | null;
+    }>;
+
+    return { deal, activityRows, emailRows, taskRows, gapRows, primaryRows };
   });
   if (!data) return null;
 
-  const { deal, activityRows, emailRows, taskRows } = data;
+  const { deal, activityRows, emailRows, taskRows, gapRows, primaryRows } = data;
+  const gap = gapRows[0];
+  const primary = primaryRows[0];
+  const primaryName = primary
+    ? [primary.first_name, primary.last_name].filter(Boolean).join(' ') ||
+      primary.email ||
+      null
+    : null;
   const contactName = [deal.contact_first, deal.contact_last]
     .filter(Boolean)
     .join(' ');
@@ -284,6 +340,14 @@ export async function buildDealSummarySource(
       status: t.status,
       dueDate: t.dueDate ?? null,
     })),
+    signals: {
+      activityCount: Number(gap?.activity_count ?? 0),
+      emailCount: Number(gap?.email_count ?? 0),
+      overdueTaskCount: Number(gap?.overdue_task_count ?? 0),
+      stakeholderCount: Number(gap?.stakeholder_count ?? 0),
+      stageEnteredAt: gap?.stage_entered_at ?? null,
+      primaryContactName: primaryName,
+    },
   };
 
   return { source: stableStringify(payload), dealName: deal.name };

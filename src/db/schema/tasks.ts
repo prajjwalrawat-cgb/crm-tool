@@ -8,7 +8,13 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-import { taskPriority, taskStatus } from './enums';
+import {
+  dealStage,
+  taskPriority,
+  taskRecurrence,
+  taskStatus,
+  taskType,
+} from './enums';
 import { tenants } from './tenants';
 
 /**
@@ -34,6 +40,20 @@ export const tasks = pgTable(
     description: text('description'),
     status: taskStatus('status').notNull().default('todo'),
     priority: taskPriority('priority').notNull().default('medium'),
+    /** Task nature: call | email | meeting | internal | followup. Null = generic. */
+    type: taskType('type'),
+    /**
+     * Recurrence cadence. When set, completing the task auto-creates the next
+     * instance with its due date rolled forward (daily +1d, weekly +7d,
+     * custom +30d). Null = one-off.
+     */
+    recurrence: taskRecurrence('recurrence'),
+    /**
+     * Stage this task blocks. When set, the deal shouldn't advance past this
+     * stage until the task is done. Loose enum reference (stages aren't a
+     * table); null = non-blocking.
+     */
+    stageBlocking: dealStage('stage_blocking'),
     dueDate: date('due_date'),
     /** Clerk user id of the assignee. Null = unassigned. */
     assignedUserId: text('assigned_user_id'),

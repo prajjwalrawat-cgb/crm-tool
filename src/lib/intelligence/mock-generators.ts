@@ -80,23 +80,91 @@ export function generateMockDailyExec(
   };
 }
 
+type DealSummarySignals = {
+  activityCount: number;
+  emailCount: number;
+  overdueTaskCount: number;
+  stakeholderCount: number;
+  stageEnteredAt: string | null;
+  primaryContactName: string | null;
+};
+
+/**
+ * Deterministic deal analysis driven by REAL gap signals from the source
+ * builder (counts of activity/emails/stakeholders, overdue tasks, current
+ * stage entry). Next actions come from the actual gaps and confidence tracks
+ * signal density — so both change the moment activity, tasks, or contacts are
+ * added to the deal (as the verification checklist requires), without any
+ * clock-derived field that would churn the cache.
+ */
 export function generateMockDealSummary(
-  payload: { deal: { stage: string; amount_minor: number; probability: number | null }; activities: unknown[]; emails: unknown[]; tasks: unknown[] },
+  payload: {
+    deal: { stage: string; amount_minor: number; probability: number | null };
+    activities: unknown[];
+    emails: unknown[];
+    tasks: unknown[];
+    signals?: DealSummarySignals;
+  },
   ctx: TenantCurrencyContext,
 ): DealAiSummary {
   const stage = payload.deal.stage;
-  const activityCount = payload.activities.length;
-  const emailCount = payload.emails.length;
-  const taskCount = payload.tasks.length;
+  const s: DealSummarySignals = payload.signals ?? {
+    activityCount: payload.activities.length,
+    emailCount: payload.emails.length,
+    overdueTaskCount: 0,
+    stakeholderCount: 0,
+    stageEnteredAt: null,
+    primaryContactName: null,
+  };
+
+  const risks: string[] = [];
+  if (s.activityCount === 0) risks.push('No activity logged on this deal yet');
+  if (s.stakeholderCount === 0) {
+    risks.push('No stakeholders identified — nobody mapped as decision-maker');
+  }
+  if (s.overdueTaskCount > 0) {
+    risks.push(
+      `${s.overdueTaskCount} overdue task${s.overdueTaskCount === 1 ? '' : 's'} on this deal`,
+    );
+  }
+
+  // Next actions from concrete gaps, ordered by urgency.
+  const nextActions: string[] = [];
+  if (s.overdueTaskCount > 0) {
+    nextActions.push(
+      `Complete ${s.overdueTaskCount} overdue task${s.overdueTaskCount === 1 ? '' : 's'}`,
+    );
+  }
+  if (s.stakeholderCount === 0) {
+    nextActions.push('Add a primary contact / decision-maker to this deal');
+  }
+  if (s.emailCount === 0) {
+    nextActions.push('Send an initial outreach email');
+  } else if (s.primaryContactName) {
+    nextActions.push(`Follow up with ${s.primaryContactName}`);
+  } else {
+    nextActions.push('Send a follow-up to keep momentum');
+  }
+
+  // Confidence = real signal density. Base low; each present signal lifts it.
+  let confidence = 0.2;
+  confidence += Math.min(0.3, s.activityCount * 0.04);
+  confidence += Math.min(0.2, s.emailCount * 0.06);
+  if (s.stakeholderCount > 0) confidence += 0.1;
+  if (s.primaryContactName) confidence += 0.05;
+  if (s.overdueTaskCount > 0) confidence -= 0.1;
+  confidence = Math.max(0.05, Math.min(0.95, confidence));
+
+  const stakeholderNote =
+    s.stakeholderCount > 0
+      ? `${s.stakeholderCount} stakeholder${s.stakeholderCount === 1 ? '' : 's'} mapped`
+      : 'no stakeholders mapped';
 
   return {
-    narrative: `Deal is in ${stage} at ${formatTenantCurrency(payload.deal.amount_minor, ctx)}. ${activityCount} recent activity events, ${emailCount} emails logged. ${MOCK_NOTICE}`,
-    risks: activityCount === 0 ? ['No activity logged on this deal yet'] : [],
-    nextActions: [
-      emailCount === 0 ? 'Send an initial outreach email' : 'Send a follow-up email',
-      taskCount === 0 ? 'Create a follow-up task' : 'Review open tasks',
-    ],
-    confidence: Math.min(0.9, 0.3 + activityCount * 0.05 + emailCount * 0.05),
+    narrative: `Deal is in ${stage} at ${formatTenantCurrency(payload.deal.amount_minor, ctx)}. ${s.activityCount} activity event${s.activityCount === 1 ? '' : 's'}, ${s.emailCount} email${s.emailCount === 1 ? '' : 's'} logged, ${stakeholderNote}. ${MOCK_NOTICE}`,
+    risks,
+    nextActions: nextActions.slice(0, 3),
+    confidence,
   };
 }
 

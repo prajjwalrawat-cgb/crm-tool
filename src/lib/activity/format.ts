@@ -161,6 +161,26 @@ export function formatActivity(row: ActivityRow): FormattedActivity {
         detail: err ?? undefined,
       };
     }
+    case 'call_logged':
+    case 'meeting_logged': {
+      const kind = action === 'call_logged' ? 'call' : 'meeting';
+      const notes = typeof meta.notes === 'string' ? meta.notes : null;
+      const occurredAt =
+        typeof meta.occurredAt === 'string' ? meta.occurredAt : null;
+      const when = occurredAt
+        ? new Date(occurredAt + 'T00:00:00').toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })
+        : null;
+      return {
+        sentence: when
+          ? `${actor} logged a ${kind} on ${when}`
+          : `${actor} logged a ${kind}`,
+        detail: notes ?? undefined,
+      };
+    }
     case 'automation_note': {
       // Workflows write a structured payload; the message is human-ready
       // and the actor display ("Someone") is replaced with "Automation".

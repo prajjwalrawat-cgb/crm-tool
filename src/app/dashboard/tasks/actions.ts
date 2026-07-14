@@ -48,6 +48,36 @@ function buildTaskAssignmentEmail(input: {
 const TASK_STATUSES = ['todo', 'in_progress', 'completed', 'cancelled'] as const;
 const TASK_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const TASK_ENTITY_TYPES = ['deal', 'company', 'contact'] as const;
+const TASK_TYPES = ['call', 'email', 'meeting', 'internal', 'followup'] as const;
+const TASK_RECURRENCES = ['daily', 'weekly', 'custom'] as const;
+const DEAL_STAGES_ENUM = [
+  'lead',
+  'qualified',
+  'proposal',
+  'negotiation',
+  'hold',
+  'won',
+  'lost',
+] as const;
+
+/**
+ * Roll a due date forward by one recurrence period. Anchored on the completed
+ * task's due date, or today when it had none. `custom` currently rolls a month
+ * (a sane default until a per-task custom interval field exists).
+ */
+function nextRecurrenceDueDate(
+  recurrence: (typeof TASK_RECURRENCES)[number],
+  fromISO: string | null,
+): string {
+  const base = fromISO ? new Date(fromISO + 'T00:00:00Z') : new Date();
+  const d = new Date(
+    Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()),
+  );
+  if (recurrence === 'daily') d.setUTCDate(d.getUTCDate() + 1);
+  else if (recurrence === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+  else d.setUTCMonth(d.getUTCMonth() + 1); // custom
+  return d.toISOString().slice(0, 10);
+}
 
 /**
  * Tasks reuse the existing `manageDeals` permission for now — operational
@@ -62,6 +92,9 @@ const createTaskSchema = z.object({
   description: z.string().max(4000).optional().nullable(),
   status: z.enum(TASK_STATUSES).default('todo'),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
+  type: z.enum(TASK_TYPES).optional().nullable(),
+  recurrence: z.enum(TASK_RECURRENCES).optional().nullable(),
+  stageBlocking: z.enum(DEAL_STAGES_ENUM).optional().nullable(),
   dueDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
@@ -96,6 +129,9 @@ function parseFormData(
     'description',
     'status',
     'priority',
+    'type',
+    'recurrence',
+    'stageBlocking',
     'dueDate',
     'assignedUserId',
     'entityType',
@@ -105,6 +141,57 @@ function parseFormData(
     out[key] = typeof v === 'string' ? (v.trim() === '' ? null : v) : null;
   }
   return out;
+}
+
+type TaskTxExecutor = Parameters<Parameters<typeof tenantTransaction>[0]>[0];
+
+/**
+ * When a recurring task is completed, spawn its next instance with the due
+ * date rolled forward. Runs inside the completing transaction so it commits
+ * atomically with the status change — the completion guard in each caller
+ * (only fire when the task actually transitions INTO completed) is what keeps
+ * a double-click from producing duplicates.
+ */
+async function spawnRecurrenceIfNeeded(
+  tx: TaskTxExecutor,
+  tenantId: string,
+  actorUserId: string,
+  completed: Task,
+): Promise<void> {
+  if (!completed.recurrence) return;
+  const [next] = await tx
+    .insert(tasks)
+    .values({
+      tenantId,
+      title: completed.title,
+      description: completed.description,
+      status: 'todo',
+      priority: completed.priority,
+      type: completed.type,
+      recurrence: completed.recurrence,
+      stageBlocking: completed.stageBlocking,
+      dueDate: nextRecurrenceDueDate(completed.recurrence, completed.dueDate),
+      assignedUserId: completed.assignedUserId,
+      createdBy: actorUserId,
+      entityType: completed.entityType,
+      entityId: completed.entityId,
+    })
+    .returning();
+  if (!next) return;
+  await recordActivity(tx, {
+    tenantId,
+    actorUserId,
+    entityType: 'task',
+    entityId: next.id,
+    action: 'created',
+    metadata: {
+      taskTitle: next.title,
+      recurredFrom: completed.id,
+      dueDate: next.dueDate,
+      linkedEntityType: next.entityType,
+      linkedEntityId: next.entityId,
+    },
+  });
 }
 
 export async function createTaskAction(
@@ -137,6 +224,9 @@ export async function createTaskAction(
             description: parsed.data.description ?? null,
             status: parsed.data.status,
             priority: parsed.data.priority,
+            type: parsed.data.type ?? null,
+            recurrence: parsed.data.recurrence ?? null,
+            stageBlocking: parsed.data.stageBlocking ?? null,
             dueDate: parsed.data.dueDate ?? null,
             assignedUserId: parsed.data.assignedUserId ?? null,
             createdBy: membership.userId,
@@ -293,6 +383,10 @@ export async function updateTaskAction(
             linkedEntityId: row.entityId,
           },
         });
+
+        if (justCompleted) {
+          await spawnRecurrenceIfNeeded(tx, tenant.id, membership.userId, row);
+        }
 
         return {
           row,
@@ -451,6 +545,13 @@ export async function toggleTaskCompletedAction(
           },
         });
 
+        // Completing a recurring task rolls the next instance forward. Guarded
+        // by `changed` above (we only reach here on a real todo→completed
+        // transition), so a double-click can't duplicate it.
+        if (completed) {
+          await spawnRecurrenceIfNeeded(tx, tenant.id, membership.userId, row);
+        }
+
         return {
           row,
           changed: true,
@@ -606,6 +707,13 @@ export async function updateTaskFieldsAction(input: {
               : {}),
           },
         });
+
+        if (
+          parsed.data.status === 'completed' &&
+          previous.status !== 'completed'
+        ) {
+          await spawnRecurrenceIfNeeded(tx, tenant.id, membership.userId, row);
+        }
 
         return {
           row,

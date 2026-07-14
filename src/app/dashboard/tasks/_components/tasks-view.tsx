@@ -135,6 +135,10 @@ export function TasksView({
         description: (formData.get('description') as string) || null,
         status: (formData.get('status') as TaskItem['status']) ?? 'todo',
         priority: (formData.get('priority') as TaskItem['priority']) ?? 'medium',
+        type: (formData.get('type') as TaskItem['type']) || null,
+        recurrence: (formData.get('recurrence') as TaskItem['recurrence']) || null,
+        stageBlocking:
+          (formData.get('stageBlocking') as TaskItem['stageBlocking']) || null,
         dueDate: (formData.get('dueDate') as string) || null,
         assignedUserId: (formData.get('assignedUserId') as string) || null,
         createdBy: currentUserId,

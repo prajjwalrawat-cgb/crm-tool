@@ -45,9 +45,43 @@ export const taskPriority = pgEnum('task_priority', [
   'urgent',
 ]);
 
+export const taskType = pgEnum('task_type', [
+  'call',
+  'email',
+  'meeting',
+  'internal',
+  'followup',
+]);
+
+export const taskRecurrence = pgEnum('task_recurrence', [
+  'daily',
+  'weekly',
+  'custom',
+]);
+
+export const dealContactRole = pgEnum('deal_contact_role', [
+  'decision_maker',
+  'influencer',
+  'champion',
+  'blocker',
+  'other',
+]);
+
+export const dealDocumentCategory = pgEnum('deal_document_category', [
+  'proposal',
+  'contract',
+  'pricing',
+  'other',
+]);
+
 export type DealApprovalStatus = (typeof dealApprovalStatus.enumValues)[number];
 export type MembershipRole = (typeof membershipRole.enumValues)[number];
 export type MembershipStatus = (typeof membershipStatus.enumValues)[number];
 export type DealStage = (typeof dealStage.enumValues)[number];
 export type TaskStatus = (typeof taskStatus.enumValues)[number];
 export type TaskPriority = (typeof taskPriority.enumValues)[number];
+export type TaskType = (typeof taskType.enumValues)[number];
+export type TaskRecurrence = (typeof taskRecurrence.enumValues)[number];
+export type DealContactRole = (typeof dealContactRole.enumValues)[number];
+export type DealDocumentCategory =
+  (typeof dealDocumentCategory.enumValues)[number];

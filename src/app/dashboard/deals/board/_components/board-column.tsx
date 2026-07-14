@@ -77,26 +77,33 @@ export const BoardColumn = memo(function BoardColumn({
       )}
     >
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
-        <span
-          className={cn(
-            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-            STAGE_HEADER_STYLES[stage],
-          )}
-        >
-          {DEAL_STAGE_LABELS[stage]}
-        </span>
-        <span
-          className="text-xs text-slate-500"
-          title={
-            totalCount > cards.length
-              ? `Showing ${cards.length} of ${totalCount}`
-              : undefined
-          }
-        >
-          {totalCount > cards.length
-            ? `${cards.length} / ${totalCount}`
-            : cards.length}
-        </span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="shrink-0 text-xs font-medium tabular-nums text-slate-500"
+            title={
+              totalCount > cards.length
+                ? `Showing ${cards.length} of ${totalCount}`
+                : undefined
+            }
+          >
+            {totalCount > cards.length
+              ? `${cards.length} / ${totalCount}`
+              : cards.length}
+          </span>
+          <span
+            className={cn(
+              'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium',
+              STAGE_HEADER_STYLES[stage],
+            )}
+          >
+            {DEAL_STAGE_LABELS[stage]}
+          </span>
+        </div>
+        {cards.length > 0 ? (
+          <span className="truncate text-xs font-semibold tabular-nums text-slate-700">
+            {formatCurrency(totalMinor, totalCurrency)}
+          </span>
+        ) : null}
       </header>
 
       <div
@@ -117,12 +124,6 @@ export const BoardColumn = memo(function BoardColumn({
           </p>
         ) : null}
       </div>
-
-      {cards.length > 0 ? (
-        <footer className="border-t border-slate-200 px-3 py-1.5 text-right text-xs text-slate-500">
-          {formatCurrency(totalMinor, totalCurrency)}
-        </footer>
-      ) : null}
     </section>
   );
 });

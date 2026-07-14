@@ -73,6 +73,15 @@ export const deals = pgTable(
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     /** Why the deal was lost. Free text; NULL unless stage = 'lost'. */
     lostReason: text('lost_reason'),
+    /**
+     * Human-readable "what has to happen to close" line for pipeline reviews.
+     * Distinct from Tasks — a single freeform sentence, not a checklist.
+     */
+    nextStep: text('next_step'),
+    /** Competing vendor on this deal, if any. Freeform. */
+    competitor: text('competitor'),
+    /** Where the deal came from: Outbound | Referral | Inbound-Website | Partner | Other. */
+    source: text('source'),
     // ISO 4217 three-letter code (e.g. "USD", "EUR", "INR").
     currency: text('currency').notNull().default('USD'),
     expectedCloseDate: date('expected_close_date'),

@@ -12,7 +12,11 @@ import { getDealSummaryInsight } from '@/lib/intelligence/runner';
 import { LiveDealSummaryCard } from '../../intelligence/_components/live-ai-card';
 import { listCommentsForEntity } from '@/lib/comments/queries';
 import { formatCurrency } from '@/lib/deals/currency';
+import { listContactOptions } from '@/lib/contacts/queries';
+import { listDealContacts } from '@/lib/deals/contacts';
+import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
+import { getDealStageHistory } from '@/lib/deals/stage-history';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
@@ -26,15 +30,22 @@ import { resolveAuthorLookup } from '../../_components/author-lookup';
 import { CommentsThread } from '../../_components/comments-thread';
 import { ComposeEmailLauncher } from '../../_components/compose-email-launcher';
 import { EntityTasksPanel } from '../../_components/entity-tasks-panel';
-import { EntityTimeline } from '../../_components/entity-timeline';
+import {
+  DEAL_ACTIVITY_FILTERS,
+  EntityTimeline,
+} from '../../_components/entity-timeline';
+import { LogActivityLauncher } from './_components/log-activity-launcher';
 import { CustomFieldsDisplay } from '../../_components/custom-fields-display';
 import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { RelationshipHealthCard } from '../../_components/relationship-health-card';
-import { StageBadge } from '../_components/stage-badge';
 import { DealApprovalControls } from './_components/deal-approval-controls';
+import { DealContactsCard } from './_components/deal-contacts-card';
+import { DealDocumentsCard } from './_components/deal-documents-card';
+import { DealFieldEditor } from './_components/deal-field-editor';
 import { DealInlineHeader } from './_components/deal-inline-header';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
+import { StageHistoryCard } from './_components/stage-history-card';
 import { SummaryCard } from './_components/summary-card';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -67,6 +78,10 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       timeline,
       dealInsight,
       customFieldDefs,
+      stageHistory,
+      dealContactRows,
+      contactOptions,
+      dealDocumentRows,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -77,7 +92,19 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       getEntityTimeline(tenant.id, 'deal', deal.id, { limit: 150 }),
       getDealSummaryInsight(tenant.id, userId, deal.id),
       listCustomFieldDefs(tenant.id, 'deal'),
+      getDealStageHistory(tenant.id, deal.id),
+      listDealContacts(tenant.id, deal.id),
+      listContactOptions(tenant.id),
+      listDealDocuments(tenant.id, deal.id),
     ]);
+
+    // Primary stakeholder's email is what the top "Email" button defaults to.
+    const primaryContact = dealContactRows.find((c) => c.isPrimary) ?? null;
+    const primaryEmail = primaryContact?.email ?? deal.contactEmail ?? null;
+    // Proposal-stage-or-later deals with no stakeholders are a hygiene gap.
+    const stageIsProposalOrLater = ['proposal', 'negotiation', 'hold', 'won'].includes(
+      deal.stage,
+    );
 
     const customValues = (deal.customFields ?? {}) as CustomValues;
     const hasCustom = customFieldDefs.some((d) => {
@@ -111,6 +138,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     }
     if (deal.ownerId) authorIds.add(deal.ownerId);
     if (deal.updatedBy) authorIds.add(deal.updatedBy);
+    for (const d of dealDocumentRows) authorIds.add(d.uploadedBy);
     const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
 
     return (
@@ -152,9 +180,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             entityType="deal"
             entityId={deal.id}
             entityLabel={deal.name}
-            defaultRecipients={
-              deal.contactEmail ? [deal.contactEmail] : []
-            }
+            defaultRecipients={primaryEmail ? [primaryEmail] : []}
             canSend={canEdit}
           />
         </div>
@@ -167,6 +193,20 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               entityId={deal.id}
             />
             <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
+            <StageHistoryCard
+              entries={stageHistory.entries.map((e) => ({
+                stage: e.stage,
+                durationDays: e.durationDays,
+                isCurrent: e.isCurrent,
+              }))}
+              currentDurationDays={stageHistory.currentDurationDays}
+              staleReason={stageHistory.staleReason}
+              avgForCurrent={
+                stageHistory.currentStage
+                  ? stageHistory.avgByStage[stageHistory.currentStage] ?? null
+                  : null
+              }
+            />
             {deal.stage === 'lost' && deal.lostReason ? (
               <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
                 <div className="text-[10px] uppercase tracking-wide text-rose-700 dark:text-rose-300">
@@ -218,6 +258,28 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             deal.approvalStatus === 'pending' ? (
               <DealApprovalControls dealId={deal.id} />
             ) : null}
+            <DealFieldEditor
+              dealId={deal.id}
+              field="competitor"
+              label="Competitor"
+              initialValue={deal.competitor ?? null}
+              canEdit={canEdit}
+              placeholder="Who else is in this deal?"
+            />
+            <DealFieldEditor
+              dealId={deal.id}
+              field="source"
+              label="Source"
+              initialValue={deal.source ?? null}
+              canEdit={canEdit}
+              options={[
+                'Outbound',
+                'Referral',
+                'Inbound-Website',
+                'Partner',
+                'Other',
+              ]}
+            />
             <DetailCard
               label="Expected close"
               value={
@@ -225,6 +287,15 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                   ? dateFormatter.format(new Date(deal.expectedCloseDate))
                   : '—'
               }
+            />
+            <DealFieldEditor
+              dealId={deal.id}
+              field="nextStep"
+              label="Next step"
+              initialValue={deal.nextStep ?? null}
+              canEdit={canEdit}
+              multiline
+              placeholder="What has to happen to close?"
             />
             <DealOwnerPicker
               dealId={deal.id}
@@ -240,6 +311,13 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             <DetailCard
               label="Contact"
               value={deal.contactName ?? deal.contactEmail ?? '—'}
+            />
+            <DealContactsCard
+              dealId={deal.id}
+              initialContacts={dealContactRows}
+              contactOptions={contactOptions}
+              canEdit={canEdit}
+              showEmptyWarning={stageIsProposalOrLater}
             />
             <DetailCard
               label="Created"
@@ -319,6 +397,33 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               currentUserId={userId}
               initialTasks={tasks}
               canEdit={canEdit}
+              teammates={teammates}
+            />
+
+            <EntityTimeline
+              items={timeline}
+              authorLookup={authorLookup}
+              currentUserId={userId}
+              title="Activity"
+              filterModes={DEAL_ACTIVITY_FILTERS}
+              emptyLabel="No activity logged yet. Log a call or meeting, or take an action on this deal."
+              headerAction={
+                canEdit ? (
+                  // key silences React's list-child validation: this element is
+                  // created here but rendered as a sibling of EntityTimeline's
+                  // static header children.
+                  <div key="log-activity" className="relative">
+                    <LogActivityLauncher dealId={deal.id} />
+                  </div>
+                ) : null
+              }
+            />
+
+            <DealDocumentsCard
+              dealId={deal.id}
+              initialDocuments={dealDocumentRows}
+              authorLookup={authorLookup}
+              canEdit={canEdit}
             />
 
             <CommentsThread
@@ -339,12 +444,6 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               initialNotes={notes}
               authorLookup={authorLookup}
               canWrite={canEdit}
-            />
-
-            <EntityTimeline
-              items={timeline}
-              authorLookup={authorLookup}
-              currentUserId={userId}
             />
           </section>
         </div>

@@ -51,6 +51,10 @@ export const ACTIVITY_ACTIONS = [
   'deal_approved',
   /** A manager rejected a Won deal (reopened to Negotiation). */
   'deal_rejected',
+  /** Manually logged phone call (via the deal "Log activity" form). */
+  'call_logged',
+  /** Manually logged meeting (via the deal "Log activity" form). */
+  'meeting_logged',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

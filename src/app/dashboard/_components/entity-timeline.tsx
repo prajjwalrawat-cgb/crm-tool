@@ -3,17 +3,20 @@
 import {
   Activity,
   AlertCircle,
+  ArrowLeftRight,
   CheckCircle2,
   CheckSquare,
   Filter,
   Mail,
   MessageCircle,
+  Phone,
   StickyNote,
   UserCog,
+  Users,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 
 import { formatActivity } from '@/lib/activity/format';
 import type { ActivityRow } from '@/lib/activity/queries';
@@ -44,6 +47,9 @@ type FilterMode =
   | 'note'
   | 'comment'
   | 'email'
+  | 'call'
+  | 'meeting'
+  | 'stage'
   | 'automation'
   | 'mine'
   | 'teammates';
@@ -54,6 +60,9 @@ const FILTER_LABEL: Record<FilterMode, string> = {
   note: 'Notes',
   comment: 'Comments',
   email: 'Emails',
+  call: 'Calls',
+  meeting: 'Meetings',
+  stage: 'Stage changes',
   automation: 'Automation',
   mine: 'Mine',
   teammates: 'Teammates',
@@ -70,15 +79,27 @@ const FILTER_ORDER: FilterMode[] = [
   'automation',
 ];
 
+/** Chip set for the deal "Activity" section (section 3 of the spec). */
+export const DEAL_ACTIVITY_FILTERS: FilterMode[] = [
+  'all',
+  'email',
+  'call',
+  'meeting',
+  'stage',
+  'note',
+];
+
 const ACTION_ICON: Record<string, LucideIcon> = {
   created: Activity,
   updated: Activity,
   deleted: Activity,
   restored: Activity,
-  stage_changed: Activity,
+  stage_changed: ArrowLeftRight,
   task_completed: CheckCircle2,
   owner_changed: UserCog,
   automation_note: Workflow,
+  call_logged: Phone,
+  meeting_logged: Users,
 };
 
 /**
@@ -93,10 +114,21 @@ export function EntityTimeline({
   items,
   authorLookup,
   currentUserId,
+  title = 'Timeline',
+  filterModes = FILTER_ORDER,
+  headerAction,
+  emptyLabel,
 }: {
   items: TimelineItem[];
   authorLookup: Record<string, string>;
   currentUserId: string;
+  /** Section heading. Deal page passes "Activity". */
+  title?: string;
+  /** Which filter chips to show. Defaults to the full set. */
+  filterModes?: FilterMode[];
+  /** Rendered on the right of the header — e.g. the "Log activity" button. */
+  headerAction?: ReactNode;
+  emptyLabel?: string;
 }) {
   const [filter, setFilter] = useState<FilterMode>('all');
 
@@ -118,6 +150,9 @@ export function EntityTimeline({
       note: 0,
       comment: 0,
       email: 0,
+      call: 0,
+      meeting: 0,
+      stage: 0,
       automation: 0,
       mine: 0,
       teammates: 0,
@@ -126,6 +161,9 @@ export function EntityTimeline({
       if (item.kind === 'activity') {
         if (isAutomation(item)) acc.automation++;
         else acc.activity++;
+        if (item.row.action === 'call_logged') acc.call++;
+        else if (item.row.action === 'meeting_logged') acc.meeting++;
+        else if (item.row.action === 'stage_changed') acc.stage++;
       } else if (item.kind === 'note') {
         acc.note++;
       } else if (item.kind === 'email') {
@@ -146,6 +184,18 @@ export function EntityTimeline({
     if (filter === 'comment') return items.filter((i) => i.kind === 'comment');
     if (filter === 'note') return items.filter((i) => i.kind === 'note');
     if (filter === 'email') return items.filter((i) => i.kind === 'email');
+    if (filter === 'call')
+      return items.filter(
+        (i) => i.kind === 'activity' && i.row.action === 'call_logged',
+      );
+    if (filter === 'meeting')
+      return items.filter(
+        (i) => i.kind === 'activity' && i.row.action === 'meeting_logged',
+      );
+    if (filter === 'stage')
+      return items.filter(
+        (i) => i.kind === 'activity' && i.row.action === 'stage_changed',
+      );
     if (filter === 'automation') return items.filter(isAutomation);
     if (filter === 'activity')
       return items.filter(
@@ -164,11 +214,14 @@ export function EntityTimeline({
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
-      <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[13px] font-semibold text-slate-900">Timeline</h2>
+      <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h2 className="text-[13px] font-semibold text-slate-900">{title}</h2>
+          {headerAction}
+        </div>
         <div className="flex flex-wrap items-center gap-1">
           <Filter className="h-3 w-3 text-slate-400" aria-hidden />
-          {FILTER_ORDER.map((mode) => (
+          {filterModes.map((mode) => (
             <button
               key={mode}
               type="button"
@@ -192,7 +245,7 @@ export function EntityTimeline({
       {filtered.length === 0 ? (
         <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-[12px] text-slate-500">
           {filter === 'all'
-            ? 'No activity yet for this record.'
+            ? emptyLabel ?? 'No activity yet for this record.'
             : `No ${FILTER_LABEL[filter].toLowerCase()} yet.`}
         </p>
       ) : (
@@ -241,6 +294,15 @@ function IconCircle({ item }: { item: TimelineItem }) {
     if (meta.automation || item.row.action === 'automation_note') {
       Icon = Workflow;
       tone = 'text-violet-600 bg-violet-50';
+    } else if (item.row.action === 'call_logged') {
+      Icon = Phone;
+      tone = 'text-teal-600 bg-teal-50';
+    } else if (item.row.action === 'meeting_logged') {
+      Icon = Users;
+      tone = 'text-cyan-600 bg-cyan-50';
+    } else if (item.row.action === 'stage_changed') {
+      Icon = ArrowLeftRight;
+      tone = 'text-indigo-600 bg-indigo-50';
     } else if (item.row.entityType === 'task') {
       Icon = CheckSquare;
       tone = 'text-indigo-600 bg-indigo-50';
