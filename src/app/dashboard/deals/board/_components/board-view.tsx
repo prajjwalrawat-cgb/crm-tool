@@ -12,7 +12,14 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 
 import type { MembershipRole } from '@/db/schema';
 import { useRealtimeEvents } from '@/hooks/use-realtime-events';
@@ -397,6 +404,34 @@ export function BoardView({
     [board, canMove, stageCounts, visibleStages],
   );
 
+  // A second horizontal scrollbar mirrored above the board, so you don't have
+  // to scroll to the bottom to pan across columns. The top strip's inner spacer
+  // matches the columns' scroll width; scrollLeft is kept in sync both ways.
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const [scrollWidth, setScrollWidth] = useState(0);
+
+  useEffect(() => {
+    const el = columnsRef.current;
+    if (!el) return;
+    const update = () => setScrollWidth(el.scrollWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [columns]);
+
+  const syncFromTop = useCallback(() => {
+    if (columnsRef.current && topScrollRef.current) {
+      columnsRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  }, []);
+  const syncFromColumns = useCallback(() => {
+    if (columnsRef.current && topScrollRef.current) {
+      topScrollRef.current.scrollLeft = columnsRef.current.scrollLeft;
+    }
+  }, []);
+
   return (
     <div className="flex flex-1 flex-col gap-4">
       <DealFilterBar
@@ -423,6 +458,17 @@ export function BoardView({
         </p>
       ) : null}
 
+      {/* Top scrollbar — mirrors the board's horizontal scroll so you can pan
+          columns without scrolling to the bottom. Hidden when nothing overflows. */}
+      <div
+        ref={topScrollRef}
+        onScroll={syncFromTop}
+        className="overflow-x-auto overscroll-x-contain"
+        aria-hidden
+      >
+        <div style={{ width: scrollWidth, height: 1 }} />
+      </div>
+
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
@@ -431,6 +477,8 @@ export function BoardView({
         onDragCancel={handleDragCancel}
       >
         <div
+          ref={columnsRef}
+          onScroll={syncFromColumns}
           className={cn(
             'flex flex-1 gap-4 overflow-x-auto overscroll-x-contain pb-4',
             // Subtle scrollbar styling on the horizontal axis.
