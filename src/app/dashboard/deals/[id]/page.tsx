@@ -17,7 +17,7 @@ import { listDealContacts } from '@/lib/deals/contacts';
 import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
 import { getDealStageHistory } from '@/lib/deals/stage-history';
-import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import { DEAL_STAGE_LABELS, DEAL_TYPE_LABELS } from '@/lib/deals/schema';
 import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
 import { listNotesForEntity } from '@/lib/notes/queries';
@@ -186,169 +186,187 @@ export default async function DealDetailPage({ params }: { params: Params }) {
         </div>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">
-          <aside className="flex flex-col gap-3">
+          <aside className="flex flex-col gap-5">
             <RelationshipHealthCard
               tenantId={tenant.id}
               entityType="deal"
               entityId={deal.id}
             />
-            <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
-            <StageHistoryCard
-              entries={stageHistory.entries.map((e) => ({
-                stage: e.stage,
-                durationDays: e.durationDays,
-                isCurrent: e.isCurrent,
-              }))}
-              currentDurationDays={stageHistory.currentDurationDays}
-              staleReason={stageHistory.staleReason}
-              avgForCurrent={
-                stageHistory.currentStage
-                  ? stageHistory.avgByStage[stageHistory.currentStage] ?? null
-                  : null
-              }
-            />
-            {deal.stage === 'lost' && deal.lostReason ? (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
-                <div className="text-[10px] uppercase tracking-wide text-rose-700 dark:text-rose-300">
-                  Lost reason
-                </div>
-                <div className="mt-1 whitespace-pre-wrap text-sm text-rose-900 dark:text-rose-100">
-                  {deal.lostReason}
-                </div>
-              </div>
-            ) : null}
-            <DetailCard
-              label="Amount"
-              value={formatCurrency(deal.amountMinor, deal.currency)}
-              mono
-            />
-            {deal.unitPriceMinor != null && deal.quantity != null ? (
+
+            <SidebarSection title="Deal Info">
+              <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
+              {deal.dealType ? (
+                <DetailCard
+                  label="Deal type"
+                  value={DEAL_TYPE_LABELS[deal.dealType]}
+                />
+              ) : null}
               <DetailCard
-                label="Unit price × Qty"
-                value={`${formatCurrency(deal.unitPriceMinor, deal.currency)} × ${deal.quantity}`}
+                label="Amount"
+                value={formatCurrency(deal.amountMinor, deal.currency)}
                 mono
               />
-            ) : null}
-            {deal.marginBps != null ? (
+              {deal.unitPriceMinor != null && deal.quantity != null ? (
+                <DetailCard
+                  label="Unit price × Qty"
+                  value={`${formatCurrency(deal.unitPriceMinor, deal.currency)} × ${deal.quantity}`}
+                  mono
+                />
+              ) : null}
+              {deal.marginBps != null ? (
+                <DetailCard
+                  label="Margin"
+                  value={`${marginBpsToPct(deal.marginBps)}% · ${formatCurrency(
+                    marginMinor(deal.amountMinor, deal.marginBps),
+                    deal.currency,
+                  )}`}
+                  mono
+                />
+              ) : null}
+              {deal.stage === 'won' ? (
+                <DetailCard
+                  label="Approval"
+                  value={
+                    deal.approvalStatus === 'approved'
+                      ? 'Approved'
+                      : deal.approvalStatus === 'pending'
+                        ? 'Pending manager approval'
+                        : deal.approvalStatus === 'rejected'
+                          ? 'Rejected'
+                          : '—'
+                  }
+                />
+              ) : null}
+              {canApprove &&
+              deal.stage === 'won' &&
+              deal.approvalStatus === 'pending' ? (
+                <DealApprovalControls dealId={deal.id} />
+              ) : null}
               <DetailCard
-                label="Margin"
-                value={`${marginBpsToPct(deal.marginBps)}% · ${formatCurrency(
-                  marginMinor(deal.amountMinor, deal.marginBps),
-                  deal.currency,
-                )}`}
-                mono
-              />
-            ) : null}
-            {deal.stage === 'won' ? (
-              <DetailCard
-                label="Approval"
+                label="Expected close"
                 value={
-                  deal.approvalStatus === 'approved'
-                    ? 'Approved'
-                    : deal.approvalStatus === 'pending'
-                      ? 'Pending manager approval'
-                      : deal.approvalStatus === 'rejected'
-                        ? 'Rejected'
-                        : '—'
+                  deal.expectedCloseDate
+                    ? dateFormatter.format(new Date(deal.expectedCloseDate))
+                    : '—'
                 }
               />
-            ) : null}
-            {canApprove &&
-            deal.stage === 'won' &&
-            deal.approvalStatus === 'pending' ? (
-              <DealApprovalControls dealId={deal.id} />
-            ) : null}
-            <DealFieldEditor
-              dealId={deal.id}
-              field="competitor"
-              label="Competitor"
-              initialValue={deal.competitor ?? null}
-              canEdit={canEdit}
-              placeholder="Who else is in this deal?"
-            />
-            <DealFieldEditor
-              dealId={deal.id}
-              field="source"
-              label="Source"
-              initialValue={deal.source ?? null}
-              canEdit={canEdit}
-              options={[
-                'Outbound',
-                'Referral',
-                'Inbound-Website',
-                'Partner',
-                'Other',
-              ]}
-            />
-            <DetailCard
-              label="Expected close"
-              value={
-                deal.expectedCloseDate
-                  ? dateFormatter.format(new Date(deal.expectedCloseDate))
-                  : '—'
-              }
-            />
-            <DealFieldEditor
-              dealId={deal.id}
-              field="nextStep"
-              label="Next step"
-              initialValue={deal.nextStep ?? null}
-              canEdit={canEdit}
-              multiline
-              placeholder="What has to happen to close?"
-            />
-            <DealOwnerPicker
-              dealId={deal.id}
-              currentOwnerId={deal.ownerId}
-              currentOwnerName={
-                deal.ownerId ? authorLookup[deal.ownerId] ?? null : null
-              }
-              currentUserId={userId}
-              teammates={assignableTeammates}
-              canEdit={canAssign}
-            />
-            <DetailCard label="Company" value={deal.companyName ?? '—'} />
-            <DetailCard
-              label="Contact"
-              value={deal.contactName ?? deal.contactEmail ?? '—'}
-            />
-            <DealContactsCard
-              dealId={deal.id}
-              initialContacts={dealContactRows}
-              contactOptions={contactOptions}
-              canEdit={canEdit}
-              showEmptyWarning={stageIsProposalOrLater}
-            />
-            <DetailCard
-              label="Created"
-              value={dateFormatter.format(new Date(deal.createdAt))}
-            />
-            <DetailCard
-              label="Last updated"
-              value={
-                (deal.updatedBy
-                  ? `${authorLookup[deal.updatedBy] ?? 'Someone'} · `
-                  : '') + dateFormatter.format(new Date(deal.updatedAt))
-              }
-            />
-            {deal.closedAt ? (
-              <DetailCard
-                label="Closed"
-                value={dateFormatter.format(new Date(deal.closedAt))}
+              <StageHistoryCard
+                entries={stageHistory.entries.map((e) => ({
+                  stage: e.stage,
+                  durationDays: e.durationDays,
+                  isCurrent: e.isCurrent,
+                }))}
+                currentDurationDays={stageHistory.currentDurationDays}
+                staleReason={stageHistory.staleReason}
+                avgForCurrent={
+                  stageHistory.currentStage
+                    ? stageHistory.avgByStage[stageHistory.currentStage] ?? null
+                    : null
+                }
               />
-            ) : null}
-            {hasCustom ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <div className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">
-                  Custom fields
+              {deal.stage === 'lost' && deal.lostReason ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-rose-700 dark:text-rose-300">
+                    Lost reason
+                  </div>
+                  <div className="mt-1 whitespace-pre-wrap text-sm text-rose-900 dark:text-rose-100">
+                    {deal.lostReason}
+                  </div>
                 </div>
-                <CustomFieldsDisplay
-                  defs={customFieldDefs}
-                  values={customValues}
-                  className="grid grid-cols-1 gap-y-2"
+              ) : null}
+            </SidebarSection>
+
+            <SidebarSection title="Relationship">
+              <DetailCard label="Company" value={deal.companyName ?? '—'} />
+              <DetailCard
+                label="Contact"
+                value={deal.contactName ?? deal.contactEmail ?? '—'}
+              />
+              <DealOwnerPicker
+                dealId={deal.id}
+                currentOwnerId={deal.ownerId}
+                currentOwnerName={
+                  deal.ownerId ? authorLookup[deal.ownerId] ?? null : null
+                }
+                currentUserId={userId}
+                teammates={assignableTeammates}
+                canEdit={canAssign}
+              />
+              <DealContactsCard
+                dealId={deal.id}
+                initialContacts={dealContactRows}
+                contactOptions={contactOptions}
+                canEdit={canEdit}
+                showEmptyWarning={stageIsProposalOrLater}
+              />
+            </SidebarSection>
+
+            <SidebarSection title="Context">
+              <DealFieldEditor
+                dealId={deal.id}
+                field="competitor"
+                label="Competitor"
+                initialValue={deal.competitor ?? null}
+                canEdit={canEdit}
+                placeholder="Who else is in this deal?"
+              />
+              <DealFieldEditor
+                dealId={deal.id}
+                field="source"
+                label="Source"
+                initialValue={deal.source ?? null}
+                canEdit={canEdit}
+                options={[
+                  'Outbound',
+                  'Referral',
+                  'Inbound-Website',
+                  'Partner',
+                  'Other',
+                ]}
+              />
+              <DealFieldEditor
+                dealId={deal.id}
+                field="nextStep"
+                label="Next step"
+                initialValue={deal.nextStep ?? null}
+                canEdit={canEdit}
+                multiline
+                placeholder="What has to happen to close?"
+              />
+            </SidebarSection>
+
+            <SidebarSection title="Record">
+              <DetailCard
+                label="Created"
+                value={dateFormatter.format(new Date(deal.createdAt))}
+              />
+              <DetailCard
+                label="Last updated"
+                value={
+                  (deal.updatedBy
+                    ? `${authorLookup[deal.updatedBy] ?? 'Someone'} · `
+                    : '') + dateFormatter.format(new Date(deal.updatedAt))
+                }
+              />
+              {deal.closedAt ? (
+                <DetailCard
+                  label="Closed"
+                  value={dateFormatter.format(new Date(deal.closedAt))}
                 />
-              </div>
-            ) : null}
+              ) : null}
+              {hasCustom ? (
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    Custom fields
+                  </div>
+                  <CustomFieldsDisplay
+                    defs={customFieldDefs}
+                    values={customValues}
+                    className="grid grid-cols-1 gap-y-2"
+                  />
+                </div>
+              ) : null}
+            </SidebarSection>
           </aside>
 
           <section className="space-y-4">
@@ -455,6 +473,28 @@ export default async function DealDetailPage({ params }: { params: Params }) {
   });
 }
 
+/**
+ * Groups related sidebar fields under a small-caps section header with a
+ * subtle divider, so the left column reads as three scannable sections
+ * (Deal Info / Relationship / Context) rather than one flat stack.
+ */
+function SidebarSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="border-b border-slate-200 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:border-[#1F1F1F] dark:text-[#71717A]">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
 function DetailCard({
   label,
   value,
@@ -466,10 +506,18 @@ function DetailCard({
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <div className="text-[10px] uppercase tracking-wide text-slate-500">
+      {/* Label: small, gray, uppercase. Value: larger, dark, medium — a clear
+          type-hierarchy step so label and value never read as the same rank. */}
+      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
         {label}
       </div>
-      <div className={`mt-1 text-sm ${mono ? 'font-mono' : ''}`}>{value}</div>
+      <div
+        className={`mt-1 text-[15px] font-medium text-slate-900 ${
+          mono ? 'font-mono' : ''
+        }`}
+      >
+        {value}
+      </div>
     </div>
   );
 }
