@@ -80,7 +80,8 @@ export const DealCard = memo(function DealCard({
                 : 'border-l-emerald-500',
         deal.__pending && 'opacity-60',
         !overlay && draggable && 'cursor-grab active:cursor-grabbing',
-        overlay && 'rotate-1 cursor-grabbing shadow-2xl',
+        // Lifted, slightly-rotated clone while dragging (dnd-kit DragOverlay).
+        overlay && 'rotate-2 cursor-grabbing shadow-2xl ring-1 ring-indigo-300/60',
         // Hide the original while dragging — dnd-kit moves the visual to
         // the DragOverlay. Without this you see two copies during drag.
         !overlay && isDragging && 'opacity-30',

@@ -496,6 +496,7 @@ export function BoardView({
           probability={stageProbabilities[stage] ?? 0}
           currency={boardCurrency}
           canMove={canMove}
+          isDragActive={activeCard !== null}
           hasMore={moreByStage[stage] ?? false}
           loadingMore={loadingStages.has(stage)}
           onLoadMore={handleLoadMore}
@@ -504,6 +505,7 @@ export function BoardView({
     [
       board,
       canMove,
+      activeCard,
       stageCounts,
       stageAmounts,
       stageProbabilities,

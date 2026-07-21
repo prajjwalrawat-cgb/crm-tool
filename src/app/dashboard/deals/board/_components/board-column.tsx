@@ -39,6 +39,8 @@ type Props = {
   /** Workspace currency for the totals. */
   currency: string;
   canMove: boolean;
+  /** A card is currently being dragged somewhere on the board. */
+  isDragActive: boolean;
   /** More rows exist past what's loaded — render the scroll sentinel. */
   hasMore: boolean;
   /** A page fetch for this column is in flight. */
@@ -61,6 +63,7 @@ export const BoardColumn = memo(function BoardColumn({
   probability,
   currency,
   canMove,
+  isDragActive,
   hasMore,
   loadingMore,
   onLoadMore,
@@ -100,8 +103,12 @@ export const BoardColumn = memo(function BoardColumn({
     <section
       aria-label={`${DEAL_STAGE_LABELS[stage]} column`}
       className={cn(
-        'flex w-72 shrink-0 flex-col rounded-lg border border-slate-200 bg-slate-50',
-        isOver && 'ring-2 ring-indigo-500/40',
+        'flex w-72 shrink-0 flex-col rounded-lg border bg-slate-50 transition-colors',
+        // While a card is in flight, mark every column as a valid drop zone
+        // with a dashed outline; the one under the pointer gets a subtle
+        // background wash + a stronger ring.
+        isDragActive ? 'border-dashed border-indigo-300' : 'border-slate-200',
+        isOver && 'bg-indigo-50/70 ring-2 ring-indigo-400/60',
       )}
     >
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
