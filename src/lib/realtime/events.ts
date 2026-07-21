@@ -282,6 +282,8 @@ export type SerializedDeal = DateToString<Deal> & {
   companyName: string | null;
   contactName: string | null;
   contactEmail: string | null;
+  /** Server-computed engagement/priority signal (see lib/deals/health). */
+  health: import('@/lib/deals/health').DealHealth;
 };
 
 export type SerializedCompany = DateToString<Company>;

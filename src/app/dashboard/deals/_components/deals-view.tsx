@@ -20,6 +20,7 @@ import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { marginPctToBps } from '@/lib/deals/approval';
 import { formatCurrency, fromMinorUnits, toMinorUnits } from '@/lib/deals/currency';
+import { computeDealHealth } from '@/lib/deals/health';
 import {
   type DealFilters,
   DEAL_FILTER_URL_KEYS,
@@ -389,6 +390,13 @@ export function DealsView({
       companyName,
       contactName,
       contactEmail: contactId ? base?.contactEmail ?? null : null,
+      // Client-side estimate for the optimistic row; the server recomputes
+      // and reconciles the authoritative value on refresh/realtime.
+      health: computeDealHealth({
+        updatedAt: new Date(),
+        expectedCloseDate,
+        stage,
+      }),
       __pending: true,
     };
   }

@@ -65,11 +65,19 @@ export const DealCard = memo(function DealCard({
       data-pending={deal.__pending ? '' : undefined}
       className={cn(
         'group rounded-md border bg-white p-3 text-sm shadow-sm transition',
-        'border-slate-200',
-        deal.stage === 'won' &&
-          'border-l-4 border-l-emerald-500',
-        deal.stage === 'lost' &&
-          'border-l-4 border-l-slate-400',
+        'border-slate-200 border-l-4',
+        // Closed deals keep their stage-colored spine; open deals get the
+        // server-computed health color (green on track / amber stale / red
+        // at risk). See lib/deals/health.
+        deal.stage === 'won'
+          ? 'border-l-emerald-500'
+          : deal.stage === 'lost'
+            ? 'border-l-slate-400'
+            : deal.health === 'at_risk'
+              ? 'border-l-rose-500'
+              : deal.health === 'stale'
+                ? 'border-l-amber-400'
+                : 'border-l-emerald-500',
         deal.__pending && 'opacity-60',
         !overlay && draggable && 'cursor-grab active:cursor-grabbing',
         overlay && 'rotate-1 cursor-grabbing shadow-2xl',

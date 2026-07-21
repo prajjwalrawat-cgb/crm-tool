@@ -25,6 +25,7 @@ import {
   type DealApprovalStatus,
 } from '@/db/schema';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
+import { computeDealHealth, type DealHealth } from '@/lib/deals/health';
 import {
   buildPage,
   type Cursor,
@@ -45,6 +46,8 @@ export type DealRow = Deal & {
   companyName: string | null;
   contactName: string | null;
   contactEmail: string | null;
+  /** Server-computed engagement/priority signal (see lib/deals/health). */
+  health: DealHealth;
 };
 
 export type DealOption = {
@@ -228,6 +231,11 @@ function shapeDealRow(r: RawJoinedRow): DealRow {
     contactName:
       r.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
     contactEmail,
+    health: computeDealHealth({
+      updatedAt: r.updatedAt,
+      expectedCloseDate: r.expectedCloseDate,
+      stage: r.stage,
+    }),
   };
 }
 

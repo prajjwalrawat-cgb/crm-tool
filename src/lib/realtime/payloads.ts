@@ -14,6 +14,8 @@ import {
   deals,
 } from '@/db/schema';
 
+import { computeDealHealth } from '@/lib/deals/health';
+
 import {
   type SerializedActivity,
   type SerializedCompany,
@@ -122,6 +124,11 @@ export async function loadSerializedDeal(
     contactName:
       rest.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
     contactEmail: rest.contactEmailText ?? contactEmail,
+    health: computeDealHealth({
+      updatedAt: rest.updatedAt,
+      expectedCloseDate: rest.expectedCloseDate,
+      stage: rest.stage,
+    }),
   };
   return serializeDates(reshaped);
 }
