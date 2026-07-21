@@ -1,4 +1,4 @@
-import { Heart, HeartCrack, HeartPulse, Sparkles } from 'lucide-react';
+import { ChevronRight, Heart, HeartCrack, HeartPulse, Sparkles } from 'lucide-react';
 
 import { getRelationshipView } from '@/lib/communications/relationships/score';
 import type { RelationshipStatus } from '@/db/schema';
@@ -32,17 +32,27 @@ export async function RelationshipHealthCard({
   );
 
   if (!signal || !breakdown) {
+    // Empty state: collapse to a single line rather than a full-height card so
+    // it doesn't waste prime real estate before any communication exists.
+    // Expands on click; auto-renders full (below) once a real signal lands.
     return (
-      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/40 p-3 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
+      <details className="group rounded-lg border border-dashed border-slate-200 bg-slate-50/40 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
           <HeartPulse className="h-3 w-3 text-slate-400 dark:text-[#71717A]" aria-hidden />
           Relationship health
-        </div>
-        <p className="mt-1.5 text-[11.5px] leading-snug text-slate-500 dark:text-[#A1A1AA]">
-          No communications yet. The score appears once outbound or
-          inbound email lands on this {entityType}.
+          <span className="font-normal normal-case tracking-normal text-slate-400 dark:text-[#71717A]">
+            — no activity yet
+          </span>
+          <ChevronRight
+            className="ml-auto h-3 w-3 text-slate-400 transition-transform group-open:rotate-90 dark:text-[#71717A]"
+            aria-hidden
+          />
+        </summary>
+        <p className="px-3 pb-2.5 text-[11.5px] leading-snug text-slate-500 dark:text-[#A1A1AA]">
+          The score appears once outbound or inbound email lands on this{' '}
+          {entityType}.
         </p>
-      </div>
+      </details>
     );
   }
 

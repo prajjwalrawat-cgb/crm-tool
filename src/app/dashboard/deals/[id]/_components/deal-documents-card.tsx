@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  ChevronRight,
   FileText,
   Image as ImageIcon,
   Loader2,
@@ -94,6 +95,90 @@ export function DealDocumentsCard({
     });
   }
 
+  const uploader = canEdit ? (
+    <div className="mb-3">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-wide text-slate-400">
+          Category
+        </span>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value as DealDocumentCategory)}
+          className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[12px] text-slate-800 focus:border-indigo-400 focus:outline-none"
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {CATEGORY_LABEL[c]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          onPick(e.dataTransfer.files);
+        }}
+        className={cn(
+          'flex w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed px-3 py-4 text-[12px] transition',
+          dragging
+            ? 'border-indigo-400 bg-indigo-50 text-indigo-600'
+            : 'border-slate-300 bg-slate-50 text-slate-500 hover:border-indigo-300 hover:text-indigo-600',
+        )}
+      >
+        {pending ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        ) : (
+          <Upload className="h-4 w-4" aria-hidden />
+        )}
+        Drag &amp; drop or click to upload
+        <span className="text-[10px] text-slate-400">
+          PDF, image, Office doc or text · max 15 MB
+        </span>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          onPick(e.target.files);
+          e.target.value = '';
+        }}
+      />
+    </div>
+  ) : null;
+
+  // Empty state: collapse to a single line rather than a full-height card.
+  // The uploader (for editors) sits one click away inside the disclosure.
+  if (initialDocuments.length === 0) {
+    return (
+      <details className="group rounded-lg border border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-2.5">
+          <FileText className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
+          <h2 className="text-[13px] font-semibold text-slate-900">Documents</h2>
+          <span className="text-[12px] text-slate-400">— none yet</span>
+          <ChevronRight
+            className="ml-auto h-3.5 w-3.5 text-slate-400 transition-transform group-open:rotate-90"
+            aria-hidden
+          />
+        </summary>
+        <div className="px-4 pb-4">
+          {uploader ?? (
+            <p className="text-[12px] text-slate-500">No documents yet.</p>
+          )}
+        </div>
+      </details>
+    );
+  }
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
       <header className="mb-3 flex items-center justify-between">
@@ -106,74 +191,9 @@ export function DealDocumentsCard({
         </span>
       </header>
 
-      {canEdit ? (
-        <div className="mb-3">
-          <div className="mb-1.5 flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-wide text-slate-400">
-              Category
-            </span>
-            <select
-              value={category}
-              onChange={(e) =>
-                setCategory(e.target.value as DealDocumentCategory)
-              }
-              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[12px] text-slate-800 focus:border-indigo-400 focus:outline-none"
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {CATEGORY_LABEL[c]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragging(false);
-              onPick(e.dataTransfer.files);
-            }}
-            className={cn(
-              'flex w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed px-3 py-4 text-[12px] transition',
-              dragging
-                ? 'border-indigo-400 bg-indigo-50 text-indigo-600'
-                : 'border-slate-300 bg-slate-50 text-slate-500 hover:border-indigo-300 hover:text-indigo-600',
-            )}
-          >
-            {pending ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <Upload className="h-4 w-4" aria-hidden />
-            )}
-            Drag &amp; drop or click to upload
-            <span className="text-[10px] text-slate-400">
-              PDF, image, Office doc or text · max 15 MB
-            </span>
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              onPick(e.target.files);
-              e.target.value = '';
-            }}
-          />
-        </div>
-      ) : null}
+      {uploader}
 
-      {initialDocuments.length === 0 ? (
-        <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-[12px] text-slate-500">
-          No documents yet.
-        </p>
-      ) : (
+      {(
         <ul className="flex flex-col divide-y divide-slate-100">
           {initialDocuments.map((doc) => {
             const isImage = doc.fileType.startsWith('image/');

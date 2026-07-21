@@ -3,6 +3,7 @@
 import {
   Building2,
   CheckSquare,
+  ChevronRight,
   CornerUpRight,
   Loader2,
   Mail,
@@ -236,25 +237,8 @@ export function EntityTasksPanel({
     });
   }
 
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
-      <header className="mb-3 flex items-baseline justify-between">
-        <div className="flex items-center gap-1.5">
-          <CheckSquare className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
-          <h2 className="text-[13px] font-semibold text-slate-900">Tasks</h2>
-        </div>
-        <span className="flex items-center gap-1.5 text-[10px] tabular-nums text-slate-400">
-          {overdueCount > 0 ? (
-            <span className="rounded bg-rose-100 px-1 py-0 font-semibold text-rose-700">
-              {overdueCount} overdue
-            </span>
-          ) : null}
-          {openTasks.length} open · {completedTasks.length} done
-        </span>
-      </header>
-
-      {canEdit ? (
-        <div className="mb-3 rounded-md border border-slate-200 bg-slate-50/60 p-2">
+  const quickAdd = canEdit ? (
+    <div className="mb-3 rounded-md border border-slate-200 bg-slate-50/60 p-2">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -411,14 +395,53 @@ export function EntityTasksPanel({
             </div>
           ) : null}
         </div>
-      ) : null}
+  ) : null;
 
-      {openTasks.length === 0 && completedTasks.length === 0 ? (
-        <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-[12px] text-slate-500">
-          No tasks here yet. Type above to capture the next action.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3">
+  // Empty state: collapse to a single line instead of a full-height card.
+  // The quick-add (for editors) is one click away inside the disclosure.
+  if (openTasks.length === 0 && completedTasks.length === 0) {
+    return (
+      <details className="group rounded-lg border border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-2.5">
+          <CheckSquare className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
+          <h2 className="text-[13px] font-semibold text-slate-900">Tasks</h2>
+          <span className="text-[12px] text-slate-400">— none yet</span>
+          <ChevronRight
+            className="ml-auto h-3.5 w-3.5 text-slate-400 transition-transform group-open:rotate-90"
+            aria-hidden
+          />
+        </summary>
+        <div className="px-4 pb-4">
+          {quickAdd}
+          <p className="text-[12px] text-slate-500">
+            No tasks here yet.
+            {canEdit ? ' Type above to capture the next action.' : ''}
+          </p>
+        </div>
+      </details>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+      <header className="mb-3 flex items-baseline justify-between">
+        <div className="flex items-center gap-1.5">
+          <CheckSquare className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
+          <h2 className="text-[13px] font-semibold text-slate-900">Tasks</h2>
+        </div>
+        <span className="flex items-center gap-1.5 text-[10px] tabular-nums text-slate-400">
+          {overdueCount > 0 ? (
+            <span className="rounded bg-rose-100 px-1 py-0 font-semibold text-rose-700">
+              {overdueCount} overdue
+            </span>
+          ) : null}
+          {openTasks.length} open · {completedTasks.length} done
+        </span>
+      </header>
+
+      {quickAdd}
+
+      <div className="flex flex-col gap-3">
           <TaskGroup
             title="Overdue"
             tone="overdue"
@@ -474,7 +497,6 @@ export function EntityTasksPanel({
             </div>
           ) : null}
         </div>
-      )}
     </section>
   );
 }
