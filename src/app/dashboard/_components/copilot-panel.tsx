@@ -11,6 +11,7 @@ import {
 
 import { cn } from '@/lib/utils';
 
+import { CopilotLauncher } from './copilot-launcher';
 import { useEditMode } from './edit-mode/edit-mode-context';
 
 type AIMode = 'live' | 'mock' | 'disabled';
@@ -255,28 +256,7 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Open Copilot"
-        aria-hidden={anyEditingActive}
-        title="Open Copilot (⌘K)"
-        className={cn(
-          'fixed bottom-4 right-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-3 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm backdrop-blur transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700',
-          // Smooth fade + slight downward motion when any editing
-          // surface is active so the launcher gets out of the way.
-          anyEditingActive
-            ? 'pointer-events-none translate-y-3 opacity-0'
-            : 'translate-y-0 opacity-100',
-        )}
-        tabIndex={anyEditingActive ? -1 : 0}
-      >
-        <Sparkles className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
-        <span>Copilot</span>
-        <kbd className="ml-0.5 hidden rounded border border-slate-200 bg-slate-50 px-1 py-0 text-[9px] font-medium text-slate-500 sm:inline">
-          ⌘K
-        </kbd>
-      </button>
+      <CopilotLauncher onOpen={() => setOpen(true)} hidden={anyEditingActive} />
 
       {open ? (
         <div
