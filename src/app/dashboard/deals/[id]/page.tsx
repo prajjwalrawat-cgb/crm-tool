@@ -382,6 +382,40 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             ) : null}
 
             {/*
+              Right-column order (highest-usage first): Activity → Tasks → AI →
+              Documents. Activity is a rep's most-used widget, so it leads;
+              the AI cards sit below the day-to-day widgets.
+            */}
+            <EntityTimeline
+              items={timeline}
+              authorLookup={authorLookup}
+              currentUserId={userId}
+              title="Activity"
+              filterModes={DEAL_ACTIVITY_FILTERS}
+              emptyLabel="No activity logged yet. Log a call or meeting, or take an action on this deal."
+              headerAction={
+                canEdit ? (
+                  // key silences React's list-child validation: this element is
+                  // created here but rendered as a sibling of EntityTimeline's
+                  // static header children.
+                  <div key="log-activity" className="relative">
+                    <LogActivityLauncher dealId={deal.id} />
+                  </div>
+                ) : null
+              }
+            />
+
+            <EntityTasksPanel
+              entityType="deal"
+              entityId={deal.id}
+              ownerId={deal.ownerId}
+              currentUserId={userId}
+              initialTasks={tasks}
+              canEdit={canEdit}
+              teammates={teammates}
+            />
+
+            {/*
               AI deal analysis + AI summary are hidden entirely unless the
               workspace has AI features switched on (AI_FEATURES_ENABLED).
               We never show a visibly fake / "mock" generating state in front
@@ -410,35 +444,6 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 />
               </>
             ) : null}
-
-            <EntityTasksPanel
-              entityType="deal"
-              entityId={deal.id}
-              ownerId={deal.ownerId}
-              currentUserId={userId}
-              initialTasks={tasks}
-              canEdit={canEdit}
-              teammates={teammates}
-            />
-
-            <EntityTimeline
-              items={timeline}
-              authorLookup={authorLookup}
-              currentUserId={userId}
-              title="Activity"
-              filterModes={DEAL_ACTIVITY_FILTERS}
-              emptyLabel="No activity logged yet. Log a call or meeting, or take an action on this deal."
-              headerAction={
-                canEdit ? (
-                  // key silences React's list-child validation: this element is
-                  // created here but rendered as a sibling of EntityTimeline's
-                  // static header children.
-                  <div key="log-activity" className="relative">
-                    <LogActivityLauncher dealId={deal.id} />
-                  </div>
-                ) : null
-              }
-            />
 
             <DealDocumentsCard
               dealId={deal.id}
