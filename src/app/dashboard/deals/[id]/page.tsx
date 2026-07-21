@@ -2,7 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { getAIMode } from '@/lib/ai/config';
+import { aiFeaturesEnabled, getAIMode } from '@/lib/ai/config';
 import { getCachedSummary } from '@/lib/ai/summary-queries';
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
@@ -363,32 +363,35 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               </article>
             ) : null}
 
-            <LiveDealSummaryCard
-              tenantId={tenant.id}
-              dealId={deal.id}
-              title="AI deal analysis"
-              subtitle="Structured signal — risks and next actions from your activity log"
-              tone="info"
-              summaryId={null}
-              hideFeedback
-              initial={dealInsight.content}
-              initialState={dealInsight.state}
-              initialGeneratedAt={dealInsight.generatedAt?.toISOString() ?? null}
-              modeOverride={
-                aiMode === 'disabled'
-                  ? 'disabled'
-                  : aiMode === 'mock'
-                    ? 'mock'
-                    : undefined
-              }
-            />
+            {/*
+              AI deal analysis + AI summary are hidden entirely unless the
+              workspace has AI features switched on (AI_FEATURES_ENABLED).
+              We never show a visibly fake / "mock" generating state in front
+              of a client — an unwired feature is absent, not pretend-live.
+            */}
+            {aiFeaturesEnabled() ? (
+              <>
+                <LiveDealSummaryCard
+                  tenantId={tenant.id}
+                  dealId={deal.id}
+                  title="AI deal analysis"
+                  subtitle="Structured signal — risks and next actions from your activity log"
+                  tone="info"
+                  summaryId={null}
+                  hideFeedback
+                  initial={dealInsight.content}
+                  initialState={dealInsight.state}
+                  initialGeneratedAt={dealInsight.generatedAt?.toISOString() ?? null}
+                  modeOverride={aiMode === 'disabled' ? 'disabled' : undefined}
+                />
 
-            <SummaryCard
-              dealId={deal.id}
-              initialSummary={cachedSummary?.summary ?? null}
-              initialGeneratedAt={cachedSummary?.generatedAt.toISOString() ?? null}
-              aiMode={aiMode}
-            />
+                <SummaryCard
+                  dealId={deal.id}
+                  initialSummary={cachedSummary?.summary ?? null}
+                  initialGeneratedAt={cachedSummary?.generatedAt.toISOString() ?? null}
+                />
+              </>
+            ) : null}
 
             <EntityTasksPanel
               entityType="deal"

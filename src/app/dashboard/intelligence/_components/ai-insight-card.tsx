@@ -154,11 +154,10 @@ function StateBadge({ state }: { state: InsightState }) {
         </span>
       );
     case 'mock':
-      return (
-        <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-px text-[9.5px] font-semibold text-slate-600 dark:bg-[#181818] dark:text-[#A1A1AA]">
-          Mock
-        </span>
-      );
+      // No badge — we never surface a "mock"/fake-state label in the UI.
+      // Unwired AI surfaces are hidden upstream (see AI_FEATURES_ENABLED),
+      // not shown with a pretend-live indicator.
+      return null;
     case 'budget':
       return (
         <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-px text-[9.5px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">

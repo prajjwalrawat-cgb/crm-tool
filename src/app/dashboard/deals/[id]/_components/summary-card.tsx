@@ -6,13 +6,10 @@ import { toast } from 'sonner';
 
 import { generateDealSummaryAction } from '../actions';
 
-type AIMode = 'live' | 'mock' | 'disabled';
-
 type Props = {
   dealId: string;
   initialSummary: string | null;
   initialGeneratedAt: string | null;
-  aiMode: AIMode;
 };
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -33,7 +30,6 @@ export function SummaryCard({
   dealId,
   initialSummary,
   initialGeneratedAt,
-  aiMode,
 }: Props) {
   const [summary, setSummary] = useState<string | null>(initialSummary);
   const [generatedAt, setGeneratedAt] = useState<string | null>(
@@ -66,17 +62,6 @@ export function SummaryCard({
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
           <Sparkles className="h-3.5 w-3.5" aria-hidden />
           AI summary
-          {aiMode !== 'live' ? (
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
-                aiMode === 'disabled'
-                  ? 'bg-red-100 text-red-700'
-                  : 'bg-amber-100 text-amber-800'
-              }`}
-            >
-              {aiMode}
-            </span>
-          ) : null}
         </div>
         <button
           type="button"

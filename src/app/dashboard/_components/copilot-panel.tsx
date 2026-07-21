@@ -300,17 +300,6 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Sparkles className="h-4 w-4 text-amber-500" aria-hidden />
                 CRM Copilot
-                {aiMode !== 'live' ? (
-                  <span
-                    className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
-                      aiMode === 'disabled'
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}
-                  >
-                    {aiMode}
-                  </span>
-                ) : null}
               </div>
               <button
                 type="button"
@@ -322,19 +311,12 @@ export function CopilotPanel({ aiMode }: { aiMode: AIMode }) {
               </button>
             </header>
 
-            {aiMode !== 'live' ? (
-              <div
-                className={`flex items-start gap-2 border-b px-4 py-2 text-[11px] ${
-                  aiMode === 'disabled'
-                    ? 'border-red-200 bg-red-50 text-red-700'
-                    : 'border-amber-200 bg-amber-50 text-amber-800'
-                }`}
-              >
+            {aiMode === 'disabled' ? (
+              <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-800">
                 <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" aria-hidden />
                 <span>
-                  {aiMode === 'disabled'
-                    ? 'AI is enabled but OPENAI_API_KEY is missing. Treat as misconfigured.'
-                    : 'Mock mode: retrieval runs on real data, but answers are deterministic stubs. Set AI_ENABLED=true and add OPENAI_API_KEY to switch to live AI.'}
+                  AI is enabled but a provider key is missing — answers may be
+                  limited until it&apos;s configured.
                 </span>
               </div>
             ) : null}
