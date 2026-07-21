@@ -1777,6 +1777,11 @@ export async function bulkUploadDealsAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      // Rows without a currency column inherit the workspace default (₹ for
+      // this deployment) rather than a hardcoded 'USD' — otherwise a bulk
+      // import silently reintroduces the "$0.00" mixed-currency artifact.
+      const workspaceCurrency = (await getOrgSettings(tenant.id))
+        .defaultCurrency as (typeof KNOWN_CURRENCIES)[number];
       const errors: Array<{ row: number; message: string }> = [];
       const toInsert: typeof deals.$inferInsert[] = [];
 
@@ -1818,7 +1823,7 @@ export async function bulkUploadDealsAction(
         }
 
         const currencyRaw = cell('currency').toUpperCase();
-        const currency = (currencyRaw || 'USD') as (typeof KNOWN_CURRENCIES)[number];
+        const currency = (currencyRaw || workspaceCurrency) as (typeof KNOWN_CURRENCIES)[number];
         if (!KNOWN_CURRENCIES.includes(currency)) {
           errors.push({
             row: i + 1,

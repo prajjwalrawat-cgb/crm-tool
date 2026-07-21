@@ -62,7 +62,7 @@ export const organizationSettings = pgTable('organization_settings', {
   displayName: text('display_name'),
   logoUrl: text('logo_url'),
 
-  defaultCurrency: text('default_currency').notNull().default('USD'),
+  defaultCurrency: text('default_currency').notNull().default('INR'),
   currencyLocale: text('currency_locale').notNull().default('en-US'),
   locale: text('locale').notNull().default('en-US'),
   timezone: text('timezone').notNull().default('UTC'),

@@ -82,8 +82,10 @@ export const deals = pgTable(
     competitor: text('competitor'),
     /** Where the deal came from: Outbound | Referral | Inbound-Website | Partner | Other. */
     source: text('source'),
-    // ISO 4217 three-letter code (e.g. "USD", "EUR", "INR").
-    currency: text('currency').notNull().default('USD'),
+    // ISO 4217 three-letter code (e.g. "USD", "EUR", "INR"). INR-first
+    // deployment default; the app always sends an explicit currency on
+    // create/edit (see migration 0046).
+    currency: text('currency').notNull().default('INR'),
     expectedCloseDate: date('expected_close_date'),
     closedAt: timestamp('closed_at', { withTimezone: true }),
     ownerId: text('owner_id'),
