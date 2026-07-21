@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm';
 import {
   boolean,
+  jsonb,
   pgTable,
   smallint,
   text,
@@ -77,6 +78,15 @@ export const organizationSettings = pgTable('organization_settings', {
   dealUnitPricingEnabled: boolean('deal_unit_pricing_enabled')
     .notNull()
     .default(false),
+
+  /**
+   * Per-stage win probability overrides (0–100), keyed by deal stage.
+   * NULL = use the code defaults (see lib/deals/stage-probability). Drives
+   * the weighted pipeline value shown per column on the board.
+   */
+  stageProbabilities: jsonb('stage_probabilities').$type<
+    Record<string, number>
+  >(),
 
   defaultDealStage: text('default_deal_stage').notNull().default('lead'),
   defaultReportRange: text('default_report_range').notNull().default('last_30d'),

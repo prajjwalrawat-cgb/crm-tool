@@ -32,6 +32,12 @@ type Props = {
   cards: BoardCard[];
   /** Total deals in this stage (after RLS) — the true column count. */
   totalCount: number;
+  /** Summed amount (minor units) across ALL deals in the stage. */
+  totalAmountMinor: number;
+  /** Win probability (0–100) for this stage — weights the pipeline value. */
+  probability: number;
+  /** Workspace currency for the totals. */
+  currency: string;
   canMove: boolean;
   /** More rows exist past what's loaded — render the scroll sentinel. */
   hasMore: boolean;
@@ -51,6 +57,9 @@ export const BoardColumn = memo(function BoardColumn({
   stage,
   cards,
   totalCount,
+  totalAmountMinor,
+  probability,
+  currency,
   canMove,
   hasMore,
   loadingMore,
@@ -83,16 +92,9 @@ export const BoardColumn = memo(function BoardColumn({
   // SortableContext doesn't reconcile every render.
   const items = useMemo(() => cards.map((c) => c.id), [cards]);
 
-  const totalMinor = useMemo(
-    () =>
-      cards.reduce((sum, c) => sum + Number(c.amountMinor ?? 0), 0),
-    [cards],
-  );
-  // All cards in a tenant *should* share a currency for sane totals; we
-  // surface the first card's currency as the column total. Mixed-currency
-  // tenants will see the first card's symbol with the summed minor units —
-  // listed under tech debt below.
-  const totalCurrency = cards[0]?.currency ?? 'USD';
+  // Raw total is the server-computed sum across ALL deals in the stage (not
+  // just the loaded page). Weighted = raw × stage probability.
+  const weightedMinor = Math.round((totalAmountMinor * probability) / 100);
 
   return (
     <section
@@ -123,10 +125,18 @@ export const BoardColumn = memo(function BoardColumn({
             {DEAL_STAGE_LABELS[stage]}
           </span>
         </div>
-        {cards.length > 0 ? (
-          <span className="truncate text-xs font-semibold tabular-nums text-slate-700">
-            {formatCurrency(totalMinor, totalCurrency)}
-          </span>
+        {totalCount > 0 ? (
+          <div className="flex min-w-0 flex-col items-end leading-tight">
+            <span className="truncate text-xs font-semibold tabular-nums text-slate-700">
+              {formatCurrency(totalAmountMinor, currency)}
+            </span>
+            <span
+              className="truncate text-[10px] tabular-nums text-slate-400"
+              title={`Weighted at ${probability}% stage probability`}
+            >
+              {formatCurrency(weightedMinor, currency)} weighted
+            </span>
+          </div>
         ) : null}
       </header>
 

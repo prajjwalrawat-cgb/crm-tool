@@ -495,6 +495,11 @@ export type DealBoardSummary = {
   board: DealBoard;
   /** Per-stage total count (after RLS) — surfaces "X+ more" in the UI. */
   counts: Record<DealStage, number>;
+  /**
+   * Per-stage summed amount in minor units across ALL deals in the stage
+   * (not just the loaded page) — drives the column's raw + weighted totals.
+   */
+  amounts: Record<DealStage, number>;
   /** True if any stage was capped. */
   capped: boolean;
 };
@@ -676,6 +681,15 @@ export async function listDealsForBoard(
         won: 0,
         lost: 0,
       };
+      const amounts: Record<DealStage, number> = {
+        lead: 0,
+        qualified: 0,
+        proposal: 0,
+        negotiation: 0,
+        hold: 0,
+        won: 0,
+        lost: 0,
+      };
 
       // Conditions shared between the per-stage SELECTs and the
       // totals GROUP BY. The `stage` filter is excluded here because
@@ -719,16 +733,20 @@ export async function listDealsForBoard(
         .select({
           stage: deals.stage,
           n: sql<number>`count(*)::int`,
+          amount: sql<string>`coalesce(sum(${deals.amountMinor}), 0)::bigint`,
         })
         .from(deals)
         .where(and(...totalsConds))
         .groupBy(deals.stage);
       for (const t of totals) {
         counts[t.stage as DealStage] = t.n;
+        // sum(bigint) comes back as a string from postgres.js — coerce for
+        // display. Deal totals are well within Number's safe range.
+        amounts[t.stage as DealStage] = Number(t.amount ?? 0);
       }
 
       const capped = STAGES.some((s) => counts[s] > board[s].length);
-      return { board, counts, capped };
+      return { board, counts, amounts, capped };
     });
   });
 }

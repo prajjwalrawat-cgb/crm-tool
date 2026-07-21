@@ -56,6 +56,12 @@ type Props = {
   initialBoard: DealBoard;
   /** Total deals per stage (after RLS); the board may render fewer if capped. */
   stageCounts: Record<DealStage, number>;
+  /** Per-stage summed amount (minor units) across all deals in the stage. */
+  stageAmounts: Record<DealStage, number>;
+  /** Per-stage win probability (0–100) for the weighted total. */
+  stageProbabilities: Record<DealStage, number>;
+  /** Workspace currency for the column totals. */
+  boardCurrency: string;
   currentRole: MembershipRole;
   tenantId: string;
   initialFilters: DealFilters;
@@ -164,6 +170,9 @@ function removeCard(state: LocalBoard, dealId: string): LocalBoard {
 export function BoardView({
   initialBoard,
   stageCounts,
+  stageAmounts,
+  stageProbabilities,
+  boardCurrency,
   currentRole,
   tenantId,
   initialFilters,
@@ -483,6 +492,9 @@ export function BoardView({
           stage={stage}
           cards={board[stage]}
           totalCount={stageCounts[stage]}
+          totalAmountMinor={stageAmounts[stage] ?? 0}
+          probability={stageProbabilities[stage] ?? 0}
+          currency={boardCurrency}
           canMove={canMove}
           hasMore={moreByStage[stage] ?? false}
           loadingMore={loadingStages.has(stage)}
@@ -493,6 +505,9 @@ export function BoardView({
       board,
       canMove,
       stageCounts,
+      stageAmounts,
+      stageProbabilities,
+      boardCurrency,
       visibleStages,
       moreByStage,
       loadingStages,

@@ -1,4 +1,5 @@
 import { withTenantSession } from '@/lib/auth-guard';
+import { resolveStageProbabilities } from '@/lib/deals/stage-probability';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
 
@@ -26,6 +27,9 @@ export default async function PipelineSettingsPage() {
           dashboardMetrics: settings.dashboardMetrics,
           fiscalYearStartMonth: settings.fiscalYearStartMonth,
           dealUnitPricingEnabled: settings.dealUnitPricingEnabled,
+          stageProbabilities: resolveStageProbabilities(
+            settings.stageProbabilities,
+          ),
         }}
       />
     );

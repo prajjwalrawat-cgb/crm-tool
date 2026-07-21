@@ -1,9 +1,13 @@
 'use client';
 
-import { GitBranch } from 'lucide-react';
+import { GitBranch, Percent } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
 import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
+import {
+  CONFIGURABLE_PROBABILITY_STAGES,
+  type StageProbabilities,
+} from '@/lib/deals/stage-probability';
 
 import { updatePipelineSettingsAction } from '../../actions';
 import {
@@ -20,6 +24,7 @@ type Values = {
   dashboardMetrics: string;
   fiscalYearStartMonth: number;
   dealUnitPricingEnabled: boolean;
+  stageProbabilities: StageProbabilities;
 };
 
 const REPORT_RANGE_OPTIONS = [
@@ -59,12 +64,21 @@ export function PipelineForm({ initial }: { initial: Values }) {
     const readBool = (name: string) =>
       (root.querySelector(`input[name="${name}"]`) as HTMLInputElement | null)
         ?.checked ?? false;
+    const stageProbabilities = { ...initial.stageProbabilities };
+    for (const stage of CONFIGURABLE_PROBABILITY_STAGES) {
+      const raw = read(`prob_${stage}`);
+      const n = Number(raw);
+      if (Number.isFinite(n)) {
+        stageProbabilities[stage] = Math.min(100, Math.max(0, Math.round(n)));
+      }
+    }
     return {
       defaultDealStage: read('defaultDealStage') as Values['defaultDealStage'],
       defaultReportRange: read('defaultReportRange'),
       dashboardMetrics: read('dashboardMetrics'),
       fiscalYearStartMonth: Number(read('fiscalYearStartMonth')) || 1,
       dealUnitPricingEnabled: readBool('dealUnitPricingEnabled'),
+      stageProbabilities,
     };
   }, [initial]);
 
@@ -117,6 +131,37 @@ export function PipelineForm({ initial }: { initial: Values }) {
             description="Show Per Unit Price and Quantity on the deal form; Amount is calculated automatically (unit price x quantity)."
             defaultChecked={initial.dealUnitPricingEnabled}
           />
+        </SettingsSection>
+
+        <SettingsSection
+          title="Stage win probabilities"
+          description="Weights the pipeline value shown beneath each board column (weighted = amount × probability). Won is fixed at 100%, Lost at 0%."
+          icon={Percent}
+        >
+          {CONFIGURABLE_PROBABILITY_STAGES.map((stage) => (
+            <label
+              key={stage}
+              className="flex items-center justify-between gap-4 border-b border-slate-100 py-2 last:border-b-0 dark:border-[#1F1F1F]"
+            >
+              <span className="text-[13px] font-medium text-slate-800 dark:text-[#FAFAFA]">
+                {DEAL_STAGE_LABELS[stage]}
+              </span>
+              <span className="relative inline-flex items-center">
+                <input
+                  type="number"
+                  name={`prob_${stage}`}
+                  min={0}
+                  max={100}
+                  step={5}
+                  defaultValue={initial.stageProbabilities[stage]}
+                  className="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 pr-6 text-right text-[13px] text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA]"
+                />
+                <span className="pointer-events-none absolute right-2 text-[12px] text-slate-400">
+                  %
+                </span>
+              </span>
+            </label>
+          ))}
         </SettingsSection>
       </SettingsForm>
     </div>

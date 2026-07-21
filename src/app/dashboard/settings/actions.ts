@@ -183,6 +183,11 @@ const pipelineSchema = z.object({
   dashboardMetrics: z.string().max(400).optional(),
   fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
   dealUnitPricingEnabled: z.boolean().optional(),
+  // Per-stage win probability (0–100), keyed by deal stage. Weights the
+  // pipeline value shown per board column.
+  stageProbabilities: z
+    .record(z.enum(DEAL_STAGES), z.coerce.number().min(0).max(100))
+    .optional(),
 });
 
 export async function updatePipelineSettingsAction(input: unknown) {
@@ -201,6 +206,9 @@ export async function updatePipelineSettingsAction(input: unknown) {
     }),
     ...(p.dealUnitPricingEnabled !== undefined && {
       dealUnitPricingEnabled: p.dealUnitPricingEnabled,
+    }),
+    ...(p.stageProbabilities !== undefined && {
+      stageProbabilities: p.stageProbabilities,
     }),
   }));
   // The per-unit-pricing toggle changes the deal form/list, so refresh those.

@@ -1,7 +1,9 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { parseDealFilters } from '@/lib/deals/filters';
 import { listDealCompanyOptions, listDealsForBoard } from '@/lib/deals/queries';
+import { resolveStageProbabilities } from '@/lib/deals/stage-probability';
 import { requireMembership } from '@/lib/membership';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import { personaOf } from '@/lib/personas';
 import { listTeammates } from '@/lib/teammates/queries';
 
@@ -26,7 +28,7 @@ export default async function DealsBoardPage({
       persona === 'sales' ? userId : undefined;
     const sp = await searchParams;
     const filters = parseDealFilters(sp);
-    const [summary, companyOptions, teammates] = await Promise.all([
+    const [summary, companyOptions, teammates, settings] = await Promise.all([
       listDealsForBoard(tenant.id, {
         restrictToOwnerOrUnassigned,
         filters,
@@ -34,7 +36,12 @@ export default async function DealsBoardPage({
       }),
       listDealCompanyOptions(tenant.id),
       listTeammates(tenant.id, tenant.name),
+      getOrgSettings(tenant.id),
     ]);
+
+    const stageProbabilities = resolveStageProbabilities(
+      settings.stageProbabilities,
+    );
 
     return (
       <main className="flex min-h-[calc(100vh-3.5rem)] flex-col px-4 py-6 sm:px-6 lg:px-8">
@@ -51,6 +58,9 @@ export default async function DealsBoardPage({
         <BoardView
           initialBoard={summary.board}
           stageCounts={summary.counts}
+          stageAmounts={summary.amounts}
+          stageProbabilities={stageProbabilities}
+          boardCurrency={settings.defaultCurrency}
           currentRole={membership.role}
           tenantId={tenant.id}
           initialFilters={filters}
