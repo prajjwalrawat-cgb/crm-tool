@@ -24,6 +24,16 @@ export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   lost: 'Lost',
 };
 
+/** Deal classification — distinguishes same-named opportunities. */
+export const DEAL_TYPES = ['new_logo', 'renewal', 'expansion', 'upsell'] as const;
+export type DealType = (typeof DEAL_TYPES)[number];
+export const DEAL_TYPE_LABELS: Record<DealType, string> = {
+  new_logo: 'New Logo',
+  renewal: 'Renewal',
+  expansion: 'Expansion',
+  upsell: 'Upsell',
+};
+
 export const createDealSchema = z.object({
   name: z
     .string()
@@ -74,6 +84,11 @@ export const createDealSchema = z.object({
       .max(100, 'Margin cannot exceed 100%'),
   ),
   currency: z.enum(KNOWN_CURRENCIES, { message: 'Pick a supported currency' }),
+  // Optional deal classification. Empty string from the form → null.
+  dealType: z.preprocess(
+    (v) => (v == null || v === '' ? null : v),
+    z.enum(DEAL_TYPES).nullable(),
+  ),
   expectedCloseDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date')

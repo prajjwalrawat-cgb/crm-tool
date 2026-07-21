@@ -76,6 +76,7 @@ export async function loadSerializedDeal(
       name: deals.name,
       description: deals.description,
       stage: deals.stage,
+      dealType: deals.dealType,
       amountMinor: deals.amountMinor,
       unitPriceMinor: deals.unitPriceMinor,
       quantity: deals.quantity,

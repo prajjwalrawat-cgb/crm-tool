@@ -11,7 +11,12 @@ import { marginBpsToPct } from '@/lib/deals/approval';
 import { validateDealForm } from '@/lib/deals/client-validate';
 import { fromMinorUnits } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
-import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
+import {
+  DEAL_STAGE_LABELS,
+  DEAL_STAGES,
+  DEAL_TYPE_LABELS,
+  DEAL_TYPES,
+} from '@/lib/deals/schema';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
@@ -234,9 +239,23 @@ export function EditDealDrawer({
           />
         ) : null}
 
+        <Select
+          name="dealType"
+          label="Deal type"
+          defaultValue={deal?.dealType ?? ''}
+          errors={errs.dealType}
+        >
+          <option value="">—</option>
+          {DEAL_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {DEAL_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </Select>
+
         <DealAmountFields
           unitPricingEnabled={unitPricingEnabled || dealHasUnitPricing}
-          defaultCurrency={deal?.currency ?? 'USD'}
+          defaultCurrency={deal?.currency ?? 'INR'}
           defaultAmount={initialAmount}
           defaultUnitPrice={initialUnitPrice}
           defaultQuantity={initialQuantity}

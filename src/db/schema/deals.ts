@@ -14,7 +14,7 @@ import {
 
 import { companies } from './companies';
 import { contacts } from './contacts';
-import { dealApprovalStatus, dealStage } from './enums';
+import { dealApprovalStatus, dealStage, dealType } from './enums';
 import { tenants } from './tenants';
 
 export const deals = pgTable(
@@ -46,6 +46,11 @@ export const deals = pgTable(
       .notNull()
       .default({}),
     stage: dealStage('stage').notNull().default('lead'),
+    /**
+     * Deal classification (New Logo / Renewal / Expansion / Upsell). Optional;
+     * used to disambiguate same-named opportunities on the board.
+     */
+    dealType: dealType('deal_type'),
     // Currency stored as integer minor units (e.g. cents) to avoid float
     // rounding. bigint covers values well past any realistic deal size.
     amountMinor: bigint('amount_minor', { mode: 'number' }).notNull().default(0),

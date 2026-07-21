@@ -9,7 +9,12 @@ import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { validateDealForm } from '@/lib/deals/client-validate';
-import { DEAL_STAGE_LABELS, DEAL_STAGES } from '@/lib/deals/schema';
+import {
+  DEAL_STAGE_LABELS,
+  DEAL_STAGES,
+  DEAL_TYPE_LABELS,
+  DEAL_TYPES,
+} from '@/lib/deals/schema';
 import { cn } from '@/lib/utils';
 
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
@@ -143,6 +148,21 @@ export function CreateDealForm({
           errors={errs.lostReason}
         />
       ) : null}
+
+      <SelectField
+        name="dealType"
+        label="Deal type"
+        errors={errs.dealType}
+        defaultValue=""
+        emptyHint="Distinguishes same-named deals on the board (optional)."
+      >
+        <option value="">—</option>
+        {DEAL_TYPES.map((t) => (
+          <option key={t} value={t}>
+            {DEAL_TYPE_LABELS[t]}
+          </option>
+        ))}
+      </SelectField>
 
       <DealAmountFields
         unitPricingEnabled={unitPricingEnabled}

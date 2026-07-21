@@ -23,6 +23,12 @@ type Props = {
   draggable: boolean;
   /** Render in dnd-kit's DragOverlay (no useSortable, no link). */
   overlay?: boolean;
+  /**
+   * Distinguishing suffix appended to the name when another visible card in
+   * the same column shares this deal's name (e.g. "— Renewal"). Computed by
+   * the column with full sibling context.
+   */
+  suffix?: string | null;
 };
 
 function isOverdue(deal: BoardCard, now: Date): boolean {
@@ -36,7 +42,9 @@ export const DealCard = memo(function DealCard({
   deal,
   draggable,
   overlay = false,
+  suffix = null,
 }: Props) {
+  const displayName = suffix ? `${deal.name} — ${suffix}` : deal.name;
   const sortable = useSortable({
     id: deal.id,
     disabled: !draggable || overlay,
@@ -89,7 +97,7 @@ export const DealCard = memo(function DealCard({
     >
       <header className="flex items-start justify-between gap-2">
         {overlay ? (
-          <span className="font-medium leading-tight">{deal.name}</span>
+          <span className="font-medium leading-tight">{displayName}</span>
         ) : (
           <Link
             href={`/dashboard/deals/${deal.id}`}
@@ -100,7 +108,7 @@ export const DealCard = memo(function DealCard({
             onPointerDown={(e) => e.stopPropagation()}
             className="font-medium leading-tight hover:underline"
           >
-            {deal.name}
+            {displayName}
           </Link>
         )}
         {deal.__pending ? (

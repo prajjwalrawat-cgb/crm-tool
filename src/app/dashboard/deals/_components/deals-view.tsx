@@ -361,6 +361,7 @@ export function DealsView({
       description:
         (String(formData.get('description') ?? '').trim() || base?.description) ?? null,
       stage,
+      dealType: base?.dealType ?? null,
       amountMinor,
       unitPriceMinor,
       quantity,

@@ -246,6 +246,7 @@ async function main() {
       companyId: company.id,
       contactId: primaryContact.id,
       name: 'Camlin Fine Sciences — Antioxidant Supply Agreement',
+      dealType: 'new_logo',
       description:
         'Multi-year supply agreement for food-grade antioxidants across the ' +
         'Mumbai and Dahej plants. Displacing an incumbent; procurement is ' +

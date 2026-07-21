@@ -31,6 +31,13 @@ export const dealApprovalStatus = pgEnum('deal_approval_status', [
   'rejected',
 ]);
 
+export const dealType = pgEnum('deal_type', [
+  'new_logo',
+  'renewal',
+  'expansion',
+  'upsell',
+]);
+
 export const taskStatus = pgEnum('task_status', [
   'todo',
   'in_progress',
@@ -75,6 +82,7 @@ export const dealDocumentCategory = pgEnum('deal_document_category', [
 ]);
 
 export type DealApprovalStatus = (typeof dealApprovalStatus.enumValues)[number];
+export type DealTypeEnum = (typeof dealType.enumValues)[number];
 export type MembershipRole = (typeof membershipRole.enumValues)[number];
 export type MembershipStatus = (typeof membershipStatus.enumValues)[number];
 export type DealStage = (typeof dealStage.enumValues)[number];

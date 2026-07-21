@@ -9,7 +9,12 @@ import { Loader2 } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef } from 'react';
 
 import { formatCurrency } from '@/lib/deals/currency';
-import { type DealStage, DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import {
+  type DealStage,
+  DEAL_STAGE_LABELS,
+  DEAL_TYPE_LABELS,
+  type DealType,
+} from '@/lib/deals/schema';
 import { cn } from '@/lib/utils';
 
 import { type BoardCard, DealCard } from './deal-card';
@@ -95,6 +100,32 @@ export const BoardColumn = memo(function BoardColumn({
   // SortableContext doesn't reconcile every render.
   const items = useMemo(() => cards.map((c) => c.id), [cards]);
 
+  // Disambiguate cards that share a name within this column. Duplicates get a
+  // suffix from deal_type (e.g. "— Renewal"); when the type is absent or would
+  // still collide, we fall back to a numeric index so the name+suffix is
+  // always unique on screen.
+  const suffixById = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of cards) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
+    const out: Record<string, string> = {};
+    const used = new Set<string>();
+    for (const c of cards) {
+      if ((counts.get(c.name) ?? 0) <= 1) continue;
+      const base = c.dealType
+        ? DEAL_TYPE_LABELS[c.dealType as DealType]
+        : '';
+      let suffix = base || '#1';
+      let n = 1;
+      while (used.has(`${c.name}|${suffix}`)) {
+        n += 1;
+        suffix = base ? `${base} ${n}` : `#${n}`;
+      }
+      used.add(`${c.name}|${suffix}`);
+      out[c.id] = suffix;
+    }
+    return out;
+  }, [cards]);
+
   // Raw total is the server-computed sum across ALL deals in the stage (not
   // just the loaded page). Weighted = raw × stage probability.
   const weightedMinor = Math.round((totalAmountMinor * probability) / 100);
@@ -155,7 +186,12 @@ export const BoardColumn = memo(function BoardColumn({
       >
         <SortableContext items={items} strategy={verticalListSortingStrategy}>
           {cards.map((card) => (
-            <DealCard key={card.id} deal={card} draggable={canMove} />
+            <DealCard
+              key={card.id}
+              deal={card}
+              draggable={canMove}
+              suffix={suffixById[card.id] ?? null}
+            />
           ))}
         </SortableContext>
 
