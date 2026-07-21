@@ -50,8 +50,11 @@ type Props = {
   hasMore: boolean;
   /** A page fetch for this column is in flight. */
   loadingMore: boolean;
-  /** Request the next page for this stage. */
-  onLoadMore: (stage: DealStage) => void;
+  /** Request the next page for this stage, passing the last card's cursor. */
+  onLoadMore: (
+    stage: DealStage,
+    cursor: { updatedAt: string; id: string },
+  ) => void;
 };
 
 /**
@@ -88,13 +91,21 @@ export const BoardColumn = memo(function BoardColumn({
     if (!el) return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) onLoadMore(stage);
+        if (!entries.some((e) => e.isIntersecting)) return;
+        // Page from the last (oldest) loaded card in this column.
+        const last = cards[cards.length - 1];
+        if (!last) return;
+        const updatedAt =
+          last.updatedAt instanceof Date
+            ? last.updatedAt.toISOString()
+            : new Date(last.updatedAt).toISOString();
+        onLoadMore(stage, { updatedAt, id: last.id });
       },
       { rootMargin: '240px' },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, onLoadMore, stage, cards.length]);
+  }, [hasMore, onLoadMore, stage, cards]);
 
   // Sortable items are deal ids — passed as a stable string array so dnd-kit's
   // SortableContext doesn't reconcile every render.

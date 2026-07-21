@@ -246,11 +246,6 @@ export function BoardView({
     () => new Set(),
   );
   const loadingStagesRef = useRef<Set<DealStage>>(new Set());
-  // Always-current mirror of `board` so the load-more handler reads the
-  // latest column (including previously appended pages) without stale
-  // closures. Set during render is allowed.
-  const boardRef = useRef<LocalBoard>(board);
-  boardRef.current = board;
   // A drag onto the Lost column, held until the reason modal is confirmed.
   const [lostPrompt, setLostPrompt] = useState<{
     dealId: string;
@@ -283,19 +278,16 @@ export function BoardView({
     setLoadingStages(new Set());
   }
 
-  // Fetch and append the next page of deals for one stage column. Idempotent
-  // per column while a request is in flight; dedups by id so a card can't
-  // appear twice if a realtime event raced the fetch.
+  // Fetch and append the next page of deals for one stage column. The column
+  // supplies the cursor (its last loaded card), so this never reads board
+  // state during render. Idempotent per column while a request is in flight;
+  // dedups by id so a card can't appear twice if a realtime event raced.
   const handleLoadMore = useCallback(
-    (stage: DealStage) => {
+    (stage: DealStage, cursor: { updatedAt: string; id: string }) => {
       if (loadingStagesRef.current.has(stage)) return;
-      const col = boardRef.current[stage];
-      const last = col[col.length - 1];
-      if (!last) return;
 
       loadingStagesRef.current.add(stage);
       setLoadingStages((s) => new Set(s).add(stage));
-      const cursor = { updatedAt: last.updatedAt.toISOString(), id: last.id };
 
       startTransition(async () => {
         const res = await loadMoreStageDealsAction({
