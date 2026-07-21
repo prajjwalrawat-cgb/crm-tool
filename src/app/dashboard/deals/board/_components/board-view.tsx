@@ -35,11 +35,22 @@ import { cn } from '@/lib/utils';
 import { DealFilterBar } from '../../_components/deal-filter-bar';
 import { FilterChips, type FilterChip } from '../../../_components/filter-chips';
 import { updateDealStageAction } from '../../actions';
+import { loadMoreStageDealsAction } from '../actions';
 import { LostReasonModal } from '../../_components/lost-reason-modal';
 import { type BoardCard, DealCard } from './deal-card';
 import { BoardColumn } from './board-column';
 
 type LocalBoard = Record<DealStage, BoardCard[]>;
+
+/** Which stages still have un-loaded deals past what's on the board. */
+function computeInitialMore(
+  board: DealBoard,
+  counts: Record<DealStage, number>,
+): Record<DealStage, boolean> {
+  const out = {} as Record<DealStage, boolean>;
+  for (const s of DEAL_STAGES) out[s] = counts[s] > board[s].length;
+  return out;
+}
 
 type Props = {
   initialBoard: DealBoard;
@@ -214,6 +225,23 @@ export function BoardView({
   const [activeCard, setActiveCard] = useState<BoardCard | null>(null);
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Per-column infinite scroll. `moreByStage` says whether more rows exist
+  // past what's loaded; `loadingStages` drives the per-column spinner. A ref
+  // guards against firing overlapping fetches for the same column while one
+  // is already in flight (the sentinel can re-trigger during layout).
+  const [moreByStage, setMoreByStage] = useState<Record<DealStage, boolean>>(
+    () => computeInitialMore(initialBoard, stageCounts),
+  );
+  const [loadingStages, setLoadingStages] = useState<Set<DealStage>>(
+    () => new Set(),
+  );
+  const loadingStagesRef = useRef<Set<DealStage>>(new Set());
+  // Always-current mirror of `board` so the load-more handler reads the
+  // latest column (including previously appended pages) without stale
+  // closures. Set during render is allowed.
+  const boardRef = useRef<LocalBoard>(board);
+  boardRef.current = board;
   // A drag onto the Lost column, held until the reason modal is confirmed.
   const [lostPrompt, setLostPrompt] = useState<{
     dealId: string;
@@ -239,7 +267,64 @@ export function BoardView({
     lastKnownGoodRef.current = initialBoard;
     // Set during render is allowed inside the same component tree.
     setBoard(initialBoard);
+    // Fresh server board → recompute which columns have more to load and
+    // drop any in-flight pager bookkeeping (the new board supersedes it).
+    setMoreByStage(computeInitialMore(initialBoard, stageCounts));
+    loadingStagesRef.current = new Set();
+    setLoadingStages(new Set());
   }
+
+  // Fetch and append the next page of deals for one stage column. Idempotent
+  // per column while a request is in flight; dedups by id so a card can't
+  // appear twice if a realtime event raced the fetch.
+  const handleLoadMore = useCallback(
+    (stage: DealStage) => {
+      if (loadingStagesRef.current.has(stage)) return;
+      const col = boardRef.current[stage];
+      const last = col[col.length - 1];
+      if (!last) return;
+
+      loadingStagesRef.current.add(stage);
+      setLoadingStages((s) => new Set(s).add(stage));
+      const cursor = { updatedAt: last.updatedAt.toISOString(), id: last.id };
+
+      startTransition(async () => {
+        const res = await loadMoreStageDealsAction({
+          stage,
+          cursor,
+          filters: initialFilters,
+        });
+        loadingStagesRef.current.delete(stage);
+        setLoadingStages((s) => {
+          const n = new Set(s);
+          n.delete(stage);
+          return n;
+        });
+        if (!res.ok) {
+          // Stop offering "load more" on error so the sentinel doesn't spin.
+          setMoreByStage((m) => ({ ...m, [stage]: false }));
+          return;
+        }
+        const incoming: BoardCard[] = res.rows.map((r) => ({
+          ...r,
+          __pending: false,
+        }));
+        setBoard((b) => {
+          const existing = new Set(b[stage].map((c) => c.id));
+          const fresh = incoming.filter((c) => !existing.has(c.id));
+          if (fresh.length === 0) return b;
+          const nextCol = [...b[stage], ...fresh];
+          lastKnownGoodRef.current = {
+            ...lastKnownGoodRef.current,
+            [stage]: nextCol,
+          };
+          return { ...b, [stage]: nextCol };
+        });
+        setMoreByStage((m) => ({ ...m, [stage]: res.hasMore }));
+      });
+    },
+    [initialFilters, startTransition],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -399,9 +484,20 @@ export function BoardView({
           cards={board[stage]}
           totalCount={stageCounts[stage]}
           canMove={canMove}
+          hasMore={moreByStage[stage] ?? false}
+          loadingMore={loadingStages.has(stage)}
+          onLoadMore={handleLoadMore}
         />
       )),
-    [board, canMove, stageCounts, visibleStages],
+    [
+      board,
+      canMove,
+      stageCounts,
+      visibleStages,
+      moreByStage,
+      loadingStages,
+      handleLoadMore,
+    ],
   );
 
   // A second horizontal scrollbar mirrored above the board, so you don't have

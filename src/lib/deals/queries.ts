@@ -491,6 +491,129 @@ export type DealBoardSummary = {
   capped: boolean;
 };
 
+export type BoardFetchOptions = {
+  restrictToOwnerOrUnassigned?: string;
+  filters?: DealFilters;
+  /** Required for `filters.mine` to resolve "owner == me". */
+  currentUserId?: string;
+};
+
+/**
+ * Shared WHERE conditions for the board — used by both the initial
+ * per-stage snapshot and the infinite-scroll pager so the two never
+ * drift. Excludes the `stage` predicate (callers add it) and the cursor
+ * predicate. Mirrors the filter semantics of `listDeals`.
+ */
+function boardSharedConditions(
+  tenantId: string,
+  f: DealFilters,
+  options: Pick<BoardFetchOptions, 'restrictToOwnerOrUnassigned' | 'currentUserId'>,
+): SQL[] {
+  const conds: SQL[] = [
+    eq(deals.tenantId, tenantId),
+    isNull(deals.deletedAt),
+  ];
+  if (typeof f.amountMinorMin === 'number') {
+    conds.push(gte(deals.amountMinor, f.amountMinorMin));
+  }
+  if (typeof f.amountMinorMax === 'number') {
+    conds.push(lte(deals.amountMinor, f.amountMinorMax));
+  }
+  if (f.expectedCloseFrom) {
+    conds.push(gte(deals.expectedCloseDate, f.expectedCloseFrom));
+  }
+  if (f.expectedCloseTo) {
+    conds.push(lte(deals.expectedCloseDate, f.expectedCloseTo));
+  }
+  if (f.stale) {
+    const days = f.staleDays && f.staleDays > 0 ? f.staleDays : 14;
+    conds.push(
+      sql`${deals.stage} NOT IN ('won','lost')`,
+      sql`${deals.updatedAt} < NOW() - (${days}::int * INTERVAL '1 day')`,
+    );
+  }
+  if (f.companyIds && f.companyIds.length > 0) {
+    conds.push(companyFilterCondition(tenantId, f.companyIds));
+  }
+  if (f.mine && options.currentUserId) {
+    conds.push(eq(deals.ownerId, options.currentUserId));
+  }
+  if (f.unassigned) {
+    conds.push(isNull(deals.ownerId));
+  }
+  if (f.ownerIds && f.ownerIds.length > 0) {
+    conds.push(inArray(deals.ownerId, f.ownerIds));
+  }
+  if (f.awaitingApproval) {
+    conds.push(eq(deals.stage, 'won'), eq(deals.approvalStatus, 'pending'));
+  }
+  if (f.approvedOnly) {
+    conds.push(eq(deals.stage, 'won'), eq(deals.approvalStatus, 'approved'));
+  }
+  if (options.restrictToOwnerOrUnassigned) {
+    const me = options.restrictToOwnerOrUnassigned;
+    conds.push(sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`);
+  }
+  return conds;
+}
+
+/** Opaque cursor for the board's per-stage infinite scroll. */
+export type BoardStageCursor = { updatedAt: string; id: string };
+
+export type StageDealsPage = {
+  rows: DealRow[];
+  nextCursor: BoardStageCursor | null;
+  /** True when more rows exist past this page. */
+  hasMore: boolean;
+};
+
+/**
+ * One page of deals for a single stage column, ordered exactly like the
+ * initial board snapshot (`updated_at DESC, id DESC`). Backs the kanban's
+ * per-column infinite scroll — the client passes the last row's cursor to
+ * fetch the next slice. Applies the same filters + RLS scope as the initial
+ * board load so scroll and snapshot stay consistent.
+ */
+export async function listStageDealsPage(
+  tenantId: string,
+  stage: DealStage,
+  cursor: BoardStageCursor | null,
+  options: BoardFetchOptions = {},
+): Promise<StageDealsPage> {
+  const f = options.filters ?? {};
+  const size = BOARD_PER_STAGE_LIMIT;
+  return await timeQuery('deals.board.stagePage', async () =>
+    tenantTransaction(async (tx) => {
+      const conds = boardSharedConditions(tenantId, f, options);
+      conds.push(eq(deals.stage, stage));
+      if (cursor) {
+        conds.push(
+          sql`(${deals.updatedAt}, ${deals.id}) < (${cursor.updatedAt}::timestamptz, ${cursor.id}::uuid)`,
+        );
+      }
+      const rows = await tx
+        .select(DEALS_PROJECTION)
+        .from(deals)
+        .leftJoin(companies, eq(deals.companyId, companies.id))
+        .leftJoin(contacts, eq(deals.contactId, contacts.id))
+        .where(and(...conds))
+        .orderBy(desc(deals.updatedAt), desc(deals.id))
+        .limit(size + 1);
+      const shaped = rows.map(shapeDealRow);
+      const hasMore = shaped.length > size;
+      const page = hasMore ? shaped.slice(0, size) : shaped;
+      const last = page[page.length - 1];
+      return {
+        rows: page,
+        hasMore,
+        nextCursor: last
+          ? { updatedAt: last.updatedAt.toISOString(), id: last.id }
+          : null,
+      };
+    }),
+  );
+}
+
 /**
  * Board snapshot. Caps at BOARD_PER_STAGE_LIMIT rows per stage by
  * issuing one query per stage with a LIMIT, in parallel. Six small
@@ -550,60 +673,10 @@ export async function listDealsForBoard(
       // totals GROUP BY. The `stage` filter is excluded here because
       // the per-stage queries already constrain by stage, and the
       // totals query needs to see the full breakdown (then the UI
-      // hides stages the user didn't ask for).
-      const sharedConds: SQL[] = [
-        eq(deals.tenantId, tenantId),
-        isNull(deals.deletedAt),
-      ];
-      if (typeof f.amountMinorMin === 'number') {
-        sharedConds.push(gte(deals.amountMinor, f.amountMinorMin));
-      }
-      if (typeof f.amountMinorMax === 'number') {
-        sharedConds.push(lte(deals.amountMinor, f.amountMinorMax));
-      }
-      if (f.expectedCloseFrom) {
-        sharedConds.push(gte(deals.expectedCloseDate, f.expectedCloseFrom));
-      }
-      if (f.expectedCloseTo) {
-        sharedConds.push(lte(deals.expectedCloseDate, f.expectedCloseTo));
-      }
-      if (f.stale) {
-        const days = f.staleDays && f.staleDays > 0 ? f.staleDays : 14;
-        sharedConds.push(
-          sql`${deals.stage} NOT IN ('won','lost')`,
-          sql`${deals.updatedAt} < NOW() - (${days}::int * INTERVAL '1 day')`,
-        );
-      }
-      if (f.companyIds && f.companyIds.length > 0) {
-        sharedConds.push(companyFilterCondition(tenantId, f.companyIds));
-      }
-      if (f.mine && options.currentUserId) {
-        sharedConds.push(eq(deals.ownerId, options.currentUserId));
-      }
-      if (f.unassigned) {
-        sharedConds.push(isNull(deals.ownerId));
-      }
-      if (f.ownerIds && f.ownerIds.length > 0) {
-        sharedConds.push(inArray(deals.ownerId, f.ownerIds));
-      }
-      if (f.awaitingApproval) {
-        sharedConds.push(
-          eq(deals.stage, 'won'),
-          eq(deals.approvalStatus, 'pending'),
-        );
-      }
-      if (f.approvedOnly) {
-        sharedConds.push(
-          eq(deals.stage, 'won'),
-          eq(deals.approvalStatus, 'approved'),
-        );
-      }
-      if (options.restrictToOwnerOrUnassigned) {
-        const me = options.restrictToOwnerOrUnassigned;
-        sharedConds.push(
-          sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`,
-        );
-      }
+      // hides stages the user didn't ask for). Factored into a helper
+      // so the infinite-scroll pager (listStageDealsPage) applies the
+      // exact same predicates.
+      const sharedConds = boardSharedConditions(tenantId, f, options);
 
       // If the user selected specific stages, skip the rest entirely
       // — keeps the round-trip count down and the empty columns at 0

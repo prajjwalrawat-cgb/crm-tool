@@ -36,10 +36,6 @@ export default async function DealsBoardPage({
       listTeammates(tenant.id, tenant.name),
     ]);
 
-    const cappedNotice = summary.capped
-      ? 'Showing the 50 most recent per stage; switch to the list view for the full pipeline.'
-      : null;
-
     return (
       <main className="flex min-h-[calc(100vh-3.5rem)] flex-col px-4 py-6 sm:px-6 lg:px-8">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -48,11 +44,6 @@ export default async function DealsBoardPage({
             <p className="mt-0.5 text-[12px] text-slate-500">
               {tenant.name} — drag deals across stages.
             </p>
-            {cappedNotice ? (
-              <p className="mt-1 text-xs text-amber-700">
-                {cappedNotice}
-              </p>
-            ) : null}
           </div>
           <DealViewTabs />
         </header>

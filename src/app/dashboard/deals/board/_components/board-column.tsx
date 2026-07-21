@@ -5,7 +5,8 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { memo, useMemo } from 'react';
+import { Loader2 } from 'lucide-react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 
 import { formatCurrency } from '@/lib/deals/currency';
 import { type DealStage, DEAL_STAGE_LABELS } from '@/lib/deals/schema';
@@ -29,12 +30,15 @@ const STAGE_HEADER_STYLES: Record<DealStage, string> = {
 type Props = {
   stage: DealStage;
   cards: BoardCard[];
-  /**
-   * Total deals in this stage (after RLS). When > cards.length the
-   * board has been capped and we surface "X / Y" + a "more in list" hint.
-   */
+  /** Total deals in this stage (after RLS) — the true column count. */
   totalCount: number;
   canMove: boolean;
+  /** More rows exist past what's loaded — render the scroll sentinel. */
+  hasMore: boolean;
+  /** A page fetch for this column is in flight. */
+  loadingMore: boolean;
+  /** Request the next page for this stage. */
+  onLoadMore: (stage: DealStage) => void;
 };
 
 /**
@@ -48,10 +52,32 @@ export const BoardColumn = memo(function BoardColumn({
   cards,
   totalCount,
   canMove,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: Props) {
   // Use the column's stage as its drop id. When a card is dropped on the
   // column body (not on another card), `event.over.id` will be the stage.
   const { setNodeRef, isOver } = useDroppable({ id: stage });
+
+  // Infinite scroll: observe a sentinel at the bottom of the column and pull
+  // the next page as it nears the viewport. The parent's ref-guard makes a
+  // repeat trigger while a fetch is in flight a no-op, so we can observe
+  // freely. rootMargin pre-fetches slightly before the sentinel is on screen.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) onLoadMore(stage);
+      },
+      { rootMargin: '240px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, onLoadMore, stage, cards.length]);
 
   // Sortable items are deal ids — passed as a stable string array so dnd-kit's
   // SortableContext doesn't reconcile every render.
@@ -82,13 +108,11 @@ export const BoardColumn = memo(function BoardColumn({
             className="shrink-0 text-xs font-medium tabular-nums text-slate-500"
             title={
               totalCount > cards.length
-                ? `Showing ${cards.length} of ${totalCount}`
-                : undefined
+                ? `${cards.length} of ${totalCount} loaded — scroll to load more`
+                : `${totalCount} in stage`
             }
           >
-            {totalCount > cards.length
-              ? `${cards.length} / ${totalCount}`
-              : cards.length}
+            {totalCount}
           </span>
           <span
             className={cn(
@@ -122,6 +146,24 @@ export const BoardColumn = memo(function BoardColumn({
           <p className="rounded-md border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400">
             Drop here
           </p>
+        ) : null}
+
+        {/* Infinite-scroll sentinel + loading affordance. Only present while
+            more rows remain, so a fully-loaded column shows nothing. */}
+        {hasMore ? (
+          <div
+            ref={sentinelRef}
+            className="flex items-center justify-center py-2 text-[11px] text-slate-400"
+          >
+            {loadingMore ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                Loading more…
+              </span>
+            ) : (
+              <span>Scroll to load more</span>
+            )}
+          </div>
         ) : null}
       </div>
     </section>
