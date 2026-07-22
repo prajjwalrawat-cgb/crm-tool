@@ -2,12 +2,15 @@
 
 import {
   closestCorners,
+  type CollisionDetection,
   DndContext,
   type DragEndEvent,
   DragOverlay,
   type DragStartEvent,
   KeyboardSensor,
+  pointerWithin,
   PointerSensor,
+  rectIntersection,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -327,6 +330,21 @@ export function BoardView({
     [initialFilters, startTransition],
   );
 
+  // Kanban collision detection. `closestCorners` alone can't target an EMPTY
+  // column: a short empty lane (e.g. Hold with no deals) loses the corner-
+  // distance contest to its tall, card-filled neighbours, so drops onto it
+  // never resolve and the card snaps back. Prefer `pointerWithin` (is the
+  // pointer inside this column?), which reliably hits empty lanes, then fall
+  // back to rect intersection and finally closestCorners for keyboard drags
+  // where there's no pointer. See dnd-kit multiple-containers guidance.
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) return pointerCollisions;
+    const rectCollisions = rectIntersection(args);
+    if (rectCollisions.length > 0) return rectCollisions;
+    return closestCorners(args);
+  }, []);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       // Larger activation distance + small delay so horizontal scroll
@@ -576,7 +594,7 @@ export function BoardView({
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
