@@ -55,6 +55,13 @@ export const ACTIVITY_ACTIONS = [
   'call_logged',
   /** Manually logged meeting (via the deal "Log activity" form). */
   'meeting_logged',
+  /**
+   * A `severity: 'warn'` stage gate failed but the transition was allowed
+   * anyway (Module 1). `metadata` carries `{ from, to, rules: [...] }` naming
+   * each warn rule that did not pass, so the deal timeline records what was
+   * skipped without blocking the rep.
+   */
+  'gate_warning',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

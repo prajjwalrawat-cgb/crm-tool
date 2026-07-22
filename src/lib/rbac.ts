@@ -55,6 +55,12 @@ const PERMISSIONS = {
   approveDeals: ['owner', 'admin', 'manager'],
   /** Setting per-member annual sales targets. Admin tier only. */
   manageTargets: ['owner', 'admin'],
+  /**
+   * Defining per-stage entry requirements ("Stage Gates" / Path, Module 1)
+   * and toggling per-workspace Phase-2 feature flags. Admin tier only —
+   * these change the rules every rep's deals are validated against.
+   */
+  manageStageGates: ['owner', 'admin'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -98,6 +104,8 @@ export const canRestoreDeals = (role: RoleArg) => can(role, 'restoreDeals');
 export const canAssignDeals = (role: RoleArg) => can(role, 'assignDeals');
 export const canApproveDeals = (role: RoleArg) => can(role, 'approveDeals');
 export const canManageTargets = (role: RoleArg) => can(role, 'manageTargets');
+export const canManageStageGates = (role: RoleArg) =>
+  can(role, 'manageStageGates');
 
 export const canHardDeleteCompanies = (role: RoleArg) =>
   can(role, 'hardDeleteCompanies');

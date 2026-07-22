@@ -17,6 +17,8 @@ import { listDealContacts } from '@/lib/deals/contacts';
 import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
 import { getDealStageHistory } from '@/lib/deals/stage-history';
+import { getPathBarGates } from '@/lib/stage-gates/evaluate';
+import { PATH_STAGES } from '@/lib/stage-gates/types';
 import { DEAL_STAGE_LABELS, DEAL_TYPE_LABELS } from '@/lib/deals/schema';
 import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
@@ -47,6 +49,7 @@ import { DealInlineHeader } from './_components/deal-inline-header';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { StageHistoryCard } from './_components/stage-history-card';
 import { SummaryCard } from './_components/summary-card';
+import { DealPathBar } from './_components/deal-path-bar';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -82,6 +85,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       dealContactRows,
       contactOptions,
       dealDocumentRows,
+      pathBarGates,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -96,6 +100,12 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       listDealContacts(tenant.id, deal.id),
       listContactOptions(tenant.id),
       listDealDocuments(tenant.id, deal.id),
+      // Path bar: live gate state for the forward funnel + current stage.
+      getPathBarGates(
+        tenant.id,
+        deal.id,
+        Array.from(new Set([...PATH_STAGES, deal.stage])),
+      ),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -168,6 +178,10 @@ export default async function DealDetailPage({ params }: { params: Params }) {
           canEdit={canEdit}
           tenantId={tenant.id}
         />
+
+        {pathBarGates.enabled ? (
+          <DealPathBar currentStage={deal.stage} byStage={pathBarGates.byStage} />
+        ) : null}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <EntityViewers

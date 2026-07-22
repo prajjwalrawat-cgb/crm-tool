@@ -42,6 +42,8 @@ import { loadMoreStageDealsAction } from '../actions';
 import { LostReasonModal } from '../../_components/lost-reason-modal';
 import { type BoardCard, DealCard } from './deal-card';
 import { BoardColumn } from './board-column';
+import { GateBlockPanel } from './gate-block-panel';
+import type { GateFailure } from '@/lib/stage-gates/types';
 
 type LocalBoard = Record<DealStage, BoardCard[]>;
 
@@ -237,6 +239,13 @@ export function BoardView({
   const [activeCard, setActiveCard] = useState<BoardCard | null>(null);
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // A drag rejected by a stage gate — drives the blocked-move slide-over.
+  const [gateBlock, setGateBlock] = useState<{
+    dealId: string;
+    dealName: string;
+    toStage: string;
+    failures: GateFailure[];
+  } | null>(null);
 
   // Per-column infinite scroll. `moreByStage` says whether more rows exist
   // past what's loaded; `loadingStages` drives the per-column spinner. A ref
@@ -435,7 +444,20 @@ export function BoardView({
         if (!result.ok) {
           setBoard(snapshot);
           lastKnownGoodRef.current = snapshot;
-          setError(result.message);
+          // A stage gate rejected the move → show the checklist slide-over with
+          // per-rule fixes rather than a bare toast.
+          if (result.blocked && result.failures) {
+            const dealName =
+              next[toStage].find((d) => d.id === dealId)?.name ?? 'this deal';
+            setGateBlock({
+              dealId,
+              dealName,
+              toStage,
+              failures: result.failures,
+            });
+          } else {
+            setError(result.message);
+          }
           return;
         }
 
@@ -637,6 +659,16 @@ export function BoardView({
             );
             setLostPrompt(null);
           }}
+        />
+      ) : null}
+
+      {gateBlock ? (
+        <GateBlockPanel
+          dealId={gateBlock.dealId}
+          dealName={gateBlock.dealName}
+          toStage={gateBlock.toStage}
+          failures={gateBlock.failures}
+          onClose={() => setGateBlock(null)}
         />
       ) : null}
     </div>

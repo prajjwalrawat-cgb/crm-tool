@@ -41,3 +41,5 @@ export * from './agent-patterns';
 export * from './agent-recommendation-feedback';
 export * from './organization-settings';
 export * from './relationship-signals';
+export * from './workspace-settings';
+export * from './stage-gates';

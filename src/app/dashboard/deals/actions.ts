@@ -40,6 +40,14 @@ import {
 } from '@/lib/deals/schema';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import {
+  blockMessage,
+  checkGateAndLogWarnings,
+  enforceGateOrThrow,
+  GateBlockedError,
+} from '@/lib/stage-gates/enforce';
+import { evaluateStageTransition } from '@/lib/stage-gates/evaluate';
+import { type GateFailure } from '@/lib/stage-gates/types';
 import { personaOf } from '@/lib/personas';
 import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
@@ -47,9 +55,27 @@ import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
 export type CreateDealResult =
   | { ok: true; deal: Deal }
-  | { ok: false; message: string; fieldErrors?: Record<string, string[]> };
+  | {
+      ok: false;
+      message: string;
+      fieldErrors?: Record<string, string[]>;
+      // Set when a stage gate blocked creating the deal directly at a gated stage.
+      blocked?: true;
+      failures?: GateFailure[];
+      toStage?: string;
+    };
 
-export type UpdateDealResult = CreateDealResult;
+export type UpdateDealResult =
+  | { ok: true; deal: Deal }
+  | {
+      ok: false;
+      message: string;
+      fieldErrors?: Record<string, string[]>;
+      // Set when a stage gate blocked a stage change made via the edit form.
+      blocked?: true;
+      failures?: GateFailure[];
+      toStage?: string;
+    };
 
 export type SimpleResult =
   | { ok: true }
@@ -284,7 +310,34 @@ export async function createDealAction(
           ? approvalOnEnterWon(membership.role, membership.userId, new Date())
           : null;
 
-      const created = await tenantTransaction(async (tx) => {
+      let created: Deal | null;
+      try {
+        created = await tenantTransaction(async (tx) => {
+        // Stage-gate enforcement for a deal created directly above Lead — treat
+        // it as a lead→stage transition. Count-based rules (stakeholders /
+        // activities) see 0 since the deal doesn't exist yet, so a deal can't be
+        // born past a gate it hasn't earned; create at Lead and advance instead.
+        if (parsed.data.stage !== 'lead') {
+          await enforceGateOrThrow(tx, {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            dealId: null,
+            dealName: parsed.data.name,
+            fromStage: 'lead',
+            toStage: parsed.data.stage,
+            override: {
+              contactId: links.contactId,
+              companyId: links.companyId,
+              amountMinor,
+              currency: parsed.data.currency,
+              expectedCloseDate: parsed.data.expectedCloseDate ?? null,
+              dealType: parsed.data.dealType ?? null,
+              description: parsed.data.description ?? null,
+              customFields: customResult.values,
+            },
+          });
+        }
+
         const [row] = await tx
           .insert(deals)
           .values({
@@ -331,7 +384,19 @@ export async function createDealAction(
           });
         }
         return row;
-      });
+        });
+      } catch (err) {
+        if (err instanceof GateBlockedError) {
+          return {
+            ok: false,
+            message: err.message,
+            blocked: true,
+            failures: err.failures,
+            toStage: err.toStage,
+          };
+        }
+        throw err;
+      }
 
       if (!created) return { ok: false, message: 'Failed to create deal.' };
 
@@ -468,7 +533,9 @@ export async function updateDealAction(
         ownerPatch = { ownerId: finalOwnerId };
       }
 
-      const result = await tenantTransaction(async (tx) => {
+      let result: Deal | null;
+      try {
+        result = await tenantTransaction(async (tx) => {
         const [previous] = await tx
           .select({
             id: deals.id,
@@ -486,6 +553,30 @@ export async function updateDealAction(
           )
           .limit(1);
         if (!previous) return null;
+
+        // Stage-gate enforcement when the edit changes the stage. The gate is
+        // evaluated against the values being SAVED (override) so setting the
+        // amount/contact and advancing in one submit is not wrongly blocked.
+        if (previous.stage !== parsed.data.stage) {
+          await enforceGateOrThrow(tx, {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            dealId: previous.id,
+            dealName: previous.name,
+            fromStage: previous.stage,
+            toStage: parsed.data.stage,
+            override: {
+              contactId: links.contactId,
+              companyId: links.companyId,
+              amountMinor,
+              currency: parsed.data.currency,
+              expectedCloseDate: parsed.data.expectedCloseDate ?? null,
+              dealType: parsed.data.dealType ?? null,
+              description: parsed.data.description ?? null,
+              customFields: customResult.values,
+            },
+          });
+        }
 
         let nextClosedAt: Date | null = previous.closedAt;
         if (isClosedStage && !previous.closedAt) nextClosedAt = new Date();
@@ -586,7 +677,19 @@ export async function updateDealAction(
         }
 
         return updated;
-      });
+        });
+      } catch (err) {
+        if (err instanceof GateBlockedError) {
+          return {
+            ok: false,
+            message: err.message,
+            blocked: true,
+            failures: err.failures,
+            toStage: err.toStage,
+          };
+        }
+        throw err;
+      }
 
       if (!result) {
         return { ok: false, message: 'Deal not found in this tenant.' };
@@ -616,17 +719,27 @@ const updateStageSchema = z.object({
   stage: z.enum(DEAL_STAGES, { message: 'Invalid stage' }),
   // Free-text reason captured when moving a deal to 'lost'.
   reason: z.string().max(1000).optional(),
+  // Justification captured for a `custom_note` stage gate on the target stage.
+  gateNote: z.string().max(2000).optional(),
 });
 
 export type UpdateDealStageInput = {
   id: string;
   stage: string;
   reason?: string;
+  gateNote?: string;
 };
 
 export type UpdateDealStageResult =
   | { ok: true; deal: Deal; changed: boolean }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      message: string;
+      // Set when a stage gate blocked the move — drives the board slide-over.
+      blocked?: true;
+      failures?: GateFailure[];
+      toStage?: string;
+    };
 
 export async function updateDealStageAction(
   input: UpdateDealStageInput,
@@ -668,7 +781,7 @@ export async function updateDealStageAction(
           )
           .limit(1);
         if (!previous) {
-          return { row: null, changed: false, previousStage: null };
+          return { row: null, changed: false, previousStage: null, blocked: null };
         }
 
         if (previous.stage === parsed.data.stage) {
@@ -681,6 +794,32 @@ export async function updateDealStageAction(
             row: unchanged ?? null,
             changed: false,
             previousStage: previous.stage,
+            blocked: null,
+          };
+        }
+
+        // Stage-gate enforcement: a pure stage move (no field edits ride along)
+        // is evaluated against the deal's current field values. A blocked move
+        // returns without writing — nothing to roll back.
+        const gate = await checkGateAndLogWarnings(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          dealId: previous.id,
+          dealName: previous.name,
+          fromStage: previous.stage,
+          toStage: parsed.data.stage,
+          gateNote: parsed.data.gateNote,
+        });
+        if (!gate.allowed) {
+          return {
+            row: null,
+            changed: false,
+            previousStage: previous.stage,
+            blocked: {
+              message: blockMessage(parsed.data.stage, gate.failures),
+              failures: gate.failures,
+              toStage: parsed.data.stage,
+            },
           };
         }
 
@@ -728,7 +867,7 @@ export async function updateDealStageAction(
           )
           .returning();
         if (!updated) {
-          return { row: null, changed: false, previousStage: previous.stage };
+          return { row: null, changed: false, previousStage: previous.stage, blocked: null };
         }
 
         await recordActivity(tx, {
@@ -791,8 +930,20 @@ export async function updateDealStageAction(
           row: updated,
           changed: true,
           previousStage: previous.stage,
+          blocked: null,
         };
       });
+
+      // A stage gate rejected the move (nothing was written).
+      if (result.blocked) {
+        return {
+          ok: false,
+          message: result.blocked.message,
+          blocked: true,
+          failures: result.blocked.failures,
+          toStage: result.blocked.toStage,
+        };
+      }
 
       if (!result.row) {
         return { ok: false, message: 'Deal not found in this tenant.' };
@@ -1788,6 +1939,9 @@ export async function bulkUploadDealsAction(
         .defaultCurrency as (typeof KNOWN_CURRENCIES)[number];
       const errors: Array<{ row: number; message: string }> = [];
       const toInsert: typeof deals.$inferInsert[] = [];
+      // Parallel to `toInsert`: the source CSV row (1-based) for each candidate,
+      // used to report per-row stage-gate rejections below.
+      const toInsertRows: number[] = [];
 
       for (let i = 1; i < rows.length; i++) {
         const cells = rows[i];
@@ -1883,18 +2037,56 @@ export async function bulkUploadDealsAction(
           lostReason,
           ownerId: membership.userId,
         });
+        toInsertRows.push(i + 1);
       }
 
       let inserted = 0;
       if (toInsert.length > 0) {
         const result = await tenantTransaction(async (tx) => {
+          // Stage-gate enforcement for the batch. A CSV row importing a deal
+          // directly above Lead is a lead→stage transition; rows that fail a
+          // block rule are dropped from the insert and reported per-row (the
+          // partial-success contract), never silently accepted. `withValues`
+          // holds only the survivors so the multi-row INSERT stays one round-trip.
+          const withValues: typeof deals.$inferInsert[] = [];
+          for (let k = 0; k < toInsert.length; k++) {
+            const values = toInsert[k]!;
+            const srcRow = toInsertRows[k]!;
+            const stage = values.stage as (typeof DEAL_STAGES)[number];
+            if (stage && stage !== 'lead') {
+              const g = await evaluateStageTransition(tx, {
+                tenantId: tenant.id,
+                dealId: null,
+                fromStage: 'lead',
+                toStage: stage,
+                override: {
+                  companyId: values.companyId ?? null,
+                  contactId: values.contactId ?? null,
+                  amountMinor: values.amountMinor ?? 0,
+                  currency: values.currency ?? 'INR',
+                  expectedCloseDate: values.expectedCloseDate ?? null,
+                  description: values.description ?? null,
+                },
+              });
+              if (!g.allowed) {
+                const blockers = g.failures.filter((f) => f.severity === 'block');
+                errors.push({
+                  row: srcRow,
+                  message: `Stage gate: ${blockers.map((b) => b.message).join('; ')}`,
+                });
+                continue;
+              }
+            }
+            withValues.push(values);
+          }
+          if (withValues.length === 0) return 0;
           // Single multi-row INSERT — fast, atomic, and we don't
           // bother emitting realtime events per row to avoid a
           // notification storm. The list/board pages revalidate
           // below and rehydrate from the DB instead.
           const inserted = await tx
             .insert(deals)
-            .values(toInsert)
+            .values(withValues)
             .returning({ id: deals.id, name: deals.name });
           for (const row of inserted) {
             await recordActivity(tx, {
