@@ -123,6 +123,8 @@ type RawJoinedRow = {
   updatedBy: string | null;
   healthScore: number | null;
   healthBand: string | null;
+  forecastCategory: string | null;
+  forecastCategoryOverridden: boolean;
   companyName: string | null;
   contactFirstName: string | null;
   contactLastName: string | null;
@@ -166,6 +168,8 @@ const DEALS_PROJECTION = {
   updatedBy: deals.updatedBy,
   healthScore: deals.healthScore,
   healthBand: deals.healthBand,
+  forecastCategory: deals.forecastCategory,
+  forecastCategoryOverridden: deals.forecastCategoryOverridden,
   // Display name: the typed free-text label takes precedence, falling back
   // to the linked company record's name (legacy/linked deals).
   companyName: sql<string | null>`coalesce(${deals.companyNameText}, ${companies.name})`,

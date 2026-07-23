@@ -71,6 +71,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/dashboard/executive', label: 'Executive', icon: Sparkles },
+      { href: '/dashboard/executive/forecast', label: 'Forecast', icon: LineChart },
       { href: '/dashboard/team', label: 'Team', icon: UserCog },
       { href: '/dashboard/activity', label: 'Activity', icon: Activity },
     ],
@@ -121,6 +122,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
     label: 'Workspace',
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/dashboard/executive/forecast', label: 'Forecast', icon: LineChart },
       {
         href: '/dashboard/reports/rep-performance',
         label: 'Team Performance',
@@ -272,6 +274,9 @@ export function navItemsForPersona(persona: Persona): readonly NavItem[] {
  */
 const EXACT_MATCH_HREFS = new Set([
   '/dashboard',
+  // Executive is a prefix of /executive/forecast — exact-match so Forecast
+  // doesn't light up both nav rows.
+  '/dashboard/executive',
   '/dashboard/deals/board',
   '/dashboard/my-performance',
   '/dashboard/reports/revenue-forecast',

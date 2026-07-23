@@ -10,6 +10,10 @@ import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
+import {
+  deriveForecastCategory,
+  FORECAST_CATEGORIES,
+} from '@/lib/deals/forecast/categories';
 
 const inputSchema = z.object({
   dealId: z.uuid({ message: 'Invalid deal id' }),
@@ -232,6 +236,102 @@ export async function updateDealFieldAction(
 
       revalidatePath(`/dashboard/deals/${parsed.data.dealId}`);
       return { ok: true, value };
+    },
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Forecast category override (Module 4)                               */
+/* ------------------------------------------------------------------ */
+
+const forecastCategorySchema = z.object({
+  dealId: z.uuid({ message: 'Invalid deal id' }),
+  // 'auto' clears the override and re-derives from the current stage.
+  category: z.enum([...FORECAST_CATEGORIES, 'auto']),
+});
+
+export type UpdateForecastCategoryResult =
+  | { ok: true; category: string; overridden: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Manually set (or reset) a deal's forecast category. Setting an explicit
+ * category flips `forecast_category_overridden = true` so subsequent stage
+ * changes leave it alone — the override is the point of forecast categories.
+ * Passing 'auto' clears the override and re-derives from the current stage.
+ * Manager/admin only (they own the forecast).
+ */
+export async function updateDealForecastCategoryAction(
+  input: unknown,
+): Promise<UpdateForecastCategoryResult> {
+  const parsed = forecastCategorySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, message: 'Invalid forecast category.' };
+
+  const gate = await checkPermission('manageForecast'); // manager tier and above
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  return await runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      const result = await tenantTransaction(async (tx) => {
+        const [deal] = await tx
+          .select({ id: deals.id, stage: deals.stage, name: deals.name })
+          .from(deals)
+          .where(
+            and(
+              eq(deals.id, parsed.data.dealId),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!deal) return null;
+
+        const isAuto = parsed.data.category === 'auto';
+        const category = isAuto
+          ? deriveForecastCategory(deal.stage)
+          : parsed.data.category;
+
+        const [row] = await tx
+          .update(deals)
+          .set({
+            forecastCategory: category,
+            forecastCategoryOverridden: !isAuto,
+            updatedBy: membership.userId,
+          })
+          .where(
+            and(
+              eq(deals.id, parsed.data.dealId),
+              eq(deals.tenantId, tenant.id),
+              isNull(deals.deletedAt),
+            ),
+          )
+          .returning({ forecastCategory: deals.forecastCategory });
+        if (!row) return null;
+
+        await recordActivity(tx, {
+          tenantId: tenant.id,
+          actorUserId: membership.userId,
+          entityType: 'deal',
+          entityId: deal.id,
+          action: 'updated',
+          metadata: {
+            name: deal.name,
+            field: 'forecast_category',
+            value: category,
+            overridden: !isAuto,
+          },
+        });
+
+        return { category, overridden: !isAuto };
+      });
+
+      if (!result) return { ok: false, message: 'Deal not found in this tenant.' };
+
+      revalidatePath(`/dashboard/deals/${parsed.data.dealId}`);
+      revalidatePath('/dashboard/executive/forecast');
+      return { ok: true, category: result.category, overridden: result.overridden };
     },
   );
 }

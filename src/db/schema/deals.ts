@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   date,
   index,
   integer,
@@ -110,6 +111,16 @@ export const deals = pgTable(
      */
     healthScore: smallint('health_score'),
     healthBand: text('health_band'),
+    /**
+     * Forecast category (Module 4): pipeline | best_case | commit | closed_won
+     * | omitted. Auto-derived from stage unless `forecastCategoryOverridden` is
+     * true, in which case a manager set it explicitly and stage changes leave it
+     * alone. NULL = pre-migration; treated as the stage-derived default.
+     */
+    forecastCategory: text('forecast_category'),
+    forecastCategoryOverridden: boolean('forecast_category_overridden')
+      .notNull()
+      .default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()

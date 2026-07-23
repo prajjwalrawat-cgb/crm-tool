@@ -24,7 +24,12 @@ import { DEAL_STAGE_LABELS, DEAL_TYPE_LABELS } from '@/lib/deals/schema';
 import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
 import { listNotesForEntity } from '@/lib/notes/queries';
-import { canApproveDeals, canAssignDeals, canManageDeals } from '@/lib/rbac';
+import {
+  canApproveDeals,
+  canAssignDeals,
+  canManageDeals,
+  canManageForecast,
+} from '@/lib/rbac';
 import { listTasksForEntity } from '@/lib/tasks/queries';
 import { listTeammates } from '@/lib/teammates/queries';
 import { getEntityTimeline } from '@/lib/timeline/queries';
@@ -52,6 +57,7 @@ import { StageHistoryCard } from './_components/stage-history-card';
 import { SummaryCard } from './_components/summary-card';
 import { DealPathBar } from './_components/deal-path-bar';
 import { DealScoreCard } from './_components/deal-score-card';
+import { ForecastCategorySelect } from './_components/forecast-category-select';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -132,6 +138,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     // to an owner, so they pick from the team minus owners.
     const canAssign = canAssignDeals(membership.role);
     const canApprove = canApproveDeals(membership.role);
+    const canForecast = canManageForecast(membership.role);
     const assignableTeammates =
       membership.role === 'owner'
         ? teammates
@@ -268,6 +275,12 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                     ? dateFormatter.format(new Date(deal.expectedCloseDate))
                     : '—'
                 }
+              />
+              <ForecastCategorySelect
+                dealId={deal.id}
+                current={deal.forecastCategory ?? null}
+                overridden={deal.forecastCategoryOverridden}
+                canEdit={canForecast}
               />
               <StageHistoryCard
                 entries={stageHistory.entries.map((e) => ({

@@ -104,6 +104,8 @@ export async function loadSerializedDeal(
       updatedBy: deals.updatedBy,
       healthScore: deals.healthScore,
       healthBand: deals.healthBand,
+      forecastCategory: deals.forecastCategory,
+      forecastCategoryOverridden: deals.forecastCategoryOverridden,
       companyName: companies.name,
       contactFirstName: contacts.firstName,
       contactLastName: contacts.lastName,

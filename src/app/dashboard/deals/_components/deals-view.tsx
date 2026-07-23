@@ -394,6 +394,8 @@ export function DealsView({
       // value, which arrives via realtime/refresh. Carry any known value.
       healthScore: base?.healthScore ?? null,
       healthBand: base?.healthBand ?? null,
+      forecastCategory: base?.forecastCategory ?? null,
+      forecastCategoryOverridden: base?.forecastCategoryOverridden ?? false,
       __pending: true,
     };
   }

@@ -61,6 +61,11 @@ const PERMISSIONS = {
    * these change the rules every rep's deals are validated against.
    */
   manageStageGates: ['owner', 'admin'],
+  /**
+   * Overriding a deal's forecast category (Module 4). Manager tier and above —
+   * the forecast is a manager-owned view, but reps don't reclassify it.
+   */
+  manageForecast: ['owner', 'admin', 'manager'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -106,6 +111,7 @@ export const canApproveDeals = (role: RoleArg) => can(role, 'approveDeals');
 export const canManageTargets = (role: RoleArg) => can(role, 'manageTargets');
 export const canManageStageGates = (role: RoleArg) =>
   can(role, 'manageStageGates');
+export const canManageForecast = (role: RoleArg) => can(role, 'manageForecast');
 
 export const canHardDeleteCompanies = (role: RoleArg) =>
   can(role, 'hardDeleteCompanies');

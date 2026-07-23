@@ -49,6 +49,7 @@ import {
 import { evaluateStageTransition } from '@/lib/stage-gates/evaluate';
 import { type GateFailure } from '@/lib/stage-gates/types';
 import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
+import { deriveForecastCategory } from '@/lib/deals/forecast/categories';
 import { personaOf } from '@/lib/personas';
 import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
@@ -364,6 +365,8 @@ export async function createDealAction(
             closedAt,
             ownerId: finalOwnerId ?? null,
             customFields: customResult.values,
+            // Forecast category auto-derived from the starting stage (Module 4).
+            forecastCategory: deriveForecastCategory(parsed.data.stage),
             updatedBy: membership.userId,
           })
           .returning();
@@ -544,6 +547,7 @@ export async function updateDealAction(
             stage: deals.stage,
             name: deals.name,
             closedAt: deals.closedAt,
+            forecastCategoryOverridden: deals.forecastCategoryOverridden,
           })
           .from(deals)
           .where(
@@ -622,6 +626,12 @@ export async function updateDealAction(
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt: nextClosedAt,
             customFields: customResult.values,
+            // Re-derive forecast category if the stage changed and it isn't
+            // manually overridden (Module 4).
+            ...(previous.stage !== parsed.data.stage &&
+            !previous.forecastCategoryOverridden
+              ? { forecastCategory: deriveForecastCategory(parsed.data.stage) }
+              : {}),
             updatedBy: membership.userId,
             ...ownerPatch,
           })
@@ -773,6 +783,7 @@ export async function updateDealStageAction(
             stage: deals.stage,
             name: deals.name,
             closedAt: deals.closedAt,
+            forecastCategoryOverridden: deals.forecastCategoryOverridden,
           })
           .from(deals)
           .where(
@@ -859,6 +870,11 @@ export async function updateDealStageAction(
               approvedBy: approvalPatch.approvedBy,
               approvedAt: approvalPatch.approvedAt,
             }),
+            // Re-derive the forecast category on stage change — unless a manager
+            // has manually overridden it (Module 4).
+            ...(previous.forecastCategoryOverridden
+              ? {}
+              : { forecastCategory: deriveForecastCategory(parsed.data.stage) }),
             updatedBy: membership.userId,
           })
           .where(
