@@ -20,6 +20,7 @@ export type ChartKey =
 /* ============================================================ */
 
 export type RevenueTrendVariant =
+  | 'weekly'
   | 'area'
   | 'line'
   | 'bar'
@@ -31,6 +32,12 @@ export const REVENUE_TREND_VARIANTS: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
+  {
+    value: 'weekly',
+    label: 'Weekly + outcomes',
+    description:
+      'Weekly pipeline bars with won/lost on their own right-hand axis.',
+  },
   {
     value: 'area',
     label: 'Area chart',
@@ -132,8 +139,14 @@ export type RevenueTrendConfig = {
   display: RevenueTrendDisplay;
 };
 
+/**
+ * `weekly` is the default: pipeline creation is lumpy and event-based,
+ * so a daily line implies continuity that isn't there, and a single
+ * shared linear axis lets one outlier day flatten won/lost revenue to
+ * the baseline. The other variants remain available in Studio.
+ */
 export const DEFAULT_REVENUE_TREND_CONFIG: RevenueTrendConfig = {
-  variant: 'area',
+  variant: 'weekly',
   metric: 'revenue',
   display: {
     showLegend: true,

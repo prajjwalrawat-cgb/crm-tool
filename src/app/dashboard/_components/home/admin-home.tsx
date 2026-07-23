@@ -1,16 +1,11 @@
 import { currentUser } from '@/lib/auth/server';
 import {
-  AlertTriangle,
-  Brain,
-  CheckCircle2,
   ChevronRight,
   Cog,
   Gauge,
-  Mail,
   Radar,
   Sparkles,
   Workflow as WorkflowIcon,
-  XCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -20,15 +15,12 @@ import {
   readStageDonutView,
 } from '@/lib/chart-studio/queries';
 import { getInboxCounts } from '@/lib/communications/threads/queries';
-import {
-  formatCompactTenantCurrency,
-  formatTenantCurrency,
-} from '@/lib/currency/format';
-import {
-  getDashboardOverview,
-  getRevenueTrend,
-  getWorkflowHealth,
-} from '@/lib/dashboard/queries';
+import { getDealHighlights } from '@/lib/dashboard/highlights';
+import { getDashboardKpis } from '@/lib/dashboard/kpis';
+import { getDashboardOverview, getRevenueTrend } from '@/lib/dashboard/queries';
+import { isoDay, type DashboardRange } from '@/lib/dashboard/range';
+import { dealFiltersToSearchParams } from '@/lib/deals/filters';
+import { resolveStageProbabilities } from '@/lib/deals/stage-probability';
 import {
   getRecommendationInsight,
   getRiskFlagInsight,
@@ -40,10 +32,14 @@ import {
 } from '@/lib/ops/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
-import type { OwnerScope } from '@/lib/reports/types';
+import type { DateRangePreset, OwnerScope } from '@/lib/reports/types';
 import { listTeammates } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
+import { DashboardRangeFilter } from '../dashboard-range-filter';
+import { DealHighlightsCard } from '../deal-highlights';
+import { KpiStrip } from '../kpi-strip';
+import { buildOpsChecks, OpsStatusStrip } from '../ops-status-strip';
 import { RevenueTrendChart } from '../revenue-trend-chart';
 import { StageConversionBars } from '../stage-conversion-bars';
 import { StageDonut } from '../stage-donut';
@@ -52,38 +48,51 @@ import { Greeting } from './greeting';
 import { RepFilter } from './rep-filter';
 
 /**
- * Admin Home — operational + business visibility for the org's
- * caretaker. Composes the same revenue funnel everyone else sees
- * (scoped org-wide), plus ops health (AI usage, email delivery,
- * workflow runs, inbox failures) and AI insight summaries.
+ * Admin Home — the org's main dashboard.
  *
- * Admin gets the most surfaces, but the page is still organized
- * around the funnel — the question "is the business closing?" matters
- * to admins too. Ops health lives below the funnel, not above it.
+ * Layout, top to bottom:
+ *   1. Filters (owner scope + shared date range)
+ *   2. KPI strip — headline numbers with vs-prior-period deltas
+ *   3. Revenue trend — weekly pipeline bars + won/lost overlay
+ *   4. Pipeline by stage (snapshot) + deal-count donut
+ *   5. Key deal highlights — what actually moved
+ *   6. Operations, collapsed to a one-line status strip
+ *   7. AI signals + admin shortcuts
+ *
+ * ONE time window drives 2, 3 and 5 (`?range=` via `DashboardRange`).
+ * Item 4 is deliberately range-independent: `pipelineByStageRunner`
+ * returns a current-state snapshot, which its subtitle now says
+ * out loud instead of implying a funnel over the period.
  */
 export async function AdminHome({
   tenantId,
   tenantName,
   userId,
   view,
+  range,
 }: {
   tenantId: string;
   tenantName: string;
   userId: string;
   view: { mode: 'team' } | { mode: 'rep'; userId: string };
+  range: DashboardRange;
 }) {
-  // The org-level KPIs + ops health stay org-wide; the pipeline funnel, donut
-  // and revenue trend rescope to a single rep when one is selected.
+  // Org-wide by default; a selected rep rescopes every deal-derived
+  // surface on the page (KPIs, trend, funnel, highlights).
+  const ownerId = view.mode === 'rep' ? view.userId : null;
   const ownerScope: OwnerScope =
     view.mode === 'rep' ? { type: 'user', userId: view.userId } : { type: 'all' };
 
+  const settings = await getOrgSettings(tenantId);
+  const probabilities = resolveStageProbabilities(settings.stageProbabilities);
+
   const [
     user,
-    settings,
     overview,
     pipeline,
     trend,
-    workflowHealth,
+    kpis,
+    highlights,
     workflowStats,
     aiStats,
     emailStats,
@@ -96,18 +105,27 @@ export async function AdminHome({
     savedStageDonutView,
   ] = await Promise.all([
     currentUser(),
-    getOrgSettings(tenantId),
     getDashboardOverview(tenantId),
     pipelineByStageRunner(
       tenantId,
-      { range: 'last_90d', owner: ownerScope },
+      {
+        // Snapshot report — the runner ignores `range` by design. Passed
+        // through so the call stays honest if that ever changes.
+        range: (range.preset === 'custom'
+          ? 'last_90d'
+          : range.preset) as DateRangePreset,
+        owner: ownerScope,
+      },
       { currentUserId: userId },
     ),
-    getRevenueTrend(tenantId, {
-      days: 90,
-      ownerId: view.mode === 'rep' ? view.userId : null,
+    getRevenueTrend(tenantId, { days: range.days, ownerId }),
+    getDashboardKpis(tenantId, {
+      range,
+      ownerId,
+      probabilities,
+      fiscalYearStartMonth: settings.fiscalYearStartMonth,
     }),
-    getWorkflowHealth(tenantId, 7),
+    getDealHighlights(tenantId, { range, ownerId }),
     getWorkflowStats(tenantId, 24),
     getAiInvocationStats(tenantId, 24),
     getEmailDeliveryStats(tenantId, 24),
@@ -122,24 +140,24 @@ export async function AdminHome({
 
   const focusedRep =
     view.mode === 'rep'
-      ? teammates.find((t) => t.id === view.userId) ?? null
+      ? (teammates.find((t) => t.id === view.userId) ?? null)
       : null;
   const scopeLabel =
-    view.mode === 'rep'
-      ? focusedRep?.displayName ?? 'Selected rep'
-      : null;
+    view.mode === 'rep' ? (focusedRep?.displayName ?? 'Selected rep') : null;
 
-  const money = (m: number) =>
-    settings.compactNumbers
-      ? formatCompactTenantCurrency(m, settings)
-      : formatTenantCurrency(m, settings);
+  const ownerNames = Object.fromEntries(
+    teammates.map((t) => [t.id, t.displayName]),
+  );
 
   const recsCount = recs.content?.recommendations.length ?? 0;
   const risksCount = risks.content?.flags.length ?? 0;
-  const aiErrorRate =
-    aiStats.totalCalls > 0
-      ? aiStats.errorCount / aiStats.totalCalls
-      : 0;
+
+  const opsChecks = buildOpsChecks({
+    workflowStats,
+    aiStats,
+    emailStats,
+    inbox,
+  });
 
   return (
     <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -150,28 +168,33 @@ export async function AdminHome({
         className="mb-3"
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <RepFilter teammates={teammates} value={view} />
+        <DashboardRangeFilter range={range} />
+        {/* Record counts don't belong in the KPI strip (no meaningful
+            period delta), but they're still worth a glance. */}
+        <span className="ml-auto hidden flex-wrap items-center gap-x-3 text-[11px] text-slate-500 sm:flex dark:text-[#A1A1AA]">
+          <CountChip label="companies" value={overview.companies} />
+          <CountChip label="contacts" value={overview.contacts} />
+          <CountChip label="active deals" value={overview.dealsActive} />
+        </span>
       </div>
 
-      {/* Org-level numbers at a glance */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        <OrgKpi label="Companies" value={overview.companies.toLocaleString()} />
-        <OrgKpi label="Contacts" value={overview.contacts.toLocaleString()} />
-        <OrgKpi label="Active deals" value={overview.dealsActive.toLocaleString()} />
-        <OrgKpi label="Pipeline" value={money(overview.pipelineMinor)} mono />
-        <OrgKpi label="Won · 30d" value={overview.wonRecent.toLocaleString()} tone="emerald" />
-        <OrgKpi label="Lost · 30d" value={overview.lostRecent.toLocaleString()} tone="rose" />
-      </div>
+      <KpiStrip
+        kpis={kpis}
+        currency={settings}
+        range={range}
+        fiscalYearStartMonth={settings.fiscalYearStartMonth}
+      />
 
-      {/* Hero — org-wide revenue trend chart. Currency CONTEXT (not
-          a formatter function) crosses the RSC boundary cleanly. */}
-      <div className="mt-5">
+      <div className="mt-4">
         <RevenueTrendChart
           data={trend}
           currency={settings}
-          title={scopeLabel ? `${scopeLabel} · revenue trend` : 'Organization revenue trend'}
-          subtitle={`Last 90 days · ${tenantName}`}
+          title={
+            scopeLabel ? `${scopeLabel} · revenue trend` : 'Organization revenue trend'
+          }
+          subtitle={`${range.label} · ${tenantName}`}
           initialConfig={savedChartView?.config ?? null}
           initialTitleOverride={savedChartView?.title ?? null}
           persona="admin"
@@ -183,8 +206,13 @@ export async function AdminHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-2"
-          title={scopeLabel ? `${scopeLabel} pipeline by stage` : 'Organization pipeline by stage'}
-          subtitle="Revenue-weighted bars · stage-to-stage conversion"
+          title={
+            scopeLabel
+              ? `${scopeLabel} pipeline by stage`
+              : 'Organization pipeline by stage'
+          }
+          subtitle="Revenue-weighted bars · deals currently in stage (live snapshot, not the selected period)"
+          stageProbabilities={probabilities}
           initialConfig={savedStageConversionView?.config ?? null}
           initialTitleOverride={savedStageConversionView?.title ?? null}
           persona="admin"
@@ -194,7 +222,11 @@ export async function AdminHome({
           currency={settings}
           className="lg:col-span-1"
           title={scopeLabel ? `${scopeLabel} — deals` : 'Organization-wide'}
-          subtitle={scopeLabel ? 'Deal-count distribution' : 'Deal-count distribution across all owners'}
+          subtitle={
+            scopeLabel
+              ? 'Deal-count distribution'
+              : 'Deal-count distribution across all owners'
+          }
           initialConfig={savedStageDonutView?.config ?? null}
           initialTitleOverride={savedStageDonutView?.title ?? null}
           persona="admin"
@@ -202,14 +234,16 @@ export async function AdminHome({
       </div>
 
       <div className="mt-4">
-        <OpsHealthCard
-          workflowStats={workflowStats}
-          workflowHealth={workflowHealth}
-          aiStats={aiStats}
-          aiErrorRate={aiErrorRate}
-          emailStats={emailStats}
-          inbox={inbox}
+        <DealHighlightsCard
+          highlights={highlights}
+          ownerNames={ownerNames}
+          rangeLabel={range.label}
+          viewAllHrefs={buildHighlightHrefs(ownerId, highlights.atRisk.idleDays, highlights.closingSoon.lookAheadDays)}
         />
+      </div>
+
+      <div className="mt-4">
+        <OpsStatusStrip checks={opsChecks} />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -222,234 +256,56 @@ export async function AdminHome({
 
 /* ============================================================ */
 
-function OrgKpi({
-  label,
-  value,
-  tone = 'slate',
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  tone?: 'slate' | 'emerald' | 'rose';
-  mono?: boolean;
-}) {
-  const valueClass = {
-    slate: 'text-slate-900 dark:text-[#FAFAFA]',
-    emerald: 'text-emerald-700 dark:text-emerald-300',
-    rose: 'text-rose-700 dark:text-rose-300',
-  }[tone];
-  // Container query + clamp() — value scales with card width so long
-  // currency strings (₹14,541,000, ₹987,654,321) fit without clipping.
-  return (
-    <div className="@container overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
-      <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
-        {label}
-      </div>
-      <div
-        className={cn(
-          'mt-1 whitespace-nowrap text-[clamp(13px,8cqi,18px)] font-semibold leading-none tabular-nums tracking-tight',
-          mono && 'font-mono text-[clamp(11px,7cqi,14px)]',
-          valueClass,
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================ */
-/* Ops health card                                               */
-/* ============================================================ */
-
-function OpsHealthCard({
-  workflowStats,
-  workflowHealth,
-  aiStats,
-  aiErrorRate,
-  emailStats,
-  inbox,
-  className,
-}: {
-  workflowStats: {
-    totalRuns: number;
-    running: number;
-    completed: number;
-    failed: number;
+/**
+ * "View all →" destinations, built from the canonical deals filter
+ * contract (`lib/deals/filters.ts`) so each link really does land on
+ * the same set the section is showing.
+ *
+ * `progressed` has no equivalent deals-list filter — stage moves live
+ * in the activity stream, so it points there rather than at a
+ * mis-filtered deals view.
+ */
+function buildHighlightHrefs(
+  ownerId: string | null,
+  idleDays: number,
+  lookAheadDays: number,
+) {
+  const owner = ownerId ? { ownerIds: [ownerId] } : {};
+  const deals = (qs: URLSearchParams) => {
+    const s = qs.toString();
+    return s ? `/dashboard/deals?${s}` : '/dashboard/deals';
   };
-  workflowHealth: { lastSuccessAt: Date | null; oldestRunningAt: Date | null };
-  aiStats: {
-    totalCalls: number;
-    successCount: number;
-    errorCount: number;
-    totalTokens: number;
+  const today = new Date();
+  const horizon = new Date(today.getTime() + lookAheadDays * 86_400_000);
+
+  return {
+    bigWins: deals(dealFiltersToSearchParams({ ...owner, stages: ['won'] })),
+    // Activity feed is the only surface that lists stage transitions.
+    progressed: '/dashboard/activity',
+    // Deals list is ordered created_at DESC by default — newest first.
+    newDeals: deals(dealFiltersToSearchParams({ ...owner })),
+    atRisk: deals(
+      dealFiltersToSearchParams({ ...owner, stale: true, staleDays: idleDays }),
+    ),
+    closingSoon: deals(
+      dealFiltersToSearchParams({
+        ...owner,
+        expectedCloseFrom: isoDay(today),
+        expectedCloseTo: isoDay(horizon),
+      }),
+    ),
   };
-  aiErrorRate: number;
-  emailStats: { sent: number; failed: number; exhausted: number };
-  inbox: { active: number; unread: number; failed: number };
-  className?: string;
-}) {
-  return (
-    <section
-      className={cn(
-        'rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
-        className,
-      )}
-    >
-      <header className="mb-3 flex items-baseline justify-between gap-3">
-        <div>
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
-            <Gauge className="h-3 w-3" aria-hidden />
-            Operations
-          </div>
-          <h2 className="mt-2 text-[14px] font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">
-            Platform health · last 24h
-          </h2>
-        </div>
-        <Link
-          href="/dashboard/ops"
-          className="inline-flex items-center gap-0.5 text-[11px] font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-300"
-        >
-          Operations <ChevronRight className="h-3 w-3" aria-hidden />
-        </Link>
-      </header>
-
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <HealthTile
-          icon={WorkflowIcon}
-          label="Workflows"
-          primary={`${workflowStats.completed}/${workflowStats.totalRuns}`}
-          secondary={
-            workflowStats.failed > 0
-              ? `${workflowStats.failed} failed`
-              : workflowStats.running > 0
-                ? `${workflowStats.running} running`
-                : 'all clear'
-          }
-          tone={
-            workflowStats.failed > 0
-              ? 'danger'
-              : workflowStats.running > 0
-                ? 'info'
-                : 'success'
-          }
-        />
-        <HealthTile
-          icon={Brain}
-          label="AI calls"
-          primary={aiStats.totalCalls.toLocaleString()}
-          secondary={
-            aiStats.errorCount > 0
-              ? `${Math.round(aiErrorRate * 100)}% errors`
-              : `${aiStats.totalTokens.toLocaleString()} tok`
-          }
-          tone={
-            aiStats.errorCount > 0 && aiErrorRate > 0.1
-              ? 'danger'
-              : aiStats.errorCount > 0
-                ? 'warning'
-                : 'success'
-          }
-        />
-        <HealthTile
-          icon={Mail}
-          label="Email"
-          primary={emailStats.sent.toLocaleString()}
-          secondary={
-            emailStats.exhausted > 0
-              ? `${emailStats.exhausted} exhausted`
-              : emailStats.failed > 0
-                ? `${emailStats.failed} retrying`
-                : 'all sent'
-          }
-          tone={
-            emailStats.exhausted > 0
-              ? 'danger'
-              : emailStats.failed > 0
-                ? 'warning'
-                : 'success'
-          }
-        />
-        <HealthTile
-          icon={Radar}
-          label="Inbox"
-          primary={inbox.active.toLocaleString()}
-          secondary={
-            inbox.failed > 0
-              ? `${inbox.failed} failed`
-              : inbox.unread > 0
-                ? `${inbox.unread} unread`
-                : 'clean'
-          }
-          tone={
-            inbox.failed > 0
-              ? 'danger'
-              : inbox.unread > 0
-                ? 'info'
-                : 'success'
-          }
-        />
-      </div>
-
-      {workflowHealth.oldestRunningAt && workflowStats.running > 0 ? (
-        <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-[11px] dark:border-amber-500/30 dark:bg-amber-500/10">
-          <AlertTriangle
-            className="mt-0.5 h-3 w-3 flex-shrink-0 text-amber-600 dark:text-amber-300"
-            aria-hidden
-          />
-          <span className="text-amber-800 dark:text-amber-200">
-            Oldest running workflow started{' '}
-            {formatRelative(workflowHealth.oldestRunningAt)} ago — check Operations.
-          </span>
-        </div>
-      ) : null}
-    </section>
-  );
 }
 
-function HealthTile({
-  icon: Icon,
-  label,
-  primary,
-  secondary,
-  tone,
-}: {
-  icon: typeof Gauge;
-  label: string;
-  primary: string;
-  secondary: string;
-  tone: 'success' | 'info' | 'warning' | 'danger';
-}) {
-  const toneClass = {
-    success: 'border-emerald-200/60 bg-emerald-50/40 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/5 dark:text-emerald-300',
-    info: 'border-indigo-200/60 bg-indigo-50/40 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/5 dark:text-indigo-300',
-    warning: 'border-amber-200/60 bg-amber-50/40 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-300',
-    danger: 'border-rose-200/60 bg-rose-50/40 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/5 dark:text-rose-300',
-  }[tone];
-  const IconStatus = tone === 'success' ? CheckCircle2 : tone === 'danger' ? XCircle : Icon;
+function CountChip({ label, value }: { label: string; value: number }) {
   return (
-    <div className={cn('rounded-lg border px-2.5 py-2', toneClass)}>
-      <div className="flex items-center gap-1.5">
-        <IconStatus className="h-3 w-3 opacity-80" aria-hidden />
-        <span className="text-[10px] font-semibold uppercase tracking-wide opacity-90">
-          {label}
-        </span>
-      </div>
-      <div className="mt-1 font-mono text-[15px] font-semibold tabular-nums">
-        {primary}
-      </div>
-      <div className="mt-0.5 text-[10.5px] opacity-75">{secondary}</div>
-    </div>
+    <span className="inline-flex items-baseline gap-1">
+      <span className="font-mono font-semibold tabular-nums text-slate-700 dark:text-[#FAFAFA]">
+        {value.toLocaleString()}
+      </span>
+      {label}
+    </span>
   );
-}
-
-function formatRelative(d: Date): string {
-  const ms = Date.now() - d.getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
 }
 
 /* ============================================================ */
@@ -576,7 +432,7 @@ function AdminQuickLinks() {
             className="group flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-[#1F1F1F] dark:hover:border-indigo-500/40 dark:hover:bg-indigo-500/10"
           >
             <l.icon
-              className="h-4 w-4 flex-shrink-0 text-indigo-600 dark:text-indigo-300"
+              className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-300"
               aria-hidden
             />
             <div className="min-w-0 flex-1">
@@ -588,7 +444,7 @@ function AdminQuickLinks() {
               </div>
             </div>
             <ChevronRight
-              className="h-3 w-3 flex-shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500 dark:text-[#3F3F46]"
+              className="h-3 w-3 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500 dark:text-[#3F3F46]"
               aria-hidden
             />
           </Link>

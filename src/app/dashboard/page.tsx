@@ -1,4 +1,5 @@
 import { withTenantSession } from '@/lib/auth-guard';
+import { resolveDashboardRange } from '@/lib/dashboard/range';
 import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
 
@@ -31,6 +32,9 @@ export default async function DashboardPage({
     const membership = await requireMembership();
     const persona = personaOf(membership.role);
     const sp = await searchParams;
+    // One window for the whole page — every widget reads this same
+    // object rather than parsing `?range=` for itself.
+    const range = resolveDashboardRange(sp);
 
     // Awaiting the home as a function call (rather than returning JSX
     // with `<Home/>`) keeps the data fetching inside the
@@ -44,6 +48,7 @@ export default async function DashboardPage({
         tenantName: tenant.name,
         userId,
         view: parseManagerView(sp.view),
+        range,
       });
     }
 

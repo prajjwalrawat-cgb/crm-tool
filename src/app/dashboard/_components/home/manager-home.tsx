@@ -25,6 +25,7 @@ import {
   getRevenueTrend,
   getStaleDeals,
 } from '@/lib/dashboard/queries';
+import { resolveStageProbabilities } from '@/lib/deals/stage-probability';
 import { getRecommendationInsight } from '@/lib/intelligence/runner';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { getTopPredictionsForTenant } from '@/lib/predictions/runner';
@@ -140,6 +141,12 @@ export async function ManagerHome({
     settings.compactNumbers
       ? formatCompactTenantCurrency(m, settings)
       : formatTenantCurrency(m, settings);
+
+  // Same probabilities the board weights columns with, so "% close" on
+  // the stage chart never contradicts the weighted-pipeline figures.
+  const stageProbabilities = resolveStageProbabilities(
+    settings.stageProbabilities,
+  );
 
   const focusedRep =
     view.mode === 'rep'
@@ -276,7 +283,8 @@ export async function ManagerHome({
           currency={settings}
           className="lg:col-span-2"
           title={view.mode === 'rep' ? `${scopeLabel} pipeline by stage` : 'Team pipeline by stage'}
-          subtitle="Revenue-weighted bars · stage-to-stage conversion"
+          subtitle="Revenue-weighted bars · deals currently in stage"
+          stageProbabilities={stageProbabilities}
           initialConfig={savedStageConversionView?.config ?? null}
           initialTitleOverride={savedStageConversionView?.title ?? null}
           persona="manager"

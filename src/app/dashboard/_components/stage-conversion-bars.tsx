@@ -26,6 +26,10 @@ import {
   formatTenantCurrency,
   type TenantCurrencyContext,
 } from '@/lib/currency/format';
+import {
+  DEFAULT_STAGE_PROBABILITY,
+  type StageProbabilities,
+} from '@/lib/deals/stage-probability';
 import type { Persona } from '@/lib/personas';
 import type { PipelineByStageRow } from '@/lib/reports/queries/pipeline-by-stage';
 import { cn } from '@/lib/utils';
@@ -42,18 +46,38 @@ import {
 import { useStudioRegistration } from './edit-mode/edit-mode-context';
 
 /**
- * Stage Conversion chart — pipeline-by-stage breakdown rendered as
- * compact horizontal bars (default) or a true trapezoid funnel,
- * donut, or pie. Power users open Studio (Cmd/Ctrl+K when focused
- * or click the gear icon on hover) to switch variant or metric.
+ * Pipeline-by-stage chart — rendered as compact horizontal bars
+ * (default) or a true trapezoid funnel, donut, or pie. Power users
+ * open Studio (Cmd/Ctrl+E when focused or click the gear icon on
+ * hover) to switch variant or metric.
+ *
+ * WHAT THE NUMBERS MEAN (this was mislabeled until the dashboard
+ * trust pass — read before touching the copy):
+ *
+ *   The source runner (`pipelineByStageRunner`) applies NO date range.
+ *   Every row is a *snapshot* of deals sitting in that stage right
+ *   now — NOT a cohort that walked the funnel in order. That's why
+ *   Proposal can hold more deals than Qualified.
+ *
+ *   · value badge   → this stage's revenue / deal count (snapshot)
+ *   · "% close"     → the stage's configured win probability
+ *                     (organization_settings.stage_probabilities,
+ *                     falling back to DEFAULT_STAGE_PROBABILITY).
+ *                     A forward-looking constant, not an observation.
+ *   · ratio chip    → this stage's value ÷ the previous stage's value.
+ *                     On a snapshot this legitimately exceeds 100%
+ *                     (Qualified can hold 11× Lead's revenue), so it
+ *                     is labeled "vs prev stage" — calling it
+ *                     "conversion" implied a ≤100% cohort rate and
+ *                     produced the 1121% trust bug.
  *
  * Metrics:
  *   revenue   → stage revenue (currency)
  *   dealCount → number of deals in each stage
  *
  * Variants:
- *   bars      → horizontal rows (default; revenue/count + conversion %)
- *   funnel    → trapezoid SVG with tapered segments — the "real funnel"
+ *   bars      → horizontal rows (default; value + close prob + ratio)
+ *   funnel    → trapezoid SVG with tapered segments
  *   donut     → centred ring of stage share
  *   pie       → solid pie chart
  */
@@ -73,13 +97,26 @@ const LABELS: Record<Stage, string> = {
   negotiation: 'Negotiation',
   won: 'Won',
 };
-const PROB: Record<Stage, number> = {
-  lead: 0.1,
-  qualified: 0.25,
-  proposal: 0.5,
-  negotiation: 0.75,
-  won: 1.0,
-};
+/**
+ * Percentages above this render as "999%+" with the exact figure kept
+ * in the `title` tooltip. A near-zero previous stage can otherwise
+ * produce five-digit ratios that read as a bug.
+ */
+const PCT_DISPLAY_CAP = 999;
+
+/** "1121%" → "999%+" past the cap; the raw value lives in the tooltip. */
+function formatRatioPct(pct: number): string {
+  return pct > PCT_DISPLAY_CAP ? `${PCT_DISPLAY_CAP}%+` : `${pct}%`;
+}
+
+function ratioTitle(
+  pct: number,
+  stage: Stage,
+  prevStage: Stage,
+  metricLabel: string,
+): string {
+  return `${LABELS[stage]} ${metricLabel} is ${pct.toLocaleString()}% of ${LABELS[prevStage]} ${metricLabel}. Snapshot ratio between two stages — not a cohort conversion rate, so it can exceed 100%.`;
+}
 const STAGE_TINT: Record<
   Stage,
   { barLight: string; barDark: string; svgLight: string; svgDark: string; dotClass: string }
@@ -126,7 +163,8 @@ export function StageConversionBars({
   currency,
   className,
   title: defaultTitle = 'Pipeline by stage',
-  subtitle = 'Revenue-weighted bars · stage-to-stage conversion',
+  subtitle = 'Revenue-weighted bars · deals currently in stage',
+  stageProbabilities,
   initialConfig,
   initialTitleOverride,
   persona,
@@ -136,6 +174,13 @@ export function StageConversionBars({
   className?: string;
   title?: string;
   subtitle?: string;
+  /**
+   * Win probability per stage (0–100) as configured in Settings →
+   * Pipeline. Omitted → the code defaults. Passing the tenant's real
+   * values keeps "% close" consistent with the weighted pipeline
+   * figures shown on the board and in the KPI strip.
+   */
+  stageProbabilities?: StageProbabilities;
   initialConfig?: StageConversionConfig | null;
   initialTitleOverride?: string | null;
   persona: Persona;
@@ -207,6 +252,9 @@ export function StageConversionBars({
     config.metric === 'revenue' ? r.totalAmountMinor : r.count;
   const formatValue = (n: number) =>
     config.metric === 'revenue' ? formatCurrency(n) : n.toLocaleString();
+  const metricLabel = config.metric === 'revenue' ? 'revenue' : 'deal count';
+  const closeProb = (s: Stage) =>
+    stageProbabilities?.[s] ?? DEFAULT_STAGE_PROBABILITY[s];
 
   const title = (titleOverride?.trim() || defaultTitle).trim();
 
@@ -234,7 +282,7 @@ export function StageConversionBars({
           <div className="min-w-0">
             <div className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
               <ArrowDown className="h-3 w-3" aria-hidden />
-              {config.metric === 'revenue' ? 'Conversion · revenue' : 'Conversion · deals'}
+              {config.metric === 'revenue' ? 'Snapshot · revenue' : 'Snapshot · deals'}
             </div>
             <h2
               id={headingId}
@@ -264,6 +312,8 @@ export function StageConversionBars({
             ordered={ordered}
             valueFor={valueFor}
             formatValue={formatValue}
+            metricLabel={metricLabel}
+            closeProb={closeProb}
             config={config}
           />
         ) : config.variant === 'funnel' ? (
@@ -271,6 +321,7 @@ export function StageConversionBars({
             ordered={ordered}
             valueFor={valueFor}
             formatValue={formatValue}
+            metricLabel={metricLabel}
             config={config}
           />
         ) : (
@@ -306,95 +357,144 @@ function BarsBody({
   ordered,
   valueFor,
   formatValue,
+  metricLabel,
+  closeProb,
   config,
 }: {
   ordered: PipelineByStageRow[];
   valueFor: (r: PipelineByStageRow) => number;
   formatValue: (n: number) => string;
+  metricLabel: string;
+  closeProb: (s: Stage) => number;
   config: StageConversionConfig;
 }) {
   const maxValue = Math.max(...ordered.map((r) => valueFor(r)), 1);
+  // Two different percentages live on each row and used to sit side by
+  // side in the same muted grey, which is how "% close" and the stage
+  // ratio got read as the same number. They now occupy captioned
+  // columns with distinct weight and colour.
   return (
-    <ul className="divide-y divide-slate-100 dark:divide-[#1F1F1F]">
-      {ordered.map((row, i) => {
-        const stage = row.stage as Stage;
-        const v = valueFor(row);
-        const widthPct = (v / maxValue) * 100;
-        const renderedWidth = Math.max(2, widthPct);
-        const prev = i > 0 ? ordered[i - 1]! : null;
-        const prevV = prev ? valueFor(prev) : 0;
-        const conversionPct =
-          prev && prevV > 0 ? Math.round((v / prevV) * 100) : null;
-        const conversionTone =
-          conversionPct === null
-            ? 'neutral'
-            : conversionPct >= 60
-              ? 'good'
-              : conversionPct >= 30
-                ? 'warn'
-                : 'bad';
-        const conversionClass = {
-          good: 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-500/15',
-          warn: 'text-amber-800 bg-amber-50 dark:text-amber-300 dark:bg-amber-500/15',
-          bad: 'text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-500/15',
-          neutral: 'text-slate-500 bg-slate-50 dark:text-[#A1A1AA] dark:bg-[#181818]',
-        }[conversionTone];
-        return (
-          <li key={stage} className="flex items-center gap-3 px-5 py-2.5 text-[12px]">
-            <span className="w-24 flex-shrink-0 text-[10.5px] font-semibold uppercase tracking-wide text-slate-600 dark:text-[#A1A1AA]">
-              {LABELS[stage]}
-            </span>
-            <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-[#181818]">
-              <span
-                className={cn(
-                  'absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out',
-                  STAGE_TINT[stage].barLight,
-                  STAGE_TINT[stage].barDark,
-                )}
-                style={{ width: `${renderedWidth}%` }}
-                aria-hidden
-              />
-            </div>
-            <div className="flex-shrink-0 text-right">
-              <div className="font-mono text-[12.5px] font-semibold tabular-nums text-slate-900 dark:text-[#FAFAFA]">
-                {formatValue(v)}
-              </div>
-              <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[10px] text-slate-500 dark:text-[#A1A1AA]">
-                {config.metric === 'revenue' ? (
-                  <>
-                    <span>
-                      {row.count} {row.count === 1 ? 'deal' : 'deals'}
-                    </span>
-                    {config.display.showCloseProb ? (
-                      <>
-                        <span className="text-slate-300 dark:text-[#3F3F46]">·</span>
-                        <span>{Math.round(PROB[stage] * 100)}% close</span>
-                      </>
-                    ) : null}
-                  </>
-                ) : config.display.showCloseProb ? (
-                  <span>{Math.round(PROB[stage] * 100)}% close</span>
-                ) : null}
-              </div>
-            </div>
-            <div className="w-20 flex-shrink-0 text-right">
-              {config.display.showConversionPct && conversionPct !== null ? (
+    <div>
+      <div className="flex items-center gap-3 border-b border-slate-100 px-5 pb-1.5 pt-2 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:border-[#1F1F1F] dark:text-[#71717A]">
+        <span className="w-24 shrink-0">Stage</span>
+        <span className="flex-1" aria-hidden />
+        <span className="w-24 shrink-0 text-right">
+          {config.metric === 'revenue' ? 'Revenue · deals' : 'Deals'}
+        </span>
+        {config.display.showCloseProb ? (
+          <span
+            className="w-16 shrink-0 text-right"
+            title="Configured win probability for the stage (Settings → Pipeline). Forward-looking, not an observed rate."
+          >
+            Close prob
+          </span>
+        ) : null}
+        {config.display.showConversionPct ? (
+          <span
+            className="w-20 shrink-0 text-right"
+            title={`Each stage's ${metricLabel} as a share of the stage above it, on the current snapshot. Not a cohort conversion rate — it can exceed 100%.`}
+          >
+            vs prev stage
+          </span>
+        ) : null}
+      </div>
+      <ul className="divide-y divide-slate-100 dark:divide-[#1F1F1F]">
+        {ordered.map((row, i) => {
+          const stage = row.stage as Stage;
+          const v = valueFor(row);
+          const widthPct = (v / maxValue) * 100;
+          const renderedWidth = Math.max(2, widthPct);
+          const prev = i > 0 ? ordered[i - 1]! : null;
+          const prevV = prev ? valueFor(prev) : 0;
+          // Snapshot ratio: this stage ÷ the stage above it. NOT a
+          // conversion rate — see the module header.
+          const ratioPct =
+            prev && prevV > 0 ? Math.round((v / prevV) * 100) : null;
+          // ≥100% means this stage holds at least as much as the one
+          // before it — healthy for a snapshot; a thin stage above a
+          // fat one is the signal worth flagging.
+          const ratioTone =
+            ratioPct === null
+              ? 'neutral'
+              : ratioPct >= 60
+                ? 'good'
+                : ratioPct >= 30
+                  ? 'warn'
+                  : 'bad';
+          const ratioClass = {
+            good: 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-500/15',
+            warn: 'text-amber-800 bg-amber-50 dark:text-amber-300 dark:bg-amber-500/15',
+            bad: 'text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-500/15',
+            neutral: 'text-slate-500 bg-slate-50 dark:text-[#A1A1AA] dark:bg-[#181818]',
+          }[ratioTone];
+          return (
+            <li key={stage} className="flex items-center gap-3 px-5 py-2.5 text-[12px]">
+              <span className="w-24 shrink-0 text-[10.5px] font-semibold uppercase tracking-wide text-slate-600 dark:text-[#A1A1AA]">
+                {LABELS[stage]}
+              </span>
+              <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-[#181818]">
                 <span
                   className={cn(
-                    'inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
-                    conversionClass,
+                    'absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out',
+                    STAGE_TINT[stage].barLight,
+                    STAGE_TINT[stage].barDark,
                   )}
-                >
-                  {conversionPct}%
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-300 dark:text-[#3F3F46]">—</span>
-              )}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+                  style={{ width: `${renderedWidth}%` }}
+                  aria-hidden
+                />
+              </div>
+              <div className="w-24 shrink-0 text-right">
+                <div className="font-mono text-[12.5px] font-semibold tabular-nums text-slate-900 dark:text-[#FAFAFA]">
+                  {formatValue(v)}
+                </div>
+                {config.metric === 'revenue' ? (
+                  <div className="mt-0.5 text-[10px] text-slate-500 dark:text-[#A1A1AA]">
+                    {row.count} {row.count === 1 ? 'deal' : 'deals'}
+                  </div>
+                ) : null}
+              </div>
+              {config.display.showCloseProb ? (
+                <div className="w-16 shrink-0 text-right">
+                  <span
+                    className="font-mono text-[10.5px] font-normal tabular-nums text-slate-500 dark:text-[#A1A1AA]"
+                    title={`Deals in ${LABELS[stage]} are weighted at ${closeProb(stage)}% win probability.`}
+                  >
+                    {closeProb(stage)}%
+                  </span>
+                </div>
+              ) : null}
+              {config.display.showConversionPct ? (
+                <div className="w-20 shrink-0 text-right">
+                  {ratioPct !== null && prev ? (
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
+                        ratioClass,
+                      )}
+                      title={ratioTitle(
+                        ratioPct,
+                        stage,
+                        prev.stage as Stage,
+                        metricLabel,
+                      )}
+                    >
+                      {formatRatioPct(ratioPct)}
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[10px] text-slate-300 dark:text-[#3F3F46]"
+                      title="First stage — nothing above it to compare against."
+                    >
+                      —
+                    </span>
+                  )}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -406,11 +506,13 @@ function FunnelBody({
   ordered,
   valueFor,
   formatValue,
+  metricLabel,
   config,
 }: {
   ordered: PipelineByStageRow[];
   valueFor: (r: PipelineByStageRow) => number;
   formatValue: (n: number) => string;
+  metricLabel: string;
   config: StageConversionConfig;
 }) {
   const maxValue = Math.max(...ordered.map((r) => valueFor(r)), 1);
@@ -482,7 +584,9 @@ function FunnelBody({
               const prev = i > 0 ? ordered[i - 1]! : null;
               const prevV = prev ? valueFor(prev) : 0;
               const v = valueFor(row);
-              const conversionPct =
+              // Snapshot ratio vs the stage above — same semantics as
+              // the bars body, same display cap.
+              const ratioPct =
                 prev && prevV > 0 ? Math.round((v / prevV) * 100) : null;
               return (
                 <li key={stage} className="flex items-center justify-center">
@@ -494,18 +598,26 @@ function FunnelBody({
                       <span className="font-mono text-[12px] font-semibold tabular-nums text-slate-900 dark:text-[#FAFAFA]">
                         {formatValue(v)}
                       </span>
-                      {config.display.showConversionPct && conversionPct !== null ? (
+                      {config.display.showConversionPct &&
+                      ratioPct !== null &&
+                      prev ? (
                         <span
                           className={cn(
                             'rounded px-1 py-px font-mono text-[9.5px] font-semibold tabular-nums backdrop-blur-sm',
-                            conversionPct >= 60
+                            ratioPct >= 60
                               ? 'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-100'
-                              : conversionPct >= 30
+                              : ratioPct >= 30
                                 ? 'bg-white/70 text-slate-700 dark:bg-white/10 dark:text-slate-200'
                                 : 'bg-rose-100/80 text-rose-800 dark:bg-rose-500/25 dark:text-rose-100',
                           )}
+                          title={ratioTitle(
+                            ratioPct,
+                            stage,
+                            prev.stage as Stage,
+                            metricLabel,
+                          )}
                         >
-                          {conversionPct}%
+                          {formatRatioPct(ratioPct)}
                         </span>
                       ) : null}
                     </div>
@@ -917,14 +1029,14 @@ function StageConversionStudio({
 
       <StudioSection label="Appearance">
         <StudioToggleRow
-          label="Conversion %"
-          hint="Show stage-to-stage retention chips"
+          label="Vs prev stage"
+          hint="Each stage's value as a share of the one above it (snapshot ratio, can exceed 100%)"
           checked={config.display.showConversionPct}
           onChange={(v) => update('showConversionPct', v)}
         />
         <StudioToggleRow
           label="Close probability"
-          hint="Heuristic close-prob meta per stage"
+          hint="Configured win probability per stage (Settings → Pipeline)"
           checked={config.display.showCloseProb}
           onChange={(v) => update('showCloseProb', v)}
         />

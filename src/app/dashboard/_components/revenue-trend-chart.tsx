@@ -17,6 +17,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -38,6 +39,11 @@ import {
   type TenantCurrencyContext,
 } from '@/lib/currency/format';
 import type { RevenueTrend } from '@/lib/dashboard/queries';
+import {
+  buildWeekly,
+  type WeeklyData,
+  type WeeklyPoint,
+} from '@/lib/dashboard/trend-shaping';
 import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
@@ -156,6 +162,18 @@ export function RevenueTrendChart({
     [data.points, config.metric, config.display.cumulative],
   );
 
+  // Weekly + dual-axis view. Only meaningful for the multi-series
+  // metrics (revenue / deal count) — an averaged or cumulative-ratio
+  // metric has nothing to put on the second axis, so those fall back
+  // to the area renderer even when `weekly` is the saved variant.
+  const weekly = useMemo(
+    () =>
+      config.variant === 'weekly' && isMultiSeries(config.metric)
+        ? buildWeekly(shaped.points, config.display.cumulative)
+        : null,
+    [config.variant, config.metric, config.display.cumulative, shaped.points],
+  );
+
   const formatValue = useCallback(
     (v: number) => formatMetricValue(v, config.metric, formatCurrency),
     [config.metric, formatCurrency],
@@ -270,15 +288,24 @@ export function RevenueTrendChart({
               fill in here automatically.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <ChartBody
-                variant={config.variant}
-                shaped={shaped}
-                display={config.display}
-                formatValue={formatValue}
-                formatAxis={formatAxis}
-              />
-            </ResponsiveContainer>
+            <>
+              {weekly?.notices.length ? (
+                <p className="mx-3 mb-1.5 rounded-md border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[10.5px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  {weekly.notices.join(' ')} Hover the marked point for its real
+                  value.
+                </p>
+              ) : null}
+              <ResponsiveContainer width="100%" height={weekly ? 280 : 260}>
+                <ChartBody
+                  variant={config.variant}
+                  shaped={shaped}
+                  weekly={weekly}
+                  display={config.display}
+                  formatValue={formatValue}
+                  formatAxis={formatAxis}
+                />
+              </ResponsiveContainer>
+            </>
           )}
         </div>
 
@@ -538,6 +565,23 @@ function shapeForMetric(
   };
 }
 
+/* ============================================================ */
+/* Weekly + dual-axis shaping                                    */
+/* ============================================================ */
+
+/**
+ * Metrics that carry a "new" series AND an outcome pair. Only these
+ * can be drawn as pipeline bars + won/lost overlay; the single-series
+ * metrics have nothing for the second axis.
+ *
+ * The bucketing + outlier math itself lives in
+ * `lib/dashboard/trend-shaping` so it can be unit-tested without
+ * dragging Recharts into a script — see `scripts/selftest-dashboard.ts`.
+ */
+function isMultiSeries(m: RevenueTrendMetric): boolean {
+  return m === 'revenue' || m === 'dealCount';
+}
+
 function labelForMetric(m: RevenueTrendMetric): string {
   return REVENUE_TREND_METRICS.find((x) => x.value === m)?.label ?? 'Revenue';
 }
@@ -577,22 +621,40 @@ function formatMetricAxis(
 function ChartBody({
   variant,
   shaped,
+  weekly,
   display,
   formatValue,
   formatAxis,
 }: {
   variant: RevenueTrendVariant;
   shaped: ShapedData;
+  /** Non-null only when the weekly dual-axis view applies. */
+  weekly: WeeklyData | null;
   display: RevenueTrendConfig['display'];
   formatValue: (n: number) => string;
   formatAxis: (n: number) => string;
 }) {
+  if (variant === 'weekly' && weekly) {
+    return (
+      <WeeklyBody
+        weekly={weekly}
+        shaped={shaped}
+        display={display}
+        formatValue={formatValue}
+        formatAxis={formatAxis}
+      />
+    );
+  }
+
   const curve = display.smoothLines ? 'monotone' : 'linear';
   const isStacked = variant === 'stacked-area';
   // Flutter uses the area renderer but with stronger gradient stops +
   // a glowing active dot. The CSS shimmer + breathe wraps it.
   const isFlutter = variant === 'flutter';
-  const useAreaRenderer = variant === 'area' || isStacked || isFlutter;
+  // `weekly` lands here only when the metric can't support the dual
+  // axis (single-series metrics) — it falls back to the area look.
+  const useAreaRenderer =
+    variant === 'area' || variant === 'weekly' || isStacked || isFlutter;
 
   const commonAxes = (
     <>
@@ -761,6 +823,252 @@ function ChartBody({
         );
       })}
     </AreaChart>
+  );
+}
+
+/* ============================================================ */
+/* Weekly body — pipeline bars (left axis) + outcomes (right)    */
+/* ============================================================ */
+
+/**
+ * Two layers on two scales:
+ *
+ *   · New pipeline → weekly bars on the LEFT axis. Bars, not a line,
+ *     because pipeline creation is discrete and lumpy — a line
+ *     between two sparse weeks draws continuity that never existed.
+ *   · Won / Lost   → thin lines on their own RIGHT axis, so a spike in
+ *     pipeline creation can no longer flatten them against zero.
+ *
+ * Values past an axis cap are drawn at the cap and flagged: the bar
+ * gets a notched top, the tooltip always reports the real number.
+ */
+function WeeklyBody({
+  weekly,
+  shaped,
+  display,
+  formatValue,
+  formatAxis,
+}: {
+  weekly: WeeklyData;
+  shaped: ShapedData;
+  display: RevenueTrendConfig['display'];
+  formatValue: (n: number) => string;
+  formatAxis: (n: number) => string;
+}) {
+  const curve = display.smoothLines ? 'monotone' : 'linear';
+  const seriesLabel = (key: ShapedSeries['key']) =>
+    shaped.series.find((s) => s.key === key)?.label ?? key;
+
+  return (
+    <ComposedChart
+      data={weekly.points}
+      margin={{ top: 6, right: 8, bottom: 0, left: 0 }}
+    >
+      <CartesianGrid
+        strokeDasharray="2 4"
+        stroke="rgba(148, 163, 184, 0.25)"
+        vertical={false}
+      />
+      <XAxis
+        dataKey="label"
+        tick={{ fontSize: 10, fill: '#94a3b8' }}
+        tickLine={false}
+        axisLine={false}
+        minTickGap={20}
+      />
+      <YAxis
+        yAxisId="pipeline"
+        tick={{ fontSize: 10, fill: '#94a3b8' }}
+        tickLine={false}
+        axisLine={false}
+        tickFormatter={(v) => formatAxis(Number(v))}
+        width={56}
+        domain={weekly.pipelineCap !== null ? [0, weekly.pipelineCap] : undefined}
+        allowDataOverflow={weekly.pipelineCap !== null}
+      />
+      <YAxis
+        yAxisId="outcome"
+        orientation="right"
+        tick={{ fontSize: 10, fill: '#94a3b8' }}
+        tickLine={false}
+        axisLine={false}
+        tickFormatter={(v) => formatAxis(Number(v))}
+        width={56}
+        domain={weekly.outcomeCap !== null ? [0, weekly.outcomeCap] : undefined}
+        allowDataOverflow={weekly.outcomeCap !== null}
+      />
+      <Tooltip
+        cursor={{ fill: 'rgba(99,102,241,0.06)' }}
+        content={(props) => {
+          const { active, payload } = props as unknown as {
+            active?: boolean;
+            payload?: ReadonlyArray<{ payload?: WeeklyPoint }>;
+          };
+          if (!active || !payload || payload.length === 0) return null;
+          const p = payload[0]?.payload;
+          if (!p) return null;
+          return (
+            <WeeklyTooltip
+              datum={p}
+              showLost={display.showLostLine}
+              formatValue={formatValue}
+              labels={{
+                newPipeline: seriesLabel('seriesB'),
+                won: seriesLabel('seriesA'),
+                lost: seriesLabel('seriesC'),
+              }}
+            />
+          );
+        }}
+      />
+      <Bar
+        yAxisId="pipeline"
+        dataKey="newPipelinePlot"
+        fill="#6366f1"
+        fillOpacity={0.75}
+        shape={<CappedBar />}
+        isAnimationActive={display.animated}
+        animationDuration={550}
+      />
+      <Line
+        yAxisId="outcome"
+        type={curve}
+        dataKey="wonPlot"
+        stroke="#10b981"
+        strokeWidth={2}
+        dot={{ r: 2.5, strokeWidth: 0, fill: '#10b981' }}
+        activeDot={{ r: 4 }}
+        isAnimationActive={display.animated}
+        animationDuration={650}
+      />
+      {display.showLostLine ? (
+        <Line
+          yAxisId="outcome"
+          type={curve}
+          dataKey="lostPlot"
+          stroke="#f43f5e"
+          strokeWidth={1.25}
+          strokeDasharray="4 4"
+          dot={false}
+          activeDot={{ r: 3.5 }}
+          isAnimationActive={display.animated}
+          animationDuration={650}
+        />
+      ) : null}
+    </ComposedChart>
+  );
+}
+
+type BarShapeProps = {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  fill?: string;
+  fillOpacity?: number;
+  payload?: WeeklyPoint;
+};
+
+/**
+ * Bar renderer that makes truncation visible. A capped week draws at
+ * the axis ceiling with a notched (zig-zag) top edge — the standard
+ * "this value continues past the chart" convention — instead of
+ * silently looking like a normal tall bar.
+ */
+function CappedBar(props: BarShapeProps) {
+  const { x = 0, y = 0, width = 0, height = 0, fill, fillOpacity } = props;
+  if (width <= 0 || height <= 0) return null;
+  const capped = props.payload?.newPipelineCapped === true;
+  const r = 2;
+
+  if (!capped) {
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={r}
+        ry={r}
+        fill={fill}
+        fillOpacity={fillOpacity}
+      />
+    );
+  }
+
+  // Zig-zag across the top edge.
+  const teeth = 4;
+  const step = width / teeth;
+  const amp = Math.min(5, height);
+  let d = `M ${x} ${y + height} L ${x} ${y + amp}`;
+  for (let i = 0; i < teeth; i++) {
+    d += ` L ${x + step * (i + 0.5)} ${y} L ${x + step * (i + 1)} ${y + amp}`;
+  }
+  d += ` L ${x + width} ${y + height} Z`;
+
+  return (
+    <g>
+      <path d={d} fill={fill} fillOpacity={fillOpacity} />
+      <path
+        d={`M ${x} ${y + amp} ${Array.from(
+          { length: teeth },
+          (_, i) =>
+            `L ${x + step * (i + 0.5)} ${y} L ${x + step * (i + 1)} ${y + amp}`,
+        ).join(' ')}`}
+        fill="none"
+        stroke="#4338ca"
+        strokeWidth={1}
+      />
+    </g>
+  );
+}
+
+function WeeklyTooltip({
+  datum,
+  showLost,
+  formatValue,
+  labels,
+}: {
+  datum: WeeklyPoint;
+  showLost: boolean;
+  formatValue: (n: number) => string;
+  labels: { newPipeline: string; won: string; lost: string };
+}) {
+  return (
+    <div
+      role="tooltip"
+      className="pointer-events-none rounded-lg border border-slate-700/60 bg-slate-900/90 px-3 py-2 text-[11px] text-slate-100 shadow-xl ring-1 ring-black/5 backdrop-blur-md"
+    >
+      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-300">
+        Week of {longDate(datum.weekStart)}
+      </div>
+      <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums">
+        <TooltipRow
+          label={labels.newPipeline}
+          value={formatValue(datum.newPipeline)}
+          dotClassName="bg-indigo-500"
+        />
+        <TooltipRow
+          label={labels.won}
+          value={formatValue(datum.won)}
+          dotClassName="bg-emerald-500"
+        />
+        {showLost ? (
+          <TooltipRow
+            label={labels.lost}
+            value={formatValue(datum.lost)}
+            dotClassName="bg-rose-500"
+            dashed
+          />
+        ) : null}
+      </dl>
+      {datum.newPipelineCapped || datum.outcomeCapped ? (
+        <p className="mt-1.5 max-w-56 border-t border-slate-700/60 pt-1 text-[10px] leading-snug text-amber-300">
+          Values above are the real figures — this week runs past the
+          chart axis, which is capped so the other weeks stay readable.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

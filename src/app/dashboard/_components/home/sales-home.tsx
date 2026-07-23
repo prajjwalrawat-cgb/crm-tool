@@ -26,6 +26,7 @@ import {
   getStaleDeals,
   getUpcomingFollowUps,
 } from '@/lib/dashboard/queries';
+import { resolveStageProbabilities } from '@/lib/deals/stage-probability';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
 import { getMyTasksSummary } from '@/lib/tasks/queries';
@@ -142,7 +143,10 @@ export async function SalesHome({
           currency={settings}
           className="lg:col-span-2"
           title="My pipeline by stage"
-          subtitle="Revenue-weighted bars · stage-to-stage conversion"
+          subtitle="Revenue-weighted bars · deals currently in stage"
+          stageProbabilities={resolveStageProbabilities(
+            settings.stageProbabilities,
+          )}
           initialConfig={savedStageConversionView?.config ?? null}
           initialTitleOverride={savedStageConversionView?.title ?? null}
           persona="sales"

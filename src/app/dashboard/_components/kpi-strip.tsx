@@ -1,0 +1,302 @@
+import { ArrowDown, ArrowUp, Minus } from 'lucide-react';
+
+import {
+  formatCompactTenantCurrency,
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
+import type { DashboardKpis } from '@/lib/dashboard/kpis';
+import type { DashboardRange } from '@/lib/dashboard/range';
+import { fiscalYearLabel } from '@/lib/targets/fiscal';
+import { cn } from '@/lib/utils';
+
+/**
+ * The dashboard's headline strip — first thing on the page.
+ *
+ * Every tile shows one number plus a delta against the immediately
+ * prior window of equal length (`DashboardRange.prior`). Two delta
+ * flavours:
+ *
+ *   · `percent` — relative change, for money and durations.
+ *   · `points`  — absolute percentage-point change, for rates. A win
+ *                 rate moving 40% → 44% is "+4 pts", never "+10%".
+ *
+ * Direction ≠ good. Avg sales cycle shrinking is a win, so tiles carry
+ * an explicit `higherIsBetter` flag that drives the colour; the arrow
+ * always follows the raw direction.
+ *
+ * Quota attainment is omitted entirely (not zeroed) when the org has
+ * no target for the fiscal year — an empty tile reads as "we missed",
+ * which is a different and wrong statement.
+ */
+
+type DeltaKind = 'percent' | 'points' | 'none';
+
+type Tile = {
+  key: string;
+  label: string;
+  value: string;
+  sub: string;
+  delta: { kind: DeltaKind; raw: number };
+  higherIsBetter: boolean;
+  tint: 'indigo' | 'violet' | 'emerald' | 'amber' | 'sky' | 'slate';
+  /** Full-precision figure for the title tooltip. */
+  title?: string;
+};
+
+export function KpiStrip({
+  kpis,
+  currency,
+  range,
+  fiscalYearStartMonth,
+  className,
+}: {
+  kpis: DashboardKpis;
+  currency: TenantCurrencyContext;
+  range: DashboardRange;
+  fiscalYearStartMonth: number;
+  className?: string;
+}) {
+  const money = (m: number) =>
+    currency.compactNumbers
+      ? formatCompactTenantCurrency(m, currency)
+      : formatTenantCurrency(m, currency);
+  const exact = (m: number) => formatTenantCurrency(m, currency);
+
+  const closed = kpis.wonCount.value + kpis.lostCount.value;
+
+  const tiles: Tile[] = [
+    {
+      key: 'pipeline',
+      label: 'Total pipeline',
+      value: money(kpis.pipelineMinor.value),
+      sub: `vs ${money(kpis.pipelineMinor.priorValue)} at period start`,
+      delta: {
+        kind: 'percent',
+        raw: pctChange(kpis.pipelineMinor.value, kpis.pipelineMinor.priorValue),
+      },
+      higherIsBetter: true,
+      tint: 'indigo',
+      title: `Open deal value: ${exact(kpis.pipelineMinor.value)}`,
+    },
+    {
+      key: 'weighted',
+      label: 'Weighted pipeline',
+      value: money(kpis.weightedPipelineMinor.value),
+      sub: 'Σ amount × stage win probability',
+      delta: {
+        kind: 'percent',
+        raw: pctChange(
+          kpis.weightedPipelineMinor.value,
+          kpis.weightedPipelineMinor.priorValue,
+        ),
+      },
+      higherIsBetter: true,
+      tint: 'violet',
+      title: `Weighted value: ${exact(kpis.weightedPipelineMinor.value)}`,
+    },
+    {
+      key: 'winRate',
+      label: 'Win rate',
+      value: `${Math.round(kpis.winRate.value * 100)}%`,
+      sub:
+        closed === 0
+          ? 'no deals closed in period'
+          : `${kpis.wonCount.value} won · ${kpis.lostCount.value} lost`,
+      delta: {
+        kind: 'points',
+        raw: (kpis.winRate.value - kpis.winRate.priorValue) * 100,
+      },
+      higherIsBetter: true,
+      tint: 'emerald',
+      title: `${(kpis.winRate.value * 100).toFixed(1)}% of closed deals were won`,
+    },
+    {
+      key: 'avgDeal',
+      label: 'Avg deal size',
+      value: kpis.wonCount.value === 0 ? '—' : money(kpis.avgWonDealMinor.value),
+      sub: kpis.wonCount.value === 0 ? 'no wins in period' : 'won deals in period',
+      delta: {
+        kind: kpis.wonCount.value === 0 ? 'none' : 'percent',
+        raw: pctChange(
+          kpis.avgWonDealMinor.value,
+          kpis.avgWonDealMinor.priorValue,
+        ),
+      },
+      higherIsBetter: true,
+      tint: 'sky',
+      title:
+        kpis.wonCount.value === 0
+          ? undefined
+          : `Average won deal: ${exact(kpis.avgWonDealMinor.value)}`,
+    },
+    {
+      key: 'cycle',
+      label: 'Avg sales cycle',
+      value: kpis.avgCycleDays.value === 0 ? '—' : `${kpis.avgCycleDays.value}d`,
+      sub: 'created → won',
+      delta: {
+        kind: kpis.avgCycleDays.value === 0 ? 'none' : 'percent',
+        raw: pctChange(kpis.avgCycleDays.value, kpis.avgCycleDays.priorValue),
+      },
+      // Faster is better — a negative delta is green here.
+      higherIsBetter: false,
+      tint: 'amber',
+    },
+  ];
+
+  if (kpis.quota) {
+    const attainment = kpis.quota.achievedMinor / kpis.quota.targetMinor;
+    const priorAttainment =
+      kpis.quota.priorAchievedMinor / kpis.quota.targetMinor;
+    const attainmentPct = Math.round(attainment * 100);
+    tiles.push({
+      key: 'quota',
+      label: `Quota attainment · ${fiscalYearLabel(fiscalYearStartMonth, kpis.quota.fiscalYear)}`,
+      // A tiny target (or a typo'd one) would otherwise render a
+      // five-digit percentage. Cap the display, keep the real figure
+      // in the tooltip.
+      value:
+        attainmentPct > PCT_DISPLAY_CAP
+          ? `${PCT_DISPLAY_CAP}%+`
+          : `${attainmentPct}%`,
+      sub: `${money(kpis.quota.achievedMinor)} of ${money(kpis.quota.targetMinor)}`,
+      delta: {
+        kind: 'points',
+        raw: (attainment - priorAttainment) * 100,
+      },
+      higherIsBetter: true,
+      tint: 'slate',
+      title: `${attainmentPct.toLocaleString()}% — ${exact(kpis.quota.achievedMinor)} approved-won revenue against a ${exact(kpis.quota.targetMinor)} target`,
+    });
+  }
+
+  return (
+    <section
+      aria-label={`Key metrics · ${range.label}`}
+      className={cn(
+        'grid grid-cols-2 gap-2 sm:grid-cols-3',
+        tiles.length === 6 ? 'xl:grid-cols-6' : 'lg:grid-cols-5',
+        className,
+      )}
+    >
+      {tiles.map((t) => (
+        <KpiTile key={t.key} tile={t} priorLabel={range.label} />
+      ))}
+    </section>
+  );
+}
+
+function KpiTile({ tile, priorLabel }: { tile: Tile; priorLabel: string }) {
+  const tintBar = {
+    indigo: 'bg-indigo-500',
+    violet: 'bg-violet-500',
+    emerald: 'bg-emerald-500',
+    amber: 'bg-amber-500',
+    sky: 'bg-sky-500',
+    slate: 'bg-slate-300 dark:bg-slate-600',
+  }[tile.tint];
+
+  return (
+    <div
+      className="@container relative overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]"
+      title={tile.title}
+    >
+      <span className={cn('absolute inset-y-0 left-0 w-0.5', tintBar)} aria-hidden />
+      <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
+        {tile.label}
+      </div>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+        {/* Container query + clamp: long INR strings stay inside the
+            card at every breakpoint without truncating. */}
+        <span className="whitespace-nowrap font-mono text-[clamp(13px,8cqi,19px)] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-[#FAFAFA]">
+          {tile.value}
+        </span>
+        <DeltaChip
+          delta={tile.delta}
+          higherIsBetter={tile.higherIsBetter}
+          priorLabel={priorLabel}
+        />
+      </div>
+      <div className="mt-1 truncate text-[10.5px] text-slate-500 dark:text-[#A1A1AA]">
+        {tile.sub}
+      </div>
+    </div>
+  );
+}
+
+/** Hard ceiling on any rendered percentage — see the trust checklist. */
+const PCT_DISPLAY_CAP = 999;
+
+function DeltaChip({
+  delta,
+  higherIsBetter,
+  priorLabel,
+}: {
+  delta: { kind: DeltaKind; raw: number };
+  higherIsBetter: boolean;
+  priorLabel: string;
+}) {
+  if (delta.kind === 'none' || !Number.isFinite(delta.raw)) {
+    return (
+      <span
+        className="inline-flex items-center gap-0.5 rounded px-1 py-px text-[10px] font-medium text-slate-400 dark:text-[#71717A]"
+        title="No comparable figure in the prior period."
+      >
+        <Minus className="h-2.5 w-2.5" aria-hidden />
+        n/a
+      </span>
+    );
+  }
+
+  const rounded = Math.round(delta.raw * 10) / 10;
+  const flat = Math.abs(rounded) < 0.05;
+  const up = rounded > 0;
+  const good = flat ? null : up === higherIsBetter;
+
+  const magnitude = Math.abs(rounded);
+  const capped = magnitude > PCT_DISPLAY_CAP;
+  const shown = capped
+    ? `${PCT_DISPLAY_CAP}%+`
+    : delta.kind === 'points'
+      ? `${magnitude.toFixed(1)} pts`
+      : `${magnitude.toFixed(magnitude < 10 ? 1 : 0)}%`;
+
+  const exactText =
+    delta.kind === 'points'
+      ? `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)} percentage points vs the prior ${priorLabel.toLowerCase()}`
+      : `${rounded > 0 ? '+' : ''}${rounded.toLocaleString()}% vs the prior ${priorLabel.toLowerCase()}`;
+
+  return (
+    <span
+      title={exactText}
+      className={cn(
+        'inline-flex items-center gap-0.5 rounded px-1 py-px text-[10px] font-semibold tabular-nums',
+        good === null
+          ? 'bg-slate-50 text-slate-500 dark:bg-[#181818] dark:text-[#A1A1AA]'
+          : good
+            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+            : 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+      )}
+    >
+      {flat ? (
+        <Minus className="h-2.5 w-2.5" aria-hidden />
+      ) : up ? (
+        <ArrowUp className="h-2.5 w-2.5" aria-hidden />
+      ) : (
+        <ArrowDown className="h-2.5 w-2.5" aria-hidden />
+      )}
+      {flat ? 'flat' : shown}
+    </span>
+  );
+}
+
+/**
+ * Relative change. A zero base has no meaningful percentage — return
+ * NaN so the chip renders "n/a" instead of the ∞% blowups that made
+ * the old stage badge untrustworthy.
+ */
+function pctChange(current: number, prior: number): number {
+  if (prior === 0) return current === 0 ? 0 : Number.NaN;
+  return ((current - prior) / Math.abs(prior)) * 100;
+}

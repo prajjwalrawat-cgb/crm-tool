@@ -1,12 +1,15 @@
 'use client';
 
 import { Users } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 /**
  * Team-vs-rep filter for the manager/admin dashboard. Changing it navigates to
  * `?view=team` or `?view=rep:<userId>` — the same URL contract the home pages
  * read server-side, so the whole dashboard rescopes to the chosen person.
+ *
+ * Other params (notably `range`/`from`/`to`) are carried through, so
+ * switching rep keeps the selected time window.
  */
 export function RepFilter({
   teammates,
@@ -16,6 +19,7 @@ export function RepFilter({
   value: { mode: 'team' } | { mode: 'rep'; userId: string };
 }) {
   const router = useRouter();
+  const params = useSearchParams();
   const current = value.mode === 'rep' ? value.userId : 'team';
 
   return (
@@ -26,11 +30,9 @@ export function RepFilter({
         value={current}
         onChange={(e) => {
           const v = e.target.value;
-          router.push(
-            v === 'team'
-              ? '/dashboard?view=team'
-              : `/dashboard?view=rep:${encodeURIComponent(v)}`,
-          );
+          const next = new URLSearchParams(params?.toString() ?? '');
+          next.set('view', v === 'team' ? 'team' : `rep:${v}`);
+          router.push(`/dashboard?${next.toString()}`);
         }}
         className="cursor-pointer bg-transparent pr-1 text-[12px] font-semibold text-slate-800 focus:outline-none dark:text-[#FAFAFA]"
       >
