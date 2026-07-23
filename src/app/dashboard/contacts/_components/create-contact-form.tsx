@@ -1,15 +1,18 @@
 ﻿'use client';
 
-import { Loader2, Plus } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { AlertTriangle, Loader2, Plus, XCircle } from 'lucide-react';
+import Link from 'next/link';
+import { useEffect, useRef, useState } from 'react';
 
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
+import type { DedupMatch } from '@/lib/dedup/queries';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { OwnerFormField } from '../../_components/owner-form-field';
+import { checkDuplicateContactAction } from '../actions';
 
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
   return Object.fromEntries(
@@ -43,21 +46,87 @@ export function CreateContactForm({
   customFieldDefs,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dup, setDup] = useState<{
+    emailMatch: { id: string; name: string } | null;
+    nameMatches: DedupMatch[];
+  }>({ emailMatch: null, nameMatches: [] });
 
+  const [prevReset, setPrevReset] = useState(resetKey);
+  if (prevReset !== resetKey) {
+    setPrevReset(resetKey);
+    setDup({ emailMatch: null, nameMatches: [] });
+  }
   useEffect(() => {
     formRef.current?.reset();
   }, [resetKey]);
+
+  // Debounced live duplicate check (Module 5): email exact (block) + name fuzzy.
+  function onFormInput() {
+    if (!formRef.current) return;
+    const fd = new FormData(formRef.current);
+    const email = String(fd.get('email') ?? '').trim();
+    const firstName = String(fd.get('firstName') ?? '').trim();
+    const lastName = String(fd.get('lastName') ?? '').trim();
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      checkDuplicateContactAction({ email, firstName, lastName })
+        .then(setDup)
+        .catch(() => setDup({ emailMatch: null, nameMatches: [] }));
+    }, 400);
+  }
 
   return (
     <form
       ref={formRef}
       action={onSubmit}
+      onInput={onFormInput}
       className="flex flex-col gap-4"
       noValidate
     >
       <p className="text-xs text-slate-500">
         One name, email, or both — at least one is required.
       </p>
+
+      {dup.emailMatch ? (
+        <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-[12px] dark:border-red-500/30 dark:bg-red-500/10">
+          <div className="flex items-center gap-1.5 font-semibold text-red-700 dark:text-red-300">
+            <XCircle className="h-3.5 w-3.5" /> This email already exists
+          </div>
+          <div className="mt-0.5 text-red-800 dark:text-red-200">
+            A contact with this email is already in your workspace:{' '}
+            <Link
+              href={`/dashboard/contacts/${dup.emailMatch.id}`}
+              className="font-medium underline"
+            >
+              {dup.emailMatch.name}
+            </Link>
+            . Contact emails must be unique — saving will be rejected.
+          </div>
+        </div>
+      ) : dup.nameMatches.length > 0 ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[12px] dark:border-amber-500/30 dark:bg-amber-500/10">
+          <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-200">
+            <AlertTriangle className="h-3.5 w-3.5" /> Possible duplicate
+          </div>
+          <ul className="mt-0.5 space-y-0.5">
+            {dup.nameMatches.map((m) => (
+              <li key={m.id} className="flex items-center justify-between gap-2">
+                <span className="truncate text-amber-900 dark:text-amber-100">
+                  {m.label}
+                  {m.sublabel ? <span className="ml-1 text-amber-600">· {m.sublabel}</span> : null}
+                </span>
+                <Link
+                  href={`/dashboard/contacts/${m.id}`}
+                  className="shrink-0 font-medium text-amber-800 underline dark:text-amber-200"
+                >
+                  Open
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3">
         <Field

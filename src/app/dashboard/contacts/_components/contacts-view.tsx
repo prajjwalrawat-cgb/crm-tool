@@ -169,6 +169,9 @@ export function ContactsView({
       customFields: {},
       deletedAt: null,
       deletedBy: null,
+      normalizedName: null,
+      mergedIntoId: null,
+      dedupOverride: false,
       __pending: true,
     };
 

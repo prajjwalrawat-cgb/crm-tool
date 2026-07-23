@@ -1,5 +1,13 @@
 import { relations } from 'drizzle-orm';
-import { index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { contacts } from './contacts';
 import { deals } from './deals';
@@ -31,6 +39,19 @@ export const companies = pgTable(
       .default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: text('deleted_by'),
+    /**
+     * Module 5 (dedup): normalized name for trigram matching (see
+     * `normalizeCompanyName`). Kept in sync on create/rename. NULL = pre-backfill.
+     */
+    normalizedName: text('normalized_name'),
+    /**
+     * When set, this company was merged INTO the referenced survivor. Merged
+     * rows are excluded from all lists/search (like a soft delete) but kept for
+     * audit + reversibility.
+     */
+    mergedIntoId: uuid('merged_into_id'),
+    /** True when created despite a surfaced duplicate warning ("Create anyway"). */
+    dedupOverride: boolean('dedup_override').notNull().default(false),
   },
   (t) => [
     index('companies_tenant_id_idx').on(t.tenantId),
@@ -38,6 +59,7 @@ export const companies = pgTable(
     index('companies_tenant_domain_idx').on(t.tenantId, t.domain),
     index('companies_tenant_owner_idx').on(t.tenantId, t.ownerId),
     index('companies_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
+    index('companies_tenant_merged_idx').on(t.tenantId, t.mergedIntoId),
   ],
 );
 

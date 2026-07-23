@@ -70,6 +70,17 @@ export const ACTIVITY_ACTIONS = [
    * count as genuine activity for Module 1 gates and Module 2 scoring.
    */
   'email_synced',
+  /**
+   * A duplicate company/contact was merged into a survivor (Module 5). Recorded
+   * on the WINNER; `metadata` carries `{ loserId, auditId, repointed }`. The
+   * full loser snapshot lives in `merge_audit` for reversibility.
+   */
+  'merged',
+  /**
+   * A company/contact was created despite a surfaced duplicate warning
+   * ("Create anyway"). Recorded on the new record for data-quality review.
+   */
+  'dedup_override',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

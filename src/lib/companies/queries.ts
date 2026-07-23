@@ -27,7 +27,13 @@ export async function listCompanyOptions(tenantId: string): Promise<CompanyOptio
     tx
       .select({ id: companies.id, name: companies.name })
       .from(companies)
-      .where(and(eq(companies.tenantId, tenantId), isNull(companies.deletedAt)))
+      .where(
+        and(
+          eq(companies.tenantId, tenantId),
+          isNull(companies.deletedAt),
+          isNull(companies.mergedIntoId),
+        ),
+      )
       .orderBy(asc(companies.name)),
   );
 }
@@ -49,6 +55,7 @@ export async function listCompanyOptionsScoped(
         and(
           eq(companies.tenantId, tenantId),
           isNull(companies.deletedAt),
+          isNull(companies.mergedIntoId),
           restrictToOwnerId
             ? or(
                 eq(companies.ownerId, restrictToOwnerId),
@@ -94,6 +101,7 @@ export async function listCompanies(
   const conditions = [
     eq(companies.tenantId, tenantId),
     isNull(companies.deletedAt),
+    isNull(companies.mergedIntoId),
   ];
   if (term) conditions.push(ilike(companies.name, `%${term}%`));
 

@@ -47,7 +47,13 @@ export async function listContactOptions(tenantId: string): Promise<ContactOptio
         email: contacts.email,
       })
       .from(contacts)
-      .where(and(eq(contacts.tenantId, tenantId), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.tenantId, tenantId),
+          isNull(contacts.deletedAt),
+          isNull(contacts.mergedIntoId),
+        ),
+      )
       .orderBy(
         asc(sql`coalesce(${contacts.lastName}, ${contacts.firstName}, ${contacts.email})`),
       ),
@@ -91,6 +97,7 @@ export async function listContactPickerOptions(
         and(
           eq(contacts.tenantId, tenantId),
           isNull(contacts.deletedAt),
+          isNull(contacts.mergedIntoId),
           restrictToOwnerId
             ? or(eq(contacts.ownerId, restrictToOwnerId), isNull(contacts.ownerId))
             : undefined,
@@ -132,6 +139,8 @@ export async function listContacts(
   const conditions: SQL[] = [
     eq(contacts.tenantId, tenantId),
     isNull(contacts.deletedAt),
+    // Module 5: merged-away duplicates are hidden like soft-deletes.
+    isNull(contacts.mergedIntoId),
   ];
   if (term) {
     const pattern = `%${term}%`;
@@ -202,6 +211,9 @@ export async function listContacts(
           customFields: contacts.customFields,
           deletedAt: contacts.deletedAt,
           deletedBy: contacts.deletedBy,
+          normalizedName: contacts.normalizedName,
+          mergedIntoId: contacts.mergedIntoId,
+          dedupOverride: contacts.dedupOverride,
           companyName: companies.name,
         })
         .from(contacts)

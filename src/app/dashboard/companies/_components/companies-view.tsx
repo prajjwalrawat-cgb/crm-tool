@@ -152,6 +152,9 @@ export function CompaniesView({
       customFields: {},
       deletedAt: null,
       deletedBy: null,
+      normalizedName: null,
+      mergedIntoId: null,
+      dedupOverride: false,
       __pending: true,
     };
 

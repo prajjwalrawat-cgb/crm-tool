@@ -1,5 +1,13 @@
 import { relations } from 'drizzle-orm';
-import { index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { companies } from './companies';
 import { deals } from './deals';
@@ -36,6 +44,12 @@ export const contacts = pgTable(
       .default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: text('deleted_by'),
+    /** Module 5 (dedup): normalized full name for trigram matching. */
+    normalizedName: text('normalized_name'),
+    /** Merged INTO the referenced survivor; excluded from lists/search. */
+    mergedIntoId: uuid('merged_into_id'),
+    /** Created despite a surfaced duplicate warning. */
+    dedupOverride: boolean('dedup_override').notNull().default(false),
   },
   (t) => [
     index('contacts_tenant_id_idx').on(t.tenantId),
@@ -44,6 +58,7 @@ export const contacts = pgTable(
     index('contacts_tenant_company_idx').on(t.tenantId, t.companyId),
     index('contacts_tenant_owner_idx').on(t.tenantId, t.ownerId),
     index('contacts_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
+    index('contacts_tenant_merged_idx').on(t.tenantId, t.mergedIntoId),
   ],
 );
 

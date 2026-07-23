@@ -10,6 +10,7 @@ import {
   Mail,
   MailCheck,
   ShieldCheck,
+  Sparkles,
   Palette,
   Target,
   User,
@@ -53,6 +54,7 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/targets', label: 'Sales targets', icon: Target, visibility: 'adminOnly' },
   { href: '/dashboard/settings/custom-fields', label: 'Custom fields', icon: ListPlus, visibility: 'adminOnly' },
   { href: '/dashboard/settings/stage-gates', label: 'Stage gates', icon: ShieldCheck, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/data-quality', label: 'Data quality', icon: Sparkles, visibility: 'adminOnly' },
   { href: '/dashboard/settings/email', label: 'Email', icon: Mail, group: 'Infrastructure', visibility: 'adminOnly' },
   { href: '/dashboard/settings/ai', label: 'AI', icon: Brain, visibility: 'adminOnly' },
 ];

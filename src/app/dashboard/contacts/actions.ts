@@ -26,10 +26,51 @@ import {
 import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { serializeContact } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
+import {
+  findContactByEmail,
+  findContactNameMatches,
+  type DedupMatch,
+} from '@/lib/dedup/queries';
+import { normalizeContactName } from '@/lib/dedup/normalize';
+import { isFeatureEnabled } from '@/lib/workspace-settings/queries';
+
+/**
+ * Live duplicate check for the create-contact form (Module 5): exact email match
+ * (blocking) + fuzzy name matches (warning). Read-only; empty when DEDUP off.
+ */
+export async function checkDuplicateContactAction(input: {
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+}): Promise<{ emailMatch: { id: string; name: string } | null; nameMatches: DedupMatch[] }> {
+  const gate = await checkPermission('manageContacts');
+  if (!gate.ok) return { emailMatch: null, nameMatches: [] };
+  const { tenant, membership } = gate;
+  return runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      if (!(await isFeatureEnabled(tenant.id, 'dedupEnabled'))) {
+        return { emailMatch: null, nameMatches: [] };
+      }
+      const [emailMatch, nameMatches] = await Promise.all([
+        input.email ? findContactByEmail(tenant.id, input.email) : Promise.resolve(null),
+        findContactNameMatches(tenant.id, input.firstName ?? null, input.lastName ?? null),
+      ]);
+      return { emailMatch, nameMatches };
+    },
+  );
+}
 
 export type CreateContactResult =
   | { ok: true; contact: Contact }
-  | { ok: false; message: string; fieldErrors?: Record<string, string[]> };
+  | {
+      ok: false;
+      message: string;
+      fieldErrors?: Record<string, string[]>;
+      // Set when creation was blocked by an existing contact with the same
+      // email (Module 5) — the form links to it.
+      duplicateContact?: { id: string; name: string };
+    };
 
 export type UpdateContactResult = CreateContactResult;
 
@@ -124,6 +165,20 @@ export async function createContactAction(
         };
       }
 
+      // Duplicate-email guard (Module 5): a contact email must be unique per
+      // workspace. This is a hard block (unlike the fuzzy company/name warning).
+      if (parsed.data.email) {
+        const existing = await findContactByEmail(tenant.id, parsed.data.email);
+        if (existing) {
+          return {
+            ok: false,
+            message: `A contact with this email already exists: ${existing.name}.`,
+            fieldErrors: { email: ['This email is already on another contact.'] },
+            duplicateContact: existing,
+          };
+        }
+      }
+
       const created = await tenantTransaction(async (tx) => {
         const [row] = await tx
           .insert(contacts)
@@ -138,6 +193,10 @@ export async function createContactAction(
             ownerId: parsed.data.ownerId ?? null,
             updatedBy: membership.userId,
             customFields: cf.values,
+            normalizedName: normalizeContactName(
+              parsed.data.firstName,
+              parsed.data.lastName,
+            ),
           })
           .returning();
         if (!row) return null;

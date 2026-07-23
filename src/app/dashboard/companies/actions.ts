@@ -26,6 +26,29 @@ import {
 import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { serializeCompany } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
+import { normalizeCompanyName } from '@/lib/dedup/normalize';
+import { findCompanyMatches, type DedupMatch } from '@/lib/dedup/queries';
+import { isFeatureEnabled } from '@/lib/workspace-settings/queries';
+
+/**
+ * Live "similar existing company" lookup for the create form (Module 5).
+ * Read-only; returns [] when DEDUP_ENABLED is off. Debounced client-side.
+ */
+export async function findSimilarCompaniesAction(
+  name: string,
+): Promise<DedupMatch[]> {
+  const gate = await checkPermission('manageCompanies');
+  if (!gate.ok) return [];
+  const { tenant, membership } = gate;
+  if (!name || name.trim().length < 2) return [];
+  return runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      if (!(await isFeatureEnabled(tenant.id, 'dedupEnabled'))) return [];
+      return findCompanyMatches(tenant.id, name);
+    },
+  );
+}
 
 export type CreateCompanyResult =
   | { ok: true; company: Company }
@@ -74,6 +97,10 @@ export async function createCompanyAction(
         };
       }
 
+      // "Create anyway" flag — the create form sets this when the user proceeds
+      // past a surfaced duplicate warning (Module 5).
+      const dedupOverride = formData.get('dedupOverride') === '1';
+
       const created = await tenantTransaction(async (tx) => {
         const [row] = await tx
           .insert(companies)
@@ -85,6 +112,8 @@ export async function createCompanyAction(
             ownerId: parsed.data.ownerId ?? null,
             updatedBy: membership.userId,
             customFields: cf.values,
+            normalizedName: normalizeCompanyName(parsed.data.name),
+            dedupOverride,
           })
           .returning();
         if (!row) return null;
@@ -96,6 +125,16 @@ export async function createCompanyAction(
           action: 'created',
           metadata: { name: row.name },
         });
+        if (dedupOverride) {
+          await recordActivity(tx, {
+            tenantId: tenant.id,
+            actorUserId: membership.userId,
+            entityType: 'company',
+            entityId: row.id,
+            action: 'dedup_override',
+            metadata: { name: row.name },
+          });
+        }
         await publishRealtimeEvent(tx, {
           type: 'company.created',
           tenantId: tenant.id,

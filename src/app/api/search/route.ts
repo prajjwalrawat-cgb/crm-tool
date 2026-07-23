@@ -98,6 +98,7 @@ export async function GET(req: NextRequest): Promise<Response> {
               FROM companies
               WHERE tenant_id = ${tenant.id}::uuid
                 AND deleted_at IS NULL
+                AND merged_into_id IS NULL
                 AND (name ILIKE ${pattern} OR domain ILIKE ${pattern})
                 AND (${mineOnlyId}::text IS NULL
                      OR owner_id = ${mineOnlyId}::text
@@ -117,6 +118,7 @@ export async function GET(req: NextRequest): Promise<Response> {
               LEFT JOIN companies co ON co.id = c.company_id
               WHERE c.tenant_id = ${tenant.id}::uuid
                 AND c.deleted_at IS NULL
+                AND c.merged_into_id IS NULL
                 AND (
                   c.first_name ILIKE ${pattern}
                   OR c.last_name ILIKE ${pattern}
