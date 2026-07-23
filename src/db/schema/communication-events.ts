@@ -35,6 +35,8 @@ export const COMMUNICATION_EVENT_KINDS = [
   'clicked',
   'replied',
   'bounced',
+  /** An inbound message captured from a connected mailbox (Module 3, Gmail sync). */
+  'received',
 ] as const;
 export type CommunicationEventKind =
   (typeof COMMUNICATION_EVENT_KINDS)[number];

@@ -84,6 +84,8 @@ export async function RelationshipHealthCard({
         </span>
       </div>
 
+      <SignalFacts signal={signal} />
+
       <SignalBars breakdown={breakdown} />
 
       {explanations.length > 0 ? (
@@ -125,6 +127,50 @@ const statusIcon: Record<RelationshipStatus, typeof Heart> = {
   stale: HeartPulse,
   at_risk: HeartCrack,
 };
+
+function fmtWhen(d: Date | null): string {
+  if (!d) return '—';
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
+ * The Module 3 v1 facts the spec asks for, straight off the signal row:
+ * last inbound date, last outbound date, and the response ratio (inbound ÷
+ * outbound). Populated the moment a synced email lands on the entity.
+ */
+function SignalFacts({
+  signal,
+}: {
+  signal: NonNullable<
+    Awaited<ReturnType<typeof getRelationshipView>>['signal']
+  >;
+}) {
+  const ratio =
+    signal.totalOutbound > 0
+      ? Math.min(1, signal.totalInbound / signal.totalOutbound)
+      : signal.totalInbound > 0
+        ? 1
+        : 0;
+  const facts = [
+    { label: 'Last inbound', value: fmtWhen(signal.lastInboundAt) },
+    { label: 'Last outbound', value: fmtWhen(signal.lastOutboundAt) },
+    { label: 'Response ratio', value: `${Math.round(ratio * 100)}%` },
+  ];
+  return (
+    <dl className="mt-2 grid grid-cols-3 gap-2 text-[10.5px]">
+      {facts.map((f) => (
+        <div key={f.label} className="min-w-0">
+          <dt className="truncate opacity-70">{f.label}</dt>
+          <dd className="font-medium tabular-nums">{f.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 function SignalBars({
   breakdown,

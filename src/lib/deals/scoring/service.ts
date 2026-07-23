@@ -40,7 +40,13 @@ const OPEN_STAGES: DealStage[] = [
   'hold',
 ];
 
-const GENUINE_ACTIVITY_ACTIONS = ['call_logged', 'meeting_logged', 'email_sent'];
+const GENUINE_ACTIVITY_ACTIONS = [
+  'call_logged',
+  'meeting_logged',
+  'email_sent',
+  // Module 3: Gmail-synced emails are genuine activity for scoring recency.
+  'email_synced',
+];
 const GENUINE_TASK_TYPES = ['call', 'email', 'meeting'];
 const MS_PER_DAY = 86_400_000;
 

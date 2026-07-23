@@ -78,6 +78,8 @@ const ACTIVITY_ACTION_TO_TYPE: Record<string, GateActivityType> = {
   call_logged: 'call',
   meeting_logged: 'meeting',
   email_sent: 'email',
+  // Module 3: an email captured from a connected Gmail mailbox counts too.
+  email_synced: 'email',
 };
 
 const GENUINE_ACTIVITY_ACTIONS = Object.keys(ACTIVITY_ACTION_TO_TYPE);

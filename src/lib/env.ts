@@ -61,6 +61,13 @@ const recommendedEnvSchema = z.object({
   SMTP_PASSWORD: z.string().min(1).optional(),
   /** `true` for implicit TLS (port 465), `false` for STARTTLS (587). */
   SMTP_SECURE: z.enum(['true', 'false']).optional(),
+  /** Google OAuth2 client for Gmail sync (Module 3). */
+  GMAIL_CLIENT_ID: z.string().min(1).optional(),
+  GMAIL_CLIENT_SECRET: z.string().min(1).optional(),
+  /** OAuth redirect, e.g. https://app.example.com/api/integrations/gmail/callback */
+  GMAIL_OAUTH_REDIRECT_URI: z.string().url().optional(),
+  /** AES-256-GCM secret for encrypting Gmail refresh tokens at rest. */
+  EMAIL_SYNC_ENCRYPTION_KEY: z.string().min(16).optional(),
 });
 
 export type EnvValidationResult =
@@ -146,6 +153,22 @@ export function validateEnv(): EnvValidationResult {
       warnings.push(
         'EMAIL_FROM not set — outgoing email will use the default onboarding@resend.dev sender. Configure a verified domain in production.',
       );
+    }
+    const gmailPartial =
+      recommendedParsed.data.GMAIL_CLIENT_ID ||
+      recommendedParsed.data.GMAIL_CLIENT_SECRET ||
+      recommendedParsed.data.GMAIL_OAUTH_REDIRECT_URI;
+    if (gmailPartial) {
+      const missing: string[] = [];
+      if (!recommendedParsed.data.GMAIL_CLIENT_ID) missing.push('GMAIL_CLIENT_ID');
+      if (!recommendedParsed.data.GMAIL_CLIENT_SECRET) missing.push('GMAIL_CLIENT_SECRET');
+      if (!recommendedParsed.data.GMAIL_OAUTH_REDIRECT_URI) missing.push('GMAIL_OAUTH_REDIRECT_URI');
+      if (!recommendedParsed.data.EMAIL_SYNC_ENCRYPTION_KEY) missing.push('EMAIL_SYNC_ENCRYPTION_KEY');
+      if (missing.length > 0) {
+        warnings.push(
+          `Gmail sync (Module 3) is partially configured — missing ${missing.join(', ')}. Connect Gmail will be disabled until all are set.`,
+        );
+      }
     }
   }
 

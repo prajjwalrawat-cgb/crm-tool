@@ -62,6 +62,14 @@ export const ACTIVITY_ACTIONS = [
    * skipped without blocking the rep.
    */
   'gate_warning',
+  /**
+   * An email captured from a connected Gmail mailbox (Module 3). `metadata`
+   * carries `{ emailId, direction, subject, source: 'gmail_sync', needsReview }`.
+   * The timeline renders the linked email_messages row (metadata.emailId is set,
+   * so this activity row is skipped there); this row exists so synced emails
+   * count as genuine activity for Module 1 gates and Module 2 scoring.
+   */
+  'email_synced',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 
