@@ -51,6 +51,10 @@ import { type GateFailure } from '@/lib/stage-gates/types';
 import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
 import { deriveForecastCategory } from '@/lib/deals/forecast/categories';
 import { HOLD_REASONS } from '@/lib/deals/hold';
+import {
+  LEAD_CLOSE_DATE_MESSAGE,
+  violatesLeadCloseDate,
+} from '@/lib/deals/validation';
 import { personaOf } from '@/lib/personas';
 import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
@@ -237,6 +241,15 @@ export async function createDealAction(
           ok: false,
           message: flat.formErrors[0] ?? 'Please fix the highlighted fields.',
           fieldErrors: flat.fieldErrors as Record<string, string[]>,
+        };
+      }
+
+      // Business rule: a dated deal can't be created in Lead.
+      if (violatesLeadCloseDate(parsed.data.stage, parsed.data.expectedCloseDate)) {
+        return {
+          ok: false,
+          message: LEAD_CLOSE_DATE_MESSAGE,
+          fieldErrors: { stage: [LEAD_CLOSE_DATE_MESSAGE] },
         };
       }
 
@@ -473,6 +486,15 @@ export async function updateDealAction(
           ok: false,
           message: flat.formErrors[0] ?? 'Please fix the highlighted fields.',
           fieldErrors: flat.fieldErrors as Record<string, string[]>,
+        };
+      }
+
+      // Business rule: a dated deal can't be saved in Lead.
+      if (violatesLeadCloseDate(parsed.data.stage, parsed.data.expectedCloseDate)) {
+        return {
+          ok: false,
+          message: LEAD_CLOSE_DATE_MESSAGE,
+          fieldErrors: { stage: [LEAD_CLOSE_DATE_MESSAGE] },
         };
       }
 
@@ -815,6 +837,24 @@ export async function updateDealStageAction(
             message: 'Moving to Hold needs a reason and a revisit date.',
           };
         }
+      }
+
+      // Business rule: a dated deal can't be moved back to Lead.
+      if (parsed.data.stage === 'lead') {
+        const [d] = await tenantTransaction((tx) =>
+          tx
+            .select({ ecd: deals.expectedCloseDate })
+            .from(deals)
+            .where(
+              and(
+                eq(deals.id, parsed.data.id),
+                eq(deals.tenantId, tenant.id),
+                isNull(deals.deletedAt),
+              ),
+            )
+            .limit(1),
+        );
+        if (d?.ecd) return { ok: false, message: LEAD_CLOSE_DATE_MESSAGE };
       }
 
       const result = await tenantTransaction(async (tx) => {
@@ -1704,6 +1744,16 @@ export async function patchDealAction(
           throw new Error('AMOUNT_DERIVED');
         }
 
+        // Business rule: setting a close date on a Lead-stage deal is rejected —
+        // the deal must first advance to Qualified or higher.
+        const effectiveCloseDate =
+          d.expectedCloseDate !== undefined
+            ? d.expectedCloseDate
+            : previous.expectedCloseDate;
+        if (violatesLeadCloseDate(previous.stage, effectiveCloseDate)) {
+          throw new Error('LEAD_CLOSE_DATE');
+        }
+
         const patch: Record<string, unknown> = { ...linkPatch };
         if (d.name !== undefined) patch.name = d.name;
         if (d.expectedCloseDate !== undefined)
@@ -1769,6 +1819,9 @@ export async function patchDealAction(
             ok: false,
             message: 'Amount is set by Per Unit Price × Qty on the deal.',
           };
+        }
+        if (err instanceof Error && err.message === 'LEAD_CLOSE_DATE') {
+          return { ok: false, message: LEAD_CLOSE_DATE_MESSAGE };
         }
         throw err;
       }
@@ -2071,6 +2124,12 @@ export async function bulkUploadDealsAction(
             continue;
           }
           expectedCloseDate = closeRaw;
+        }
+
+        // Business rule: a dated deal can't be imported at the Lead stage.
+        if (violatesLeadCloseDate(stage, expectedCloseDate)) {
+          errors.push({ row: i + 1, message: LEAD_CLOSE_DATE_MESSAGE });
+          continue;
         }
 
         // Company is a free-text label (matches the deal form) — store as

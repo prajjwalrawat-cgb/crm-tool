@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { Check, ChevronDown, Eye, EyeOff, ExternalLink, Loader2, MoreVertical, Pencil, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Download, Eye, EyeOff, ExternalLink, Loader2, MoreVertical, Pencil, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -661,6 +661,16 @@ export function DealsView({
               />
             ) : null}
           </div>
+          <a
+            href={`/api/deals/export${
+              searchParams.toString() ? `?${searchParams.toString()}` : ''
+            }`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-[#262626] dark:bg-[#0F0F0F] dark:text-[#D4D4D8] dark:hover:bg-[#161616]"
+            title="Export the current (filtered) deals to Excel/CSV"
+          >
+            <Download className="h-4 w-4" aria-hidden />
+            Export
+          </a>
           {canEdit ? (
             <>
               <BulkUploadButton />
