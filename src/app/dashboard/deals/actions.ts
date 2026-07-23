@@ -50,6 +50,7 @@ import { evaluateStageTransition } from '@/lib/stage-gates/evaluate';
 import { type GateFailure } from '@/lib/stage-gates/types';
 import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
 import { deriveForecastCategory } from '@/lib/deals/forecast/categories';
+import { HOLD_REASONS } from '@/lib/deals/hold';
 import { personaOf } from '@/lib/personas';
 import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
@@ -82,6 +83,9 @@ export type UpdateDealResult =
 export type SimpleResult =
   | { ok: true }
   | { ok: false; message: string };
+
+/** Thrown when the edit form tries to enter Hold (Module 6) — needs the board. */
+class HoldEditError extends Error {}
 
 /**
  * Read custom-field values out of FormData (inputs are named `cf_<key>`) and
@@ -560,6 +564,12 @@ export async function updateDealAction(
           .limit(1);
         if (!previous) return null;
 
+        // Module 6: entering Hold needs a reason + revisit date, which the edit
+        // form doesn't collect — send the user to the board for that move.
+        if (parsed.data.stage === 'hold' && previous.stage !== 'hold') {
+          throw new HoldEditError();
+        }
+
         // Stage-gate enforcement when the edit changes the stage. The gate is
         // evaluated against the values being SAVED (override) so setting the
         // amount/contact and advancing in one submit is not wrongly blocked.
@@ -632,6 +642,10 @@ export async function updateDealAction(
             !previous.forecastCategoryOverridden
               ? { forecastCategory: deriveForecastCategory(parsed.data.stage) }
               : {}),
+            // Module 6: clear hold fields when the edit moves the deal off Hold.
+            ...(previous.stage === 'hold' && parsed.data.stage !== 'hold'
+              ? { holdReason: null, holdRevisitOn: null, holdNote: null }
+              : {}),
             updatedBy: membership.userId,
             ...ownerPatch,
           })
@@ -700,6 +714,13 @@ export async function updateDealAction(
             toStage: err.toStage,
           };
         }
+        if (err instanceof HoldEditError) {
+          return {
+            ok: false,
+            message:
+              'Put a deal on Hold from the pipeline board — it needs a reason and a revisit date.',
+          };
+        }
         throw err;
       }
 
@@ -734,6 +755,13 @@ const updateStageSchema = z.object({
   reason: z.string().max(1000).optional(),
   // Justification captured for a `custom_note` stage gate on the target stage.
   gateNote: z.string().max(2000).optional(),
+  // Module 6 — required when moving to 'hold'.
+  holdReason: z.enum(HOLD_REASONS).optional(),
+  holdRevisitOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+    .optional(),
+  holdNote: z.string().max(1000).optional(),
 });
 
 export type UpdateDealStageInput = {
@@ -741,6 +769,9 @@ export type UpdateDealStageInput = {
   stage: string;
   reason?: string;
   gateNote?: string;
+  holdReason?: string;
+  holdRevisitOn?: string;
+  holdNote?: string;
 };
 
 export type UpdateDealStageResult =
@@ -775,6 +806,16 @@ export async function updateDealStageAction(
 
       const isClosed =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
+
+      // Module 6: moving to Hold requires a reason code + a revisit date.
+      if (parsed.data.stage === 'hold') {
+        if (!parsed.data.holdReason || !parsed.data.holdRevisitOn) {
+          return {
+            ok: false,
+            message: 'Moving to Hold needs a reason and a revisit date.',
+          };
+        }
+      }
 
       const result = await tenantTransaction(async (tx) => {
         const [previous] = await tx
@@ -875,6 +916,14 @@ export async function updateDealStageAction(
             ...(previous.forecastCategoryOverridden
               ? {}
               : { forecastCategory: deriveForecastCategory(parsed.data.stage) }),
+            // Module 6: set hold fields when entering Hold, clear them otherwise.
+            ...(parsed.data.stage === 'hold'
+              ? {
+                  holdReason: parsed.data.holdReason,
+                  holdRevisitOn: parsed.data.holdRevisitOn,
+                  holdNote: parsed.data.holdNote?.trim() || null,
+                }
+              : { holdReason: null, holdRevisitOn: null, holdNote: null }),
             updatedBy: membership.userId,
           })
           .where(

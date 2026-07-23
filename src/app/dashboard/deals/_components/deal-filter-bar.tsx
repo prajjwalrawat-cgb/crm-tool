@@ -140,6 +140,10 @@ export function DealFilterBar({
       pushFilters({ ...initialFilters, score: next }),
     [initialFilters, pushFilters],
   );
+  const setRevisitDue = useCallback(
+    (next: boolean) => pushFilters({ ...initialFilters, revisitDue: next }),
+    [initialFilters, pushFilters],
+  );
 
   const clearAll = useCallback(
     () => pushFilters({}),
@@ -195,6 +199,11 @@ export function DealFilterBar({
           onClick={() => setApprovedOnly(!initialFilters.approvedOnly)}
         />
         <ScorePopover selected={initialFilters.score} onChange={setScore} />
+        <ToggleChip
+          label="Revisit due"
+          active={!!initialFilters.revisitDue}
+          onClick={() => setRevisitDue(!initialFilters.revisitDue)}
+        />
         <CompanyPopover
           selectedIds={initialFilters.companyIds ?? []}
           options={companyOptions}

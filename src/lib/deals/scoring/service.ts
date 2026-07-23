@@ -31,13 +31,16 @@ const FALLBACK_MEDIANS: Record<DealStage, number> = {
   lost: 14,
 };
 
-/** Stages whose deals are still "open" and get scored. */
+/**
+ * Stages whose deals are actively scored. Hold is deliberately excluded
+ * (Module 6): held deals are frozen at their last score — no recompute churn —
+ * until they leave Hold.
+ */
 const OPEN_STAGES: DealStage[] = [
   'lead',
   'qualified',
   'proposal',
   'negotiation',
-  'hold',
 ];
 
 const GENUINE_ACTIVITY_ACTIONS = [
@@ -119,7 +122,10 @@ async function gatherContext(
   medians: Record<DealStage, number>,
   now: Date,
 ): Promise<DealScoreContext | null> {
-  if (deal.stage === 'won' || deal.stage === 'lost') return null;
+  // Won/lost = closed; hold = frozen (Module 6). None are scored.
+  if (deal.stage === 'won' || deal.stage === 'lost' || deal.stage === 'hold') {
+    return null;
+  }
 
   const [act] = await exec
     .select({ last: sql<Date | null>`max(${activityLogs.createdAt})` })

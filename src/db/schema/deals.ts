@@ -80,6 +80,15 @@ export const deals = pgTable(
     /** Why the deal was lost. Free text; NULL unless stage = 'lost'. */
     lostReason: text('lost_reason'),
     /**
+     * Module 6 — Hold parking state. Required when stage = 'hold': a reason code
+     * (budget_deferred | champion_left | timing | competitor_evaluation |
+     * client_unresponsive | other) + a "revisit on" date. Cleared on leaving
+     * Hold. `holdNote` is an optional free-text elaboration.
+     */
+    holdReason: text('hold_reason'),
+    holdRevisitOn: date('hold_revisit_on'),
+    holdNote: text('hold_note'),
+    /**
      * Human-readable "what has to happen to close" line for pipeline reviews.
      * Distinct from Tasks — a single freeform sentence, not a checklist.
      */

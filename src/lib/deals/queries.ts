@@ -125,6 +125,9 @@ type RawJoinedRow = {
   healthBand: string | null;
   forecastCategory: string | null;
   forecastCategoryOverridden: boolean;
+  holdReason: string | null;
+  holdRevisitOn: string | null;
+  holdNote: string | null;
   companyName: string | null;
   contactFirstName: string | null;
   contactLastName: string | null;
@@ -170,6 +173,9 @@ const DEALS_PROJECTION = {
   healthBand: deals.healthBand,
   forecastCategory: deals.forecastCategory,
   forecastCategoryOverridden: deals.forecastCategoryOverridden,
+  holdReason: deals.holdReason,
+  holdRevisitOn: deals.holdRevisitOn,
+  holdNote: deals.holdNote,
   // Display name: the typed free-text label takes precedence, falling back
   // to the linked company record's name (legacy/linked deals).
   companyName: sql<string | null>`coalesce(${deals.companyNameText}, ${companies.name})`,
@@ -311,6 +317,11 @@ export async function listDeals(
   }
   if (f.score) {
     conditions.push(eq(deals.healthBand, f.score));
+  }
+  if (f.revisitDue) {
+    conditions.push(
+      sql`${deals.stage} = 'hold' AND ${deals.holdRevisitOn} IS NOT NULL AND ${deals.holdRevisitOn} <= CURRENT_DATE`,
+    );
   }
   // Hard scope: members see only their deals + unassigned. URL params
   // cannot widen this — they're additive within the allowed set.
@@ -572,6 +583,11 @@ function boardSharedConditions(
   }
   if (f.score) {
     conds.push(eq(deals.healthBand, f.score));
+  }
+  if (f.revisitDue) {
+    conds.push(
+      sql`${deals.stage} = 'hold' AND ${deals.holdRevisitOn} IS NOT NULL AND ${deals.holdRevisitOn} <= CURRENT_DATE`,
+    );
   }
   if (options.restrictToOwnerOrUnassigned) {
     const me = options.restrictToOwnerOrUnassigned;

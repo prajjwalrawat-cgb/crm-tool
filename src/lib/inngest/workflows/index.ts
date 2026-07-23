@@ -19,6 +19,7 @@ import {
 import { dealScoresNightly } from './deal-scores-nightly';
 import { forecastSnapshotWeekly } from './forecast-snapshot-weekly';
 import { gmailSync } from './gmail-sync';
+import { holdRevisitDaily } from './hold-revisit-daily';
 import {
   newMemberOnboarding,
   newMemberOnboardingHandler,
@@ -51,6 +52,7 @@ export {
   dealScoresNightly,
   forecastSnapshotWeekly,
   gmailSync,
+  holdRevisitDaily,
   newMemberOnboarding,
   notificationsRetention,
   regenerateEmbedding,

@@ -396,6 +396,9 @@ export function DealsView({
       healthBand: base?.healthBand ?? null,
       forecastCategory: base?.forecastCategory ?? null,
       forecastCategoryOverridden: base?.forecastCategoryOverridden ?? false,
+      holdReason: base?.holdReason ?? null,
+      holdRevisitOn: base?.holdRevisitOn ?? null,
+      holdNote: base?.holdNote ?? null,
       __pending: true,
     };
   }

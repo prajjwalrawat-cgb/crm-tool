@@ -162,7 +162,8 @@ async function queryRollup(
     WHEN 'lost' THEN 'omitted'
     WHEN 'hold' THEN 'omitted'
     ELSE 'pipeline' END)`;
-  const overdueExpr = sql`(${deals.stage} NOT IN ('won','lost') AND ${deals.expectedCloseDate} IS NOT NULL AND ${deals.expectedCloseDate} < CURRENT_DATE)`;
+  // Held deals are parked with a revisit date (Module 6) — never "overdue".
+  const overdueExpr = sql`(${deals.stage} NOT IN ('won','lost','hold') AND ${deals.expectedCloseDate} IS NOT NULL AND ${deals.expectedCloseDate} < CURRENT_DATE)`;
 
   const conds = [
     eq(deals.tenantId, params.tenantId),

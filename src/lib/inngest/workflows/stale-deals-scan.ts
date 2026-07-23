@@ -102,6 +102,8 @@ async function scanTenant(tenantId: string): Promise<number> {
             isNull(deals.deletedAt),
             ne(deals.stage, 'won'),
             ne(deals.stage, 'lost'),
+            // Module 6: held deals are parked with a revisit date — not stale.
+            ne(deals.stage, 'hold'),
             lt(deals.updatedAt, cutoff),
           ),
         ),

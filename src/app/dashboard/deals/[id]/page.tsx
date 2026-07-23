@@ -58,6 +58,7 @@ import { SummaryCard } from './_components/summary-card';
 import { DealPathBar } from './_components/deal-path-bar';
 import { DealScoreCard } from './_components/deal-score-card';
 import { ForecastCategorySelect } from './_components/forecast-category-select';
+import { HoldControl } from './_components/hold-control';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -281,6 +282,15 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 current={deal.forecastCategory ?? null}
                 overridden={deal.forecastCategoryOverridden}
                 canEdit={canForecast}
+              />
+              <HoldControl
+                dealId={deal.id}
+                dealName={deal.name}
+                stage={deal.stage}
+                holdReason={deal.holdReason ?? null}
+                holdRevisitOn={deal.holdRevisitOn ?? null}
+                holdNote={deal.holdNote ?? null}
+                canEdit={canEdit}
               />
               <StageHistoryCard
                 entries={stageHistory.entries.map((e) => ({

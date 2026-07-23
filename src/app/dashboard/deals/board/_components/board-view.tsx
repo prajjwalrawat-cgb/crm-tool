@@ -40,9 +40,11 @@ import { FilterChips, type FilterChip } from '../../../_components/filter-chips'
 import { updateDealStageAction } from '../../actions';
 import { loadMoreStageDealsAction } from '../actions';
 import { LostReasonModal } from '../../_components/lost-reason-modal';
+import { HoldReasonModal } from '../../_components/hold-reason-modal';
 import { type BoardCard, DealCard } from './deal-card';
 import { BoardColumn } from './board-column';
 import { GateBlockPanel } from './gate-block-panel';
+import { CollapsedHoldColumn } from './collapsed-hold-column';
 import type { GateFailure } from '@/lib/stage-gates/types';
 
 type LocalBoard = Record<DealStage, BoardCard[]>;
@@ -230,10 +232,18 @@ export function BoardView({
   // Stage filter on the board hides columns the user didn't select so
   // the layout collapses to just the relevant lanes — matches the
   // list view's "stage IN (...)" semantics visually.
-  const visibleStages: readonly DealStage[] =
+  const visibleStages: readonly DealStage[] = (
     initialFilters.stages && initialFilters.stages.length > 0
       ? DEAL_STAGES.filter((s) => initialFilters.stages!.includes(s))
-      : DEAL_STAGES;
+      : DEAL_STAGES
+  ).filter(
+    // Module 6: the Hold column is hidden entirely when empty. To put the first
+    // deal on Hold, use "Put on hold" on the deal detail page.
+    (s) =>
+      s !== 'hold' ||
+      (stageCounts.hold ?? 0) > 0 ||
+      (initialFilters.stages?.includes('hold') ?? false),
+  );
 
   const [board, setBoard] = useState<LocalBoard>(() => initialBoard);
   const [activeCard, setActiveCard] = useState<BoardCard | null>(null);
@@ -265,6 +275,15 @@ export function BoardView({
     next: LocalBoard;
     dealName: string;
   } | null>(null);
+  // A drag onto Hold, held until the reason + revisit date are entered.
+  const [holdPrompt, setHoldPrompt] = useState<{
+    dealId: string;
+    snapshot: LocalBoard;
+    next: LocalBoard;
+    dealName: string;
+  } | null>(null);
+  // Hold column is collapsed to a slim bar by default when non-empty.
+  const [holdExpanded, setHoldExpanded] = useState(false);
 
   // Track the most recent server-acknowledged board so a *late* error from a
   // prior request rolls back to the right state, not an even older one.
@@ -428,6 +447,7 @@ export function BoardView({
       snapshot: LocalBoard,
       next: LocalBoard,
       reason?: string,
+      hold?: { holdReason: string; holdRevisitOn: string; holdNote: string },
     ) => {
       const seq = ++dragSeqRef.current;
       setError(null);
@@ -436,6 +456,9 @@ export function BoardView({
           id: dealId,
           stage: toStage,
           reason,
+          holdReason: hold?.holdReason,
+          holdRevisitOn: hold?.holdRevisitOn,
+          holdNote: hold?.holdNote,
         });
         // If the user has issued a newer drag in the meantime, ignore this
         // outcome — the newer drag's transition owns the state now.
@@ -507,6 +530,13 @@ export function BoardView({
         return;
       }
 
+      // Moving to Hold: capture the reason + revisit date before committing.
+      if (toStage === 'hold') {
+        const dealName = next.hold.find((d) => d.id === dealId)?.name ?? 'this deal';
+        setHoldPrompt({ dealId, snapshot, next, dealName });
+        return;
+      }
+
       commitStage(dealId, toStage, snapshot, next);
     },
     [board, commitStage],
@@ -518,26 +548,38 @@ export function BoardView({
 
   const columns = useMemo(
     () =>
-      visibleStages.map((stage) => (
-        <BoardColumn
-          key={stage}
-          stage={stage}
-          cards={board[stage]}
-          totalCount={stageCounts[stage]}
-          totalAmountMinor={stageAmounts[stage] ?? 0}
-          probability={stageProbabilities[stage] ?? 0}
-          currency={boardCurrency}
-          canMove={canMove}
-          isDragActive={activeCard !== null}
-          hasMore={moreByStage[stage] ?? false}
-          loadingMore={loadingStages.has(stage)}
-          onLoadMore={handleLoadMore}
-        />
-      )),
+      visibleStages.map((stage) =>
+        stage === 'hold' && !holdExpanded ? (
+          <CollapsedHoldColumn
+            key="hold"
+            count={stageCounts.hold ?? 0}
+            totalAmountMinor={stageAmounts.hold ?? 0}
+            currency={boardCurrency}
+            isDragActive={activeCard !== null}
+            onExpand={() => setHoldExpanded(true)}
+          />
+        ) : (
+          <BoardColumn
+            key={stage}
+            stage={stage}
+            cards={board[stage]}
+            totalCount={stageCounts[stage]}
+            totalAmountMinor={stageAmounts[stage] ?? 0}
+            probability={stageProbabilities[stage] ?? 0}
+            currency={boardCurrency}
+            canMove={canMove}
+            isDragActive={activeCard !== null}
+            hasMore={moreByStage[stage] ?? false}
+            loadingMore={loadingStages.has(stage)}
+            onLoadMore={handleLoadMore}
+          />
+        ),
+      ),
     [
       board,
       canMove,
       activeCard,
+      holdExpanded,
       stageCounts,
       stageAmounts,
       stageProbabilities,
@@ -658,6 +700,29 @@ export function BoardView({
               reason,
             );
             setLostPrompt(null);
+          }}
+        />
+      ) : null}
+
+      {holdPrompt ? (
+        <HoldReasonModal
+          dealName={holdPrompt.dealName}
+          onCancel={() => {
+            setBoard(holdPrompt.snapshot);
+            lastKnownGoodRef.current = holdPrompt.snapshot;
+            setHoldPrompt(null);
+          }}
+          onConfirm={(holdReason, holdRevisitOn, holdNote) => {
+            commitStage(
+              holdPrompt.dealId,
+              'hold',
+              holdPrompt.snapshot,
+              holdPrompt.next,
+              undefined,
+              { holdReason, holdRevisitOn, holdNote },
+            );
+            setHoldExpanded(true);
+            setHoldPrompt(null);
           }}
         />
       ) : null}

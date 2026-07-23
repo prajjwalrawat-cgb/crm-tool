@@ -49,6 +49,8 @@ export type DealFilters = {
   approvedOnly?: boolean;
   /** Health-score band filter (Module 2): matches deals.health_band. */
   score?: 'strong' | 'moderate' | 'at_risk';
+  /** Held deals whose revisit date has arrived (Module 6). */
+  revisitDue?: boolean;
 };
 
 export const SCORE_BANDS = ['strong', 'moderate', 'at_risk'] as const;
@@ -69,6 +71,7 @@ const URL_FILTER_KEYS = [
   'owner',
   'approval',
   'score',
+  'revisitDue',
 ] as const;
 
 /**
@@ -143,6 +146,7 @@ export function parseDealFilters(
       raw.score === 'at_risk'
         ? raw.score
         : undefined,
+    revisitDue: flag(raw.revisitDue),
   };
 }
 
@@ -182,6 +186,7 @@ export function dealFiltersToSearchParams(
   if (filters.awaitingApproval) out.set('approval', 'pending');
   else if (filters.approvedOnly) out.set('approval', 'approved');
   if (filters.score) out.set('score', filters.score);
+  if (filters.revisitDue) out.set('revisitDue', '1');
   return out;
 }
 
@@ -199,6 +204,7 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       (filters.ownerIds && filters.ownerIds.length > 0) ||
       filters.awaitingApproval ||
       filters.approvedOnly ||
-      filters.score,
+      filters.score ||
+      filters.revisitDue,
   );
 }

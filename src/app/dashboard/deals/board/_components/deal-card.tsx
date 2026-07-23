@@ -129,9 +129,16 @@ export const DealCard = memo(function DealCard({
           </Link>
         )}
         <span className="flex shrink-0 items-center gap-1.5">
-          {deal.stage !== 'won' &&
-          deal.stage !== 'lost' &&
-          deal.healthScore != null ? (
+          {deal.stage === 'hold' ? (
+            <span
+              title="On hold — score frozen"
+              className="inline-flex h-5 items-center rounded-full bg-orange-100 px-2 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:bg-orange-500/15 dark:text-orange-300"
+            >
+              On hold
+            </span>
+          ) : deal.stage !== 'won' &&
+            deal.stage !== 'lost' &&
+            deal.healthScore != null ? (
             <span
               title={`Health score: ${deal.healthScore}/100`}
               className={cn(
