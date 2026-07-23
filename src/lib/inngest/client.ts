@@ -42,3 +42,7 @@ export const memberInvitedEvent = eventType('crm/member.invited', {
 export const embedEntityEvent = eventType('crm/ai.embed_entity', {
   schema: staticSchema<WorkflowEvents['crm/ai.embed_entity']>(),
 });
+
+export const dealHealthRecomputeEvent = eventType('crm/deal.health_recompute', {
+  schema: staticSchema<WorkflowEvents['crm/deal.health_recompute']>(),
+});

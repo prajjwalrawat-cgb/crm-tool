@@ -135,6 +135,11 @@ export function DealFilterBar({
       }),
     [initialFilters, pushFilters],
   );
+  const setScore = useCallback(
+    (next: DealFilters['score']) =>
+      pushFilters({ ...initialFilters, score: next }),
+    [initialFilters, pushFilters],
+  );
 
   const clearAll = useCallback(
     () => pushFilters({}),
@@ -189,6 +194,7 @@ export function DealFilterBar({
           active={!!initialFilters.approvedOnly}
           onClick={() => setApprovedOnly(!initialFilters.approvedOnly)}
         />
+        <ScorePopover selected={initialFilters.score} onChange={setScore} />
         <CompanyPopover
           selectedIds={initialFilters.companyIds ?? []}
           options={companyOptions}
@@ -384,6 +390,69 @@ function StagePopover({
                     {checked ? <span className="text-[8px]">✓</span> : null}
                   </span>
                   <span className="capitalize">{DEAL_STAGE_LABELS[stage]}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </Popover>
+    </div>
+  );
+}
+
+const SCORE_OPTIONS: Array<{
+  value: NonNullable<DealFilters['score']>;
+  label: string;
+  dot: string;
+}> = [
+  { value: 'strong', label: 'Strong (≥70)', dot: 'bg-emerald-500' },
+  { value: 'moderate', label: 'Moderate (40–69)', dot: 'bg-amber-400' },
+  { value: 'at_risk', label: 'At risk (<40)', dot: 'bg-rose-500' },
+];
+
+function ScorePopover({
+  selected,
+  onChange,
+}: {
+  selected: DealFilters['score'] | undefined;
+  onChange: (next: DealFilters['score']) => void;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const active = !!selected;
+  const current = SCORE_OPTIONS.find((o) => o.value === selected);
+  const label = active ? `Score: ${current?.label.split(' ')[0]}` : 'Score';
+
+  return (
+    <div className="relative">
+      <Chip
+        active={active}
+        onClick={() => setOpen((v) => !v)}
+        onClear={() => onChange(undefined)}
+      >
+        {label}
+      </Chip>
+      <Popover anchorRef={anchorRef} open={open} onClose={() => setOpen(false)}>
+        <ul className="flex flex-col">
+          {SCORE_OPTIONS.map((o) => {
+            const checked = selected === o.value;
+            return (
+              <li key={o.value}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(checked ? undefined : o.value);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] transition',
+                    checked
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-slate-700 hover:bg-slate-50',
+                  )}
+                >
+                  <span className={cn('h-2.5 w-2.5 rounded-full', o.dot)} aria-hidden />
+                  <span>{o.label}</span>
                 </button>
               </li>
             );

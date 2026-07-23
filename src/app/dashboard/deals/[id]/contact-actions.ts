@@ -8,6 +8,7 @@ import { contacts, dealContacts, deals } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
+import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
 
 const ROLES = [
   'decision_maker',
@@ -130,6 +131,7 @@ export async function addDealContactAction(
         throw err;
       }
 
+      await queueDealScoreRecompute(tenant.id, parsed.data.dealId, 'stakeholder_added');
       revalidatePath(`/dashboard/deals/${parsed.data.dealId}`);
       return { ok: true };
     },
@@ -213,6 +215,7 @@ export async function createAndLinkContactAction(
         });
       });
 
+      await queueDealScoreRecompute(tenant.id, parsed.data.dealId, 'stakeholder_added');
       revalidatePath(`/dashboard/deals/${parsed.data.dealId}`);
       revalidatePath('/dashboard/contacts');
       return { ok: true };
@@ -345,6 +348,7 @@ export async function removeDealContactAction(
           }
         }
       });
+      await queueDealScoreRecompute(tenant.id, parsed.data.dealId, 'stakeholder_removed');
       revalidatePath(`/dashboard/deals/${parsed.data.dealId}`);
       return { ok: true };
     },

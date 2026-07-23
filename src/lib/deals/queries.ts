@@ -25,7 +25,6 @@ import {
   type DealApprovalStatus,
 } from '@/db/schema';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
-import { computeDealHealth, type DealHealth } from '@/lib/deals/health';
 import {
   buildPage,
   type Cursor,
@@ -46,8 +45,8 @@ export type DealRow = Deal & {
   companyName: string | null;
   contactName: string | null;
   contactEmail: string | null;
-  /** Server-computed engagement/priority signal (see lib/deals/health). */
-  health: DealHealth;
+  // Health (Module 2) rides along as `healthScore` / `healthBand` — real
+  // columns on `deals`, already part of `Deal`.
 };
 
 export type DealOption = {
@@ -122,6 +121,8 @@ type RawJoinedRow = {
   contactEmailText: string | null;
   customFields: Record<string, unknown>;
   updatedBy: string | null;
+  healthScore: number | null;
+  healthBand: string | null;
   companyName: string | null;
   contactFirstName: string | null;
   contactLastName: string | null;
@@ -163,6 +164,8 @@ const DEALS_PROJECTION = {
   contactEmailText: deals.contactEmailText,
   customFields: deals.customFields,
   updatedBy: deals.updatedBy,
+  healthScore: deals.healthScore,
+  healthBand: deals.healthBand,
   // Display name: the typed free-text label takes precedence, falling back
   // to the linked company record's name (legacy/linked deals).
   companyName: sql<string | null>`coalesce(${deals.companyNameText}, ${companies.name})`,
@@ -233,11 +236,6 @@ function shapeDealRow(r: RawJoinedRow): DealRow {
     contactName:
       r.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
     contactEmail,
-    health: computeDealHealth({
-      updatedAt: r.updatedAt,
-      expectedCloseDate: r.expectedCloseDate,
-      stage: r.stage,
-    }),
   };
 }
 
@@ -306,6 +304,9 @@ export async function listDeals(
       eq(deals.stage, 'won'),
       eq(deals.approvalStatus, 'approved'),
     );
+  }
+  if (f.score) {
+    conditions.push(eq(deals.healthBand, f.score));
   }
   // Hard scope: members see only their deals + unassigned. URL params
   // cannot widen this — they're additive within the allowed set.
@@ -564,6 +565,9 @@ function boardSharedConditions(
   }
   if (f.approvedOnly) {
     conds.push(eq(deals.stage, 'won'), eq(deals.approvalStatus, 'approved'));
+  }
+  if (f.score) {
+    conds.push(eq(deals.healthBand, f.score));
   }
   if (options.restrictToOwnerOrUnassigned) {
     const me = options.restrictToOwnerOrUnassigned;

@@ -101,6 +101,15 @@ export const deals = pgTable(
      * as the stage default at query time.
      */
     probability: smallint('probability'),
+    /**
+     * Denormalized current health score (Module 2). The append-only
+     * `deal_scores` table is the source of truth + trend history; these two
+     * columns are a cache the recompute service keeps in lockstep so the board
+     * and the pipeline Score filter are cheap single-column reads. NULL until
+     * the deal has been scored at least once.
+     */
+    healthScore: smallint('health_score'),
+    healthBand: text('health_band'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()

@@ -17,6 +17,7 @@ import { listDealContacts } from '@/lib/deals/contacts';
 import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
 import { getDealStageHistory } from '@/lib/deals/stage-history';
+import { getDealScoreWithHistory } from '@/lib/deals/scoring/service';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
 import { DEAL_STAGE_LABELS, DEAL_TYPE_LABELS } from '@/lib/deals/schema';
@@ -50,6 +51,7 @@ import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { StageHistoryCard } from './_components/stage-history-card';
 import { SummaryCard } from './_components/summary-card';
 import { DealPathBar } from './_components/deal-path-bar';
+import { DealScoreCard } from './_components/deal-score-card';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -86,6 +88,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       contactOptions,
       dealDocumentRows,
       pathBarGates,
+      dealScore,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -106,6 +109,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
         deal.id,
         Array.from(new Set([...PATH_STAGES, deal.stage])),
       ),
+      // Deal Score card: current score + trend history (Module 2).
+      getDealScoreWithHistory(tenant.id, deal.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -418,6 +423,18 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 ) : null
               }
             />
+
+            {dealScore.current ? (
+              <DealScoreCard
+                score={dealScore.current.score}
+                band={dealScore.current.band}
+                reasons={dealScore.current.reasons}
+                history={dealScore.history.map((p) => ({
+                  score: p.score,
+                  computedAt: p.computedAt.toISOString(),
+                }))}
+              />
+            ) : null}
 
             <EntityTasksPanel
               entityType="deal"

@@ -47,7 +47,11 @@ export type DealFilters = {
   awaitingApproval?: boolean;
   /** Won deals that have been manager-approved (stage=won + approved). */
   approvedOnly?: boolean;
+  /** Health-score band filter (Module 2): matches deals.health_band. */
+  score?: 'strong' | 'moderate' | 'at_risk';
 };
+
+export const SCORE_BANDS = ['strong', 'moderate', 'at_risk'] as const;
 
 const URL_FILTER_KEYS = [
   'stage',
@@ -64,6 +68,7 @@ const URL_FILTER_KEYS = [
   'unassigned',
   'owner',
   'approval',
+  'score',
 ] as const;
 
 /**
@@ -132,6 +137,12 @@ export function parseDealFilters(
     ownerIds: ownerIds.length > 0 ? ownerIds : undefined,
     awaitingApproval: raw.approval === 'pending',
     approvedOnly: raw.approval === 'approved',
+    score:
+      raw.score === 'strong' ||
+      raw.score === 'moderate' ||
+      raw.score === 'at_risk'
+        ? raw.score
+        : undefined,
   };
 }
 
@@ -170,6 +181,7 @@ export function dealFiltersToSearchParams(
   }
   if (filters.awaitingApproval) out.set('approval', 'pending');
   else if (filters.approvedOnly) out.set('approval', 'approved');
+  if (filters.score) out.set('score', filters.score);
   return out;
 }
 
@@ -186,6 +198,7 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.unassigned ||
       (filters.ownerIds && filters.ownerIds.length > 0) ||
       filters.awaitingApproval ||
-      filters.approvedOnly,
+      filters.approvedOnly ||
+      filters.score,
   );
 }

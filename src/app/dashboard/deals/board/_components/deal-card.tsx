@@ -38,6 +38,26 @@ function isOverdue(deal: BoardCard, now: Date): boolean {
   return new Date(deal.expectedCloseDate) < now;
 }
 
+/** Left-spine color derived from the Module 2 health band. */
+function bandBorder(band: string | null): string {
+  if (band === 'strong') return 'border-l-emerald-500';
+  if (band === 'moderate') return 'border-l-amber-400';
+  if (band === 'at_risk') return 'border-l-rose-500';
+  // Not yet scored — neutral spine (no competing signal).
+  return 'border-l-slate-200';
+}
+
+/** Chip colors for the numeric score, by band. */
+function bandChip(band: string | null): string {
+  if (band === 'strong')
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300';
+  if (band === 'moderate')
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300';
+  if (band === 'at_risk')
+    return 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300';
+  return 'bg-slate-100 text-slate-500 dark:bg-[#1F1F1F] dark:text-[#A1A1AA]';
+}
+
 export const DealCard = memo(function DealCard({
   deal,
   draggable,
@@ -75,17 +95,14 @@ export const DealCard = memo(function DealCard({
         'group rounded-md border bg-white p-3 text-sm shadow-sm transition',
         'border-slate-200 border-l-4',
         // Closed deals keep their stage-colored spine; open deals get the
-        // server-computed health color (green on track / amber stale / red
-        // at risk). See lib/deals/health.
+        // Module 2 health-band color (green strong / amber moderate / red at
+        // risk / neutral until first scored). One health system — see
+        // lib/deals/scoring.
         deal.stage === 'won'
           ? 'border-l-emerald-500'
           : deal.stage === 'lost'
             ? 'border-l-slate-400'
-            : deal.health === 'at_risk'
-              ? 'border-l-rose-500'
-              : deal.health === 'stale'
-                ? 'border-l-amber-400'
-                : 'border-l-emerald-500',
+            : bandBorder(deal.healthBand),
         deal.__pending && 'opacity-60',
         !overlay && draggable && 'cursor-grab active:cursor-grabbing',
         // Lifted, slightly-rotated clone while dragging (dnd-kit DragOverlay).
@@ -111,12 +128,27 @@ export const DealCard = memo(function DealCard({
             {displayName}
           </Link>
         )}
-        {deal.__pending ? (
-          <Loader2
-            className="h-3 w-3 shrink-0 animate-spin text-slate-400"
-            aria-hidden
-          />
-        ) : null}
+        <span className="flex shrink-0 items-center gap-1.5">
+          {deal.stage !== 'won' &&
+          deal.stage !== 'lost' &&
+          deal.healthScore != null ? (
+            <span
+              title={`Health score: ${deal.healthScore}/100`}
+              className={cn(
+                'inline-flex h-5 min-w-7 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums',
+                bandChip(deal.healthBand),
+              )}
+            >
+              {deal.healthScore}
+            </span>
+          ) : null}
+          {deal.__pending ? (
+            <Loader2
+              className="h-3 w-3 animate-spin text-slate-400"
+              aria-hidden
+            />
+          ) : null}
+        </span>
       </header>
 
       {(deal.companyName || deal.contactName || deal.contactEmail) ? (

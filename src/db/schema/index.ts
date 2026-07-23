@@ -43,3 +43,4 @@ export * from './organization-settings';
 export * from './relationship-signals';
 export * from './workspace-settings';
 export * from './stage-gates';
+export * from './deal-scores';

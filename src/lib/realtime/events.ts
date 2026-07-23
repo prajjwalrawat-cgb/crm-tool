@@ -282,8 +282,8 @@ export type SerializedDeal = DateToString<Deal> & {
   companyName: string | null;
   contactName: string | null;
   contactEmail: string | null;
-  /** Server-computed engagement/priority signal (see lib/deals/health). */
-  health: import('@/lib/deals/health').DealHealth;
+  // Health score (Module 2) rides along as `healthScore` / `healthBand` — real
+  // columns on `deals`, so they're already part of DateToString<Deal>.
 };
 
 export type SerializedCompany = DateToString<Company>;

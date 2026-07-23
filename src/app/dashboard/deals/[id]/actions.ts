@@ -9,6 +9,7 @@ import { generateEntitySummary } from '@/lib/ai/summary';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
+import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
 
 const inputSchema = z.object({
   dealId: z.uuid({ message: 'Invalid deal id' }),
@@ -141,6 +142,9 @@ export async function logDealActivityAction(
         });
       });
 
+      // A logged call/meeting is genuine activity → refresh the health score.
+      await queueDealScoreRecompute(tenant.id, deal.id, 'activity_logged');
+
       revalidatePath(`/dashboard/deals/${deal.id}`);
       revalidatePath('/dashboard/activity');
       return { ok: true };
@@ -222,6 +226,9 @@ export async function updateDealFieldAction(
       });
 
       if (!updated) return { ok: false, message: 'Deal not found in this tenant.' };
+
+      // Next Step is a scoring signal; recompute on any of these field edits.
+      await queueDealScoreRecompute(tenant.id, parsed.data.dealId, 'field_edit');
 
       revalidatePath(`/dashboard/deals/${parsed.data.dealId}`);
       return { ok: true, value };

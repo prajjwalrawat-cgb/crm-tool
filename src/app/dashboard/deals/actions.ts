@@ -48,6 +48,7 @@ import {
 } from '@/lib/stage-gates/enforce';
 import { evaluateStageTransition } from '@/lib/stage-gates/evaluate';
 import { type GateFailure } from '@/lib/stage-gates/types';
+import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
 import { personaOf } from '@/lib/personas';
 import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
@@ -407,6 +408,7 @@ export async function createDealAction(
         name: created.name,
         stage: created.stage,
       });
+      await queueDealScoreRecompute(tenant.id, created.id, 'created');
       await sendWorkflowEvent('crm/ai.embed_entity', {
         tenantId: tenant.id,
         entityType: 'deal',
@@ -702,6 +704,7 @@ export async function updateDealAction(
         actorUserId: membership.userId,
         reason: 'updated',
       });
+      await queueDealScoreRecompute(tenant.id, result.id, 'deal_updated');
 
       revalidatePath('/dashboard/deals');
       revalidatePath('/dashboard/deals/board');
@@ -988,6 +991,7 @@ export async function updateDealStageAction(
           actorUserId: membership.userId,
           reason: 'updated',
         });
+        await queueDealScoreRecompute(tenant.id, result.row.id, 'stage_changed');
       }
 
       revalidatePath('/dashboard/deals');
@@ -1705,6 +1709,7 @@ export async function patchDealAction(
       }
 
       if (!updated) return { ok: false, message: 'Deal not found.' };
+      await queueDealScoreRecompute(tenant.id, d.id, 'field_edit');
       revalidatePath('/dashboard/deals');
       revalidatePath('/dashboard/deals/board');
       return { ok: true };

@@ -13,6 +13,22 @@ import {
 } from '@/lib/db-context';
 import { sendAutomatedEmailSafe } from '@/lib/email/automation';
 import { recordNotificationSafe } from '@/lib/notifications/recorder';
+import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
+
+/**
+ * Queue a deal health-score recompute when a task change touches a deal-linked
+ * task (open/overdue/completed counts are scoring signals). No-op for tasks
+ * that aren't linked to a deal.
+ */
+async function maybeRescoreLinkedDeal(
+  tenantId: string,
+  task: { entityType: string | null; entityId: string | null },
+  reason: string,
+): Promise<void> {
+  if (task.entityType === 'deal' && task.entityId) {
+    await queueDealScoreRecompute(tenantId, task.entityId, reason);
+  }
+}
 
 /**
  * Helper: render the task-assignment auto-email body. Kept small so
@@ -307,6 +323,7 @@ export async function createTaskAction(
         }
       }
 
+      await maybeRescoreLinkedDeal(tenant.id, inserted, 'task_created');
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
       return { ok: true, task: inserted };
@@ -460,6 +477,11 @@ export async function updateTaskAction(
         });
       }
 
+      await maybeRescoreLinkedDeal(
+        tenant.id,
+        updated.row,
+        updated.justCompleted ? 'task_completed' : 'task_updated',
+      );
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
       return { ok: true, task: updated.row };
@@ -580,6 +602,9 @@ export async function toggleTaskCompletedAction(
         });
       }
 
+      if (result.changed) {
+        await maybeRescoreLinkedDeal(tenant.id, result.row, 'task_completed');
+      }
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
       return { ok: true, task: result.row };
@@ -769,6 +794,7 @@ export async function updateTaskFieldsAction(input: {
         }
       }
 
+      await maybeRescoreLinkedDeal(tenant.id, updated.row, 'task_updated');
       revalidatePath('/dashboard/tasks');
       revalidatePath('/dashboard');
       return { ok: true, task: updated.row };

@@ -61,6 +61,19 @@ export type WorkflowEvents = {
     /** Free-form reason — surfaced on the workflow run row. */
     reason: 'created' | 'updated' | 'restored' | 'manual';
   };
+  /**
+   * Fan-in event for the deal health-score recompute (Module 2). Emitted from
+   * any mutation that changes a scoring signal — activity logged, stage
+   * changed, task created/completed, stakeholder added, amount/close-date
+   * edited. The receiving function debounces 5 minutes per deal so a burst of
+   * edits collapses to one recompute.
+   */
+  'crm/deal.health_recompute': {
+    tenantId: string;
+    dealId: string;
+    /** What triggered it — surfaced on the workflow run row. */
+    reason: string;
+  };
 };
 
 export type WorkflowEventName = keyof WorkflowEvents;

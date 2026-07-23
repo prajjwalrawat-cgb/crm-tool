@@ -13,6 +13,11 @@ import { communicationAnalyticsRollup } from './communication-analytics-rollup';
 import { dealLost, dealLostHandler } from './deal-lost';
 import { dealWon, dealWonHandler } from './deal-won';
 import {
+  dealHealthRecompute,
+  dealHealthRecomputeHandler,
+} from './deal-health-recompute';
+import { dealScoresNightly } from './deal-scores-nightly';
+import {
   newMemberOnboarding,
   newMemberOnboardingHandler,
 } from './new-member-onboarding';
@@ -34,11 +39,14 @@ registerLocalHandler('crm/deal.stage_changed', dealWonHandler);
 registerLocalHandler('crm/deal.stage_changed', dealLostHandler);
 registerLocalHandler('crm/ai.embed_entity', regenerateEmbeddingHandler);
 registerLocalHandler('crm/member.invited', newMemberOnboardingHandler);
+registerLocalHandler('crm/deal.health_recompute', dealHealthRecomputeHandler);
 
 export {
   communicationAnalyticsRollup,
   dealLost,
   dealWon,
+  dealHealthRecompute,
+  dealScoresNightly,
   newMemberOnboarding,
   notificationsRetention,
   regenerateEmbedding,
