@@ -16,6 +16,7 @@ export * from './companies';
 export * from './contacts';
 export * from './deals';
 export * from './deal-contacts';
+export * from './deal-value-splits';
 export * from './deal-stage-history';
 export * from './deal-documents';
 export * from './activity-logs';

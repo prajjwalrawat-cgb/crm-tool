@@ -18,6 +18,7 @@ import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
 import { getDealStageHistory } from '@/lib/deals/stage-history';
 import { getDealScoreWithHistory } from '@/lib/deals/scoring/service';
+import { listDealValueSplit } from '@/lib/deals/value-split-queries';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
 import { DEAL_TYPE_LABELS, DEAL_TYPES } from '@/lib/deals/schema';
@@ -53,6 +54,7 @@ import { DealDocumentsCard } from './_components/deal-documents-card';
 import { DealFieldEditor } from './_components/deal-field-editor';
 import { DealInlineHeader } from './_components/deal-inline-header';
 import { DealStageCard } from './_components/deal-stage-card';
+import { DealValueSplitCard } from './_components/deal-value-split-card';
 import { EditableDetailCard } from './_components/editable-detail-card';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { StageHistoryCard } from './_components/stage-history-card';
@@ -98,6 +100,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       dealDocumentRows,
       pathBarGates,
       dealScore,
+      valueSplitRows,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -120,6 +123,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       ),
       // Deal Score card: current score + trend history (Module 2).
       getDealScoreWithHistory(tenant.id, deal.id),
+      // Multi-year TCV breakdown (empty for single-year deals).
+      listDealValueSplit(tenant.id, deal.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -619,6 +624,17 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 />
               </>
             ) : null}
+
+            {/* Multi-year TCV. Record-and-report only: the deal still counts
+                once, at its full amount, everywhere else. */}
+            <DealValueSplitCard
+              dealId={deal.id}
+              amountMinor={deal.amountMinor}
+              currency={deal.currency}
+              expectedCloseDate={deal.expectedCloseDate ?? null}
+              initialRows={valueSplitRows}
+              canEdit={canEdit}
+            />
 
             <DealDocumentsCard
               dealId={deal.id}
