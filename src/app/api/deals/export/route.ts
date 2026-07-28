@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { auth } from '@/lib/auth/server';
-import { runWithTenantContext } from '@/lib/db-context';
+import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { fromMinorUnits } from '@/lib/deals/currency';
 import { parseDealFilters } from '@/lib/deals/filters';
 import { decodeCursor, type Cursor } from '@/lib/pagination/cursor';
 import { listDeals, type DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
+import type { SplitRow } from '@/lib/deals/value-split';
+import { listDealValueSplitsFor } from '@/lib/deals/value-split-queries';
 import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
 import {
@@ -36,30 +38,42 @@ export async function GET(req: NextRequest) {
   const filters = parseDealFilters(raw);
   const search = url.searchParams.get('q')?.trim() || undefined;
 
-  const rows = await runWithTenantContext({ tenantId: orgId, userId }, async () => {
-    const membership = await requireMembership();
-    const restrictToOwnerOrUnassigned =
-      personaOf(membership.role) === 'sales' ? userId : undefined;
+  const { rows, splits } = await runWithTenantContext(
+    { tenantId: orgId, userId },
+    async () => {
+      const membership = await requireMembership();
+      const restrictToOwnerOrUnassigned =
+        personaOf(membership.role) === 'sales' ? userId : undefined;
 
-    // Page through the same query the list uses until exhausted or capped.
-    const all: DealRow[] = [];
-    let cursor: Cursor | null = null;
-    for (let i = 0; i < MAX_ROWS / PAGE; i++) {
-      const page = await listDeals(orgId, {
-        search,
-        filters,
-        size: PAGE,
-        cursor,
-        currentUserId: userId,
-        restrictToOwnerOrUnassigned,
-      });
-      all.push(...page.items);
-      if (!page.nextCursor || all.length >= MAX_ROWS) break;
-      cursor = decodeCursor(page.nextCursor);
-      if (!cursor) break;
-    }
-    return all;
-  });
+      // Page through the same query the list uses until exhausted or capped.
+      const all: DealRow[] = [];
+      let cursor: Cursor | null = null;
+      for (let i = 0; i < MAX_ROWS / PAGE; i++) {
+        const page = await listDeals(orgId, {
+          search,
+          filters,
+          size: PAGE,
+          cursor,
+          currentUserId: userId,
+          restrictToOwnerOrUnassigned,
+        });
+        all.push(...page.items);
+        if (!page.nextCursor || all.length >= MAX_ROWS) break;
+        cursor = decodeCursor(page.nextCursor);
+        if (!cursor) break;
+      }
+
+      // Multi-year splits for the whole page set in one query, not one per deal.
+      const byDeal = await tenantTransaction((tx) =>
+        listDealValueSplitsFor(
+          tx,
+          orgId,
+          all.map((d) => d.id),
+        ),
+      );
+      return { rows: all, splits: byDeal };
+    },
+  );
 
   // Resolve owner display names in one batch.
   const ownerIds = Array.from(
@@ -67,7 +81,7 @@ export async function GET(req: NextRequest) {
   );
   const ownerNames = await resolveAuthorLookup(ownerIds);
 
-  const csv = buildCsv(rows, ownerNames);
+  const csv = buildCsv(rows, ownerNames, splits);
   const date = new Date().toISOString().slice(0, 10);
   return new NextResponse(`﻿${csv}`, {
     headers: {
@@ -99,9 +113,44 @@ const COLUMNS = [
   'Updated',
 ] as const;
 
-function buildCsv(rows: DealRow[], ownerNames: Record<string, string>): string {
-  const lines = [COLUMNS.map(csvCell).join(',')];
+function buildCsv(
+  rows: DealRow[],
+  ownerNames: Record<string, string>,
+  splits: Map<string, SplitRow[]>,
+): string {
+  // Multi-year columns are only as wide as the longest contract in this
+  // export, so a workspace with no splits gets the sheet it always got.
+  const maxYears = rows.reduce(
+    (max, r) => Math.max(max, splits.get(r.id)?.length ?? 0),
+    0,
+  );
+  const header = [
+    ...COLUMNS,
+    ...(maxYears > 0
+      ? [
+          'Contract Start',
+          'Contract Years',
+          ...Array.from({ length: maxYears }, (_, i) => `Year ${i + 1} Value`),
+        ]
+      : []),
+  ];
+
+  const lines = [header.map(csvCell).join(',')];
   for (const r of rows) {
+    const split = splits.get(r.id) ?? [];
+    const splitCells =
+      maxYears > 0
+        ? [
+            split[0]?.periodStart ?? '',
+            split.length > 0 ? String(split.length) : '',
+            ...Array.from({ length: maxYears }, (_, i) => {
+              const row = split.find((s) => s.yearIndex === i + 1);
+              return row
+                ? fromMinorUnits(row.amountMinor, r.currency).toFixed(2)
+                : '';
+            }),
+          ]
+        : [];
     lines.push(
       [
         r.name,
@@ -125,6 +174,7 @@ function buildCsv(rows: DealRow[], ownerNames: Record<string, string>): string {
         r.source ?? '',
         r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
         r.updatedAt instanceof Date ? r.updatedAt.toISOString() : String(r.updatedAt),
+        ...splitCells,
       ]
         .map(csvCell)
         .join(','),

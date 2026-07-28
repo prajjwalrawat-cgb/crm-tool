@@ -81,6 +81,12 @@ export const ACTIVITY_ACTIONS = [
    * ("Create anyway"). Recorded on the new record for data-quality review.
    */
   'dedup_override',
+  /**
+   * A deal's multi-year contract value split was recorded, changed or removed.
+   * `metadata` carries `{ name, years, startISO, totalMinor, currency }` — the
+   * deal amount itself is untouched, so this is the only trace of the change.
+   */
+  'value_split_changed',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 
