@@ -129,6 +129,26 @@ export const patchDealSchema = z.object({
   expectedCloseDate: z
     .union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date'), z.null()])
     .optional(),
+  // Same bounds the create/edit forms enforce.
+  marginPct: z.coerce
+    .number({ message: 'Enter a valid margin' })
+    .gt(0, 'Margin must be greater than 0')
+    .max(100, 'Margin cannot exceed 100%')
+    .optional(),
+  dealType: z.union([z.enum(DEAL_TYPES), z.null()]).optional(),
+  // Unit pricing: either side may be patched alone; the action fills the other
+  // from the stored row and re-derives the amount.
+  unitPrice: z.coerce
+    .number({ message: 'Enter a valid unit price' })
+    .min(0, 'Unit price cannot be negative')
+    .max(999_999_999_999, 'Unit price is too large')
+    .optional(),
+  quantity: z.coerce
+    .number({ message: 'Enter a valid quantity' })
+    .int('Quantity must be a whole number')
+    .min(0, 'Quantity cannot be negative')
+    .max(100_000_000, 'Quantity is too large')
+    .optional(),
   companyName: z.union([z.string().trim().max(200), z.null()]).optional(),
   contactName: z.union([z.string().trim().max(200), z.null()]).optional(),
   contactEmail: z

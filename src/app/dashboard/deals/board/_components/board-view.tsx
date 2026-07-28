@@ -38,9 +38,13 @@ import { cn } from '@/lib/utils';
 import { DealFilterBar } from '../../_components/deal-filter-bar';
 import { FilterChips, type FilterChip } from '../../../_components/filter-chips';
 import { updateDealStageAction } from '../../actions';
-import { loadMoreStageDealsAction } from '../actions';
+import {
+  loadMoreStageDealsAction,
+  revertQualifiedDealsToLeadAction,
+} from '../actions';
 import { LostReasonModal } from '../../_components/lost-reason-modal';
 import { HoldReasonModal } from '../../_components/hold-reason-modal';
+import { ClearCloseDateModal } from '../../_components/clear-close-date-modal';
 import { type BoardCard, DealCard } from './deal-card';
 import { BoardColumn } from './board-column';
 import { GateBlockPanel } from './gate-block-panel';
@@ -282,8 +286,25 @@ export function BoardView({
     next: LocalBoard;
     dealName: string;
   } | null>(null);
+  // A drag back onto Lead by a dated deal, held until the user accepts that
+  // the close date goes away.
+  const [clearDatePrompt, setClearDatePrompt] = useState<{
+    dealId: string;
+    snapshot: LocalBoard;
+    next: LocalBoard;
+    dealName: string;
+    closeDate: string | null;
+  } | null>(null);
   // Hold column is collapsed to a slim bar by default when non-empty.
   const [holdExpanded, setHoldExpanded] = useState(false);
+
+  // TEMPORARY (Lead close-date rollout): bulk-select in the Qualified column
+  // to send deals the migration moved out of Lead back where they belong.
+  // The revert clears their close date — see revertQualifiedDealsToLeadAction.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [reverting, setReverting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Track the most recent server-acknowledged board so a *late* error from a
   // prior request rolls back to the right state, not an even older one.
@@ -448,6 +469,7 @@ export function BoardView({
       next: LocalBoard,
       reason?: string,
       hold?: { holdReason: string; holdRevisitOn: string; holdNote: string },
+      clearCloseDate?: boolean,
     ) => {
       const seq = ++dragSeqRef.current;
       setError(null);
@@ -459,6 +481,7 @@ export function BoardView({
           holdReason: hold?.holdReason,
           holdRevisitOn: hold?.holdRevisitOn,
           holdNote: hold?.holdNote,
+          clearCloseDate,
         });
         // If the user has issued a newer drag in the meantime, ignore this
         // outcome — the newer drag's transition owns the state now.
@@ -467,6 +490,22 @@ export function BoardView({
         if (!result.ok) {
           setBoard(snapshot);
           lastKnownGoodRef.current = snapshot;
+          // Refused only because the deal is dated — the card we hold may be
+          // stale (loaded before someone set a date), so honour the server's
+          // signal and ask rather than erroring out.
+          if (result.needsCloseDateClear) {
+            setClearDatePrompt({
+              dealId,
+              snapshot,
+              next,
+              dealName:
+                next[toStage].find((d) => d.id === dealId)?.name ?? 'this deal',
+              closeDate:
+                next[toStage].find((d) => d.id === dealId)?.expectedCloseDate ??
+                null,
+            });
+            return;
+          }
           // A stage gate rejected the move → show the checklist slide-over with
           // per-rule fixes rather than a bare toast.
           if (result.blocked && result.failures) {
@@ -537,6 +576,20 @@ export function BoardView({
         return;
       }
 
+      // Dragging a dated deal back to Lead: it can keep the stage or the date,
+      // not both. Confirm the trade before committing.
+      const dragged = board[fromStage].find((d) => d.id === dealId);
+      if (toStage === 'lead' && dragged?.expectedCloseDate) {
+        setClearDatePrompt({
+          dealId,
+          snapshot,
+          next,
+          dealName: dragged.name,
+          closeDate: dragged.expectedCloseDate,
+        });
+        return;
+      }
+
       commitStage(dealId, toStage, snapshot, next);
     },
     [board, commitStage],
@@ -545,6 +598,101 @@ export function BoardView({
   const handleDragCancel = useCallback(() => {
     setActiveCard(null);
   }, []);
+
+  const toggleSelected = useCallback((dealId: string) => {
+    setSelectedIds((curr) => {
+      const next = new Set(curr);
+      if (next.has(dealId)) next.delete(dealId);
+      else next.add(dealId);
+      return next;
+    });
+  }, []);
+
+  const toggleAllSelected = useCallback((ids: string[]) => {
+    setSelectedIds((curr) =>
+      curr.size === ids.length ? new Set() : new Set(ids),
+    );
+  }, []);
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const confirmRevertToLead = useCallback(() => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+
+    // Optimistic: drop the cards into Lead with their date stripped, exactly
+    // as the server will leave them.
+    const snapshot = lastKnownGoodRef.current;
+    setBoard((curr) => {
+      const moving = curr.qualified.filter((c) => ids.includes(c.id));
+      if (moving.length === 0) return curr;
+      return {
+        ...curr,
+        qualified: curr.qualified.filter((c) => !ids.includes(c.id)),
+        lead: [
+          ...moving.map((c) => ({
+            ...c,
+            stage: 'lead' as DealStage,
+            expectedCloseDate: null,
+            __pending: true,
+          })),
+          ...curr.lead,
+        ],
+      };
+    });
+    setError(null);
+    setNotice(null);
+    setReverting(true);
+
+    startTransition(async () => {
+      const result = await revertQualifiedDealsToLeadAction({ dealIds: ids });
+      setReverting(false);
+      if (!result.ok) {
+        setBoard(snapshot);
+        lastKnownGoodRef.current = snapshot;
+        setError(result.message);
+        return;
+      }
+      // Anything the server refused stays where it is — the revalidated board
+      // arriving next render is the source of truth, so just report it.
+      const parts = [`${result.moved} moved back to Lead`];
+      if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
+      if (result.blocked.length > 0) {
+        parts.push(`blocked by a stage gate: ${result.blocked.join(', ')}`);
+      }
+      setNotice(`${parts.join(' · ')}. Close dates were cleared.`);
+      exitSelectMode();
+    });
+  }, [selectedIds, exitSelectMode, startTransition]);
+
+  const qualifiedSelection = useMemo(
+    () =>
+      canMove
+        ? {
+            active: selectMode,
+            selectedIds,
+            pending: reverting,
+            onStart: () => setSelectMode(true),
+            onCancel: exitSelectMode,
+            onToggle: toggleSelected,
+            onToggleAll: toggleAllSelected,
+            onConfirm: confirmRevertToLead,
+          }
+        : undefined,
+    [
+      canMove,
+      selectMode,
+      selectedIds,
+      reverting,
+      exitSelectMode,
+      toggleSelected,
+      toggleAllSelected,
+      confirmRevertToLead,
+    ],
+  );
 
   const columns = useMemo(
     () =>
@@ -572,6 +720,7 @@ export function BoardView({
             hasMore={moreByStage[stage] ?? false}
             loadingMore={loadingStages.has(stage)}
             onLoadMore={handleLoadMore}
+            selection={stage === 'qualified' ? qualifiedSelection : undefined}
           />
         ),
       ),
@@ -580,6 +729,7 @@ export function BoardView({
       canMove,
       activeCard,
       holdExpanded,
+      qualifiedSelection,
       stageCounts,
       stageAmounts,
       stageProbabilities,
@@ -639,6 +789,15 @@ export function BoardView({
         </p>
       ) : null}
 
+      {notice ? (
+        <p
+          role="status"
+          className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+        >
+          {notice}
+        </p>
+      ) : null}
+
       {!canMove ? (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
           Read-only — your role can&apos;t move deals between stages.
@@ -657,6 +816,11 @@ export function BoardView({
       </div>
 
       <DndContext
+        // Stable id — without it dnd-kit derives `aria-describedby` from a
+        // module-scoped counter that keeps climbing on the long-lived server
+        // process while the browser bundle restarts at 0, so every card
+        // hydration-mismatches on that attribute.
+        id="deals-board"
         sensors={sensors}
         collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
@@ -723,6 +887,41 @@ export function BoardView({
             );
             setHoldExpanded(true);
             setHoldPrompt(null);
+          }}
+        />
+      ) : null}
+
+      {clearDatePrompt ? (
+        <ClearCloseDateModal
+          dealName={clearDatePrompt.dealName}
+          closeDate={clearDatePrompt.closeDate}
+          onCancel={() => {
+            setBoard(clearDatePrompt.snapshot);
+            lastKnownGoodRef.current = clearDatePrompt.snapshot;
+            setClearDatePrompt(null);
+          }}
+          onConfirm={() => {
+            // Strip the date from the optimistic card too, so it doesn't linger
+            // on the Lead card until the revalidated board arrives.
+            const next: LocalBoard = {
+              ...clearDatePrompt.next,
+              lead: clearDatePrompt.next.lead.map((c) =>
+                c.id === clearDatePrompt.dealId
+                  ? { ...c, expectedCloseDate: null }
+                  : c,
+              ),
+            };
+            setBoard(next);
+            commitStage(
+              clearDatePrompt.dealId,
+              'lead',
+              clearDatePrompt.snapshot,
+              next,
+              undefined,
+              undefined,
+              true,
+            );
+            setClearDatePrompt(null);
           }}
         />
       ) : null}

@@ -50,6 +50,10 @@ import { evaluateStageTransition } from '@/lib/stage-gates/evaluate';
 import { type GateFailure } from '@/lib/stage-gates/types';
 import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
 import { deriveForecastCategory } from '@/lib/deals/forecast/categories';
+import {
+  buildDealColumnPatch,
+  UnitPricingIncompleteError,
+} from '@/lib/deals/patch-columns';
 import { HOLD_REASONS } from '@/lib/deals/hold';
 import {
   LEAD_CLOSE_DATE_MESSAGE,
@@ -784,6 +788,9 @@ const updateStageSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
     .optional(),
   holdNote: z.string().max(1000).optional(),
+  // Set when the user has been told, and accepted, that moving back to Lead
+  // drops the deal's close date. Without it a dated deal is refused.
+  clearCloseDate: z.boolean().optional(),
 });
 
 export type UpdateDealStageInput = {
@@ -794,6 +801,7 @@ export type UpdateDealStageInput = {
   holdReason?: string;
   holdRevisitOn?: string;
   holdNote?: string;
+  clearCloseDate?: boolean;
 };
 
 export type UpdateDealStageResult =
@@ -805,6 +813,9 @@ export type UpdateDealStageResult =
       blocked?: true;
       failures?: GateFailure[];
       toStage?: string;
+      // Move to Lead refused only because the deal is dated. The caller should
+      // confirm with the user and retry with `clearCloseDate: true`.
+      needsCloseDateClear?: true;
     };
 
 export async function updateDealStageAction(
@@ -839,8 +850,10 @@ export async function updateDealStageAction(
         }
       }
 
-      // Business rule: a dated deal can't be moved back to Lead.
-      if (parsed.data.stage === 'lead') {
+      // Business rule: a dated deal can't sit in Lead. Rather than a dead end,
+      // the move is offered as a trade — drop the date and go back. The caller
+      // confirms with the user, then retries with `clearCloseDate`.
+      if (parsed.data.stage === 'lead' && !parsed.data.clearCloseDate) {
         const [d] = await tenantTransaction((tx) =>
           tx
             .select({ ecd: deals.expectedCloseDate })
@@ -854,7 +867,13 @@ export async function updateDealStageAction(
             )
             .limit(1),
         );
-        if (d?.ecd) return { ok: false, message: LEAD_CLOSE_DATE_MESSAGE };
+        if (d?.ecd) {
+          return {
+            ok: false,
+            message: LEAD_CLOSE_DATE_MESSAGE,
+            needsCloseDateClear: true,
+          };
+        }
       }
 
       const result = await tenantTransaction(async (tx) => {
@@ -946,6 +965,11 @@ export async function updateDealStageAction(
             stage: parsed.data.stage,
             closedAt: nextClosedAt,
             lostReason,
+            // Landing in Lead always means no close date — either it was
+            // already null or the user accepted clearing it above.
+            ...(parsed.data.stage === 'lead'
+              ? { expectedCloseDate: null }
+              : {}),
             ...(approvalPatch && {
               approvalStatus: approvalPatch.approvalStatus,
               approvedBy: approvalPatch.approvedBy,
@@ -1754,21 +1778,9 @@ export async function patchDealAction(
           throw new Error('LEAD_CLOSE_DATE');
         }
 
-        const patch: Record<string, unknown> = { ...linkPatch };
-        if (d.name !== undefined) patch.name = d.name;
-        if (d.expectedCloseDate !== undefined)
-          patch.expectedCloseDate = d.expectedCloseDate;
-        if (d.companyName !== undefined)
-          patch.companyNameText = d.companyName?.trim() ? d.companyName.trim() : null;
-        if (d.contactName !== undefined)
-          patch.contactNameText = d.contactName?.trim() ? d.contactName.trim() : null;
-        if (d.contactEmail !== undefined)
-          patch.contactEmailText = d.contactEmail?.trim() ? d.contactEmail.trim() : null;
-        if (d.ownerId !== undefined) patch.ownerId = d.ownerId;
-        if (d.currency !== undefined) patch.currency = d.currency;
-        if (d.amount !== undefined) {
-          patch.amountMinor = toMinorUnits(d.amount, d.currency ?? previous.currency);
-        }
+        // Only the fields present in the input become columns — see
+        // lib/deals/patch-columns.ts.
+        const patch = buildDealColumnPatch(d, previous, linkPatch);
         if (Object.keys(patch).length === 0) return previous;
         patch.updatedBy = membership.userId;
 
@@ -1823,6 +1835,9 @@ export async function patchDealAction(
         if (err instanceof Error && err.message === 'LEAD_CLOSE_DATE') {
           return { ok: false, message: LEAD_CLOSE_DATE_MESSAGE };
         }
+        if (err instanceof UnitPricingIncompleteError) {
+          return { ok: false, message: err.message };
+        }
         throw err;
       }
 
@@ -1830,6 +1845,9 @@ export async function patchDealAction(
       await queueDealScoreRecompute(tenant.id, d.id, 'field_edit');
       revalidatePath('/dashboard/deals');
       revalidatePath('/dashboard/deals/board');
+      // The detail page reads these same columns — without this a patch made
+      // from that page leaves its sidebar showing the pre-edit values.
+      revalidatePath(`/dashboard/deals/${d.id}`);
       return { ok: true };
     },
   );

@@ -79,7 +79,24 @@ export function EditDealDrawer({
   // selects (see client-validate.ts).
   const [clientErrors, setClientErrors] = useState<Record<string, string[]>>({});
   const [clientMsg, setClientMsg] = useState<string | null>(null);
-  const [stageValue, setStageValue] = useState<string>(deal?.stage ?? 'lead');
+  // Stage drives which conditional fields render (lost reason, close date), so
+  // it has to track the deal being edited. The `key` further down remounts the
+  // <form> — but NOT this component, so a plain `useState(deal.stage)` would be
+  // stuck on whatever the first render saw (`lead`, from the closed drawer's
+  // `deal=null`) while the select itself showed the real stage. Re-seed it when
+  // the drawer switches deals — React's adjust-state-on-prop-change pattern.
+  const dealKey = deal?.id ?? null;
+  const [stageState, setStageState] = useState<{
+    key: string | null;
+    value: string;
+  }>(() => ({ key: dealKey, value: deal?.stage ?? 'lead' }));
+  if (stageState.key !== dealKey) {
+    setStageState({ key: dealKey, value: deal?.stage ?? 'lead' });
+  }
+  const stageValue =
+    stageState.key === dealKey ? stageState.value : (deal?.stage ?? 'lead');
+  const setStageValue = (value: string) =>
+    setStageState({ key: dealKey, value });
   const errs = { ...fieldErrors, ...clientErrors };
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -263,13 +280,26 @@ export function EditDealDrawer({
           errors={errs}
         />
 
-        <Field
-          name="expectedCloseDate"
-          label="Expected close date"
-          type="date"
-          defaultValue={initialDate}
-          errors={errs.expectedCloseDate}
-        />
+        {/* Hidden in Lead — a Lead can't hold a close date (see
+            violatesLeadCloseDate). The field submits nothing while hidden,
+            which the action reads as null, so switching a dated deal back to
+            Lead clears its date on save. */}
+        {stageValue === 'lead' ? (
+          <p className="text-xs text-slate-500">
+            Expected close date is set once the deal reaches Qualified.
+            {initialDate
+              ? ' Saving in Lead clears the date currently on this deal.'
+              : ''}
+          </p>
+        ) : (
+          <Field
+            name="expectedCloseDate"
+            label="Expected close date"
+            type="date"
+            defaultValue={initialDate}
+            errors={errs.expectedCloseDate}
+          />
+        )}
 
         <DealCompanyContactFields
           key={`cc-${deal?.id ?? 'none'}`}

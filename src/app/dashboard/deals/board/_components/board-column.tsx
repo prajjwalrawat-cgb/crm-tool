@@ -55,6 +55,26 @@ type Props = {
     stage: DealStage,
     cursor: { updatedAt: string; id: string },
   ) => void;
+  /**
+   * Bulk-select controls for this column. Only the Qualified column gets
+   * these today — the temporary "send it back to Lead" cleanup after the
+   * Lead close-date rollout. Absent = no select affordance at all.
+   */
+  selection?: ColumnSelection;
+};
+
+export type ColumnSelection = {
+  /** Select mode is on — cards show checkboxes and drag is suspended. */
+  active: boolean;
+  selectedIds: Set<string>;
+  /** The bulk action is in flight. */
+  pending: boolean;
+  onStart: () => void;
+  onCancel: () => void;
+  onToggle: (dealId: string) => void;
+  /** Select every loaded card in this column, or clear the selection. */
+  onToggleAll: (ids: string[]) => void;
+  onConfirm: () => void;
 };
 
 /**
@@ -75,6 +95,7 @@ export const BoardColumn = memo(function BoardColumn({
   hasMore,
   loadingMore,
   onLoadMore,
+  selection,
 }: Props) {
   // Use the column's stage as its drop id. When a card is dropped on the
   // column body (not on another card), `event.over.id` will be the stage.
@@ -189,6 +210,62 @@ export const BoardColumn = memo(function BoardColumn({
         ) : null}
       </header>
 
+      {selection ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-200 px-3 py-1.5 text-[11px]">
+          {!selection.active ? (
+            <button
+              type="button"
+              onClick={selection.onStart}
+              className="rounded border border-slate-300 bg-white px-2 py-0.5 font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Select
+            </button>
+          ) : (
+            <>
+              <span className="font-medium tabular-nums text-slate-600">
+                {selection.selectedIds.size} selected
+              </span>
+              <button
+                type="button"
+                onClick={() => selection.onToggleAll(cards.map((c) => c.id))}
+                disabled={selection.pending}
+                className="rounded border border-slate-300 bg-white px-2 py-0.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {selection.selectedIds.size === cards.length && cards.length > 0
+                  ? 'Clear'
+                  : `All (${cards.length})`}
+              </button>
+              <button
+                type="button"
+                onClick={selection.onConfirm}
+                disabled={selection.pending || selection.selectedIds.size === 0}
+                title="Moves the selected deals back to Lead and clears their expected close date"
+                className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-0.5 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {selection.pending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                ) : null}
+                Move to Lead
+              </button>
+              <button
+                type="button"
+                onClick={selection.onCancel}
+                disabled={selection.pending}
+                className="rounded px-1.5 py-0.5 text-slate-500 hover:text-slate-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+          {selection.active ? (
+            <p className="w-full text-[10px] leading-tight text-amber-700">
+              Their expected close date will be cleared — a Lead can&apos;t
+              hold one.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <div
         ref={setNodeRef}
         className="flex flex-1 flex-col gap-2 p-2"
@@ -200,8 +277,13 @@ export const BoardColumn = memo(function BoardColumn({
             <DealCard
               key={card.id}
               deal={card}
-              draggable={canMove}
+              // Drag is suspended while picking cards — a drag gesture and a
+              // multi-select gesture on the same card fight each other.
+              draggable={canMove && !selection?.active}
               suffix={suffixById[card.id] ?? null}
+              selectable={selection?.active ?? false}
+              selected={selection?.selectedIds.has(card.id) ?? false}
+              onSelectToggle={selection?.onToggle}
             />
           ))}
         </SortableContext>

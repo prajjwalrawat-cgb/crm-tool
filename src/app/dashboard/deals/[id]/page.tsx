@@ -11,7 +11,7 @@ import { getDealSummaryInsight } from '@/lib/intelligence/runner';
 
 import { LiveDealSummaryCard } from '../../intelligence/_components/live-ai-card';
 import { listCommentsForEntity } from '@/lib/comments/queries';
-import { formatCurrency } from '@/lib/deals/currency';
+import { formatCurrency, KNOWN_CURRENCIES } from '@/lib/deals/currency';
 import { listContactOptions } from '@/lib/contacts/queries';
 import { listDealContacts } from '@/lib/deals/contacts';
 import { listDealDocuments } from '@/lib/deals/documents';
@@ -20,7 +20,7 @@ import { getDealStageHistory } from '@/lib/deals/stage-history';
 import { getDealScoreWithHistory } from '@/lib/deals/scoring/service';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
-import { DEAL_STAGE_LABELS, DEAL_TYPE_LABELS } from '@/lib/deals/schema';
+import { DEAL_TYPE_LABELS, DEAL_TYPES } from '@/lib/deals/schema';
 import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
 import { listNotesForEntity } from '@/lib/notes/queries';
@@ -52,6 +52,8 @@ import { DealContactsCard } from './_components/deal-contacts-card';
 import { DealDocumentsCard } from './_components/deal-documents-card';
 import { DealFieldEditor } from './_components/deal-field-editor';
 import { DealInlineHeader } from './_components/deal-inline-header';
+import { DealStageCard } from './_components/deal-stage-card';
+import { EditableDetailCard } from './_components/editable-detail-card';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { StageHistoryCard } from './_components/stage-history-card';
 import { SummaryCard } from './_components/summary-card';
@@ -164,6 +166,11 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     for (const d of dealDocumentRows) authorIds.add(d.uploadedBy);
     const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
 
+    // A deal carrying unit price + qty derives its Amount from that pair, so
+    // Amount is never edited directly for it.
+    const amountDerived =
+      deal.unitPriceMinor != null && deal.quantity != null;
+
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
         <Link
@@ -174,6 +181,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
           All deals
         </Link>
 
+        {/* Amount is computed for unit-priced deals: the Amount card is
+            read-only there and the Unit price × Qty card drives it. */}
         <DealInlineHeader
           initial={{
             name: deal.name,
@@ -184,10 +193,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             marginPct:
               deal.marginBps != null ? String(marginBpsToPct(deal.marginBps)) : '',
           }}
-          initialLostReason={deal.lostReason}
           dealId={deal.id}
-          companyId={deal.companyId ?? null}
-          contactId={deal.contactId ?? null}
           canEdit={canEdit}
           tenantId={tenant.id}
         />
@@ -221,35 +227,133 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             />
 
             <SidebarSection title="Deal Info">
-              <DetailCard label="Stage" value={DEAL_STAGE_LABELS[deal.stage]} />
-              {deal.dealType ? (
-                <DetailCard
-                  label="Deal type"
-                  value={DEAL_TYPE_LABELS[deal.dealType]}
-                />
-              ) : null}
-              <DetailCard
-                label="Amount"
-                value={formatCurrency(deal.amountMinor, deal.currency)}
-                mono
+              {/* Every card below edits in place and patches only its own
+                  columns — see editable-detail-card.tsx. */}
+              <DealStageCard
+                dealId={deal.id}
+                dealName={deal.name}
+                stage={deal.stage}
+                expectedCloseDate={deal.expectedCloseDate ?? null}
+                canEdit={canEdit}
               />
-              {deal.unitPriceMinor != null && deal.quantity != null ? (
-                <DetailCard
+              <EditableDetailCard
+                dealId={deal.id}
+                label="Deal type"
+                display={deal.dealType ? DEAL_TYPE_LABELS[deal.dealType] : '—'}
+                canEdit={canEdit}
+                fields={[
+                  {
+                    key: 'dealType',
+                    type: 'select',
+                    value: deal.dealType ?? '',
+                    whenEmpty: 'null',
+                    options: [
+                      { value: '', label: '—' },
+                      ...DEAL_TYPES.map((t) => ({
+                        value: t,
+                        label: DEAL_TYPE_LABELS[t],
+                      })),
+                    ],
+                  },
+                ]}
+              />
+              <EditableDetailCard
+                dealId={deal.id}
+                label="Amount"
+                display={formatCurrency(deal.amountMinor, deal.currency)}
+                mono
+                canEdit={canEdit && !amountDerived}
+                hint={
+                  amountDerived
+                    ? 'Computed from Unit price × Qty'
+                    : undefined
+                }
+                fields={
+                  amountDerived
+                    ? undefined
+                    : [
+                        {
+                          key: 'amount',
+                          type: 'number',
+                          step: '0.01',
+                          min: '0',
+                          value: (deal.amountMinor / 100).toFixed(2),
+                          whenEmpty: 'zero',
+                          widthClass: 'w-32',
+                        },
+                        {
+                          key: 'currency',
+                          type: 'select',
+                          value: deal.currency,
+                          options: KNOWN_CURRENCIES.map((c) => ({
+                            value: c,
+                            label: c,
+                          })),
+                          widthClass: 'w-24',
+                        },
+                      ]
+                }
+              />
+              {amountDerived ? (
+                <EditableDetailCard
+                  dealId={deal.id}
                   label="Unit price × Qty"
-                  value={`${formatCurrency(deal.unitPriceMinor, deal.currency)} × ${deal.quantity}`}
+                  display={`${formatCurrency(deal.unitPriceMinor!, deal.currency)} × ${deal.quantity}`}
                   mono
+                  canEdit={canEdit}
+                  hint="Amount follows this pair"
+                  fields={[
+                    {
+                      key: 'unitPrice',
+                      label: 'Unit price',
+                      type: 'number',
+                      step: '0.01',
+                      min: '0',
+                      value: (deal.unitPriceMinor! / 100).toFixed(2),
+                      whenEmpty: 'zero',
+                      widthClass: 'w-28',
+                    },
+                    {
+                      key: 'quantity',
+                      label: 'Qty',
+                      type: 'number',
+                      step: '1',
+                      min: '0',
+                      value: String(deal.quantity),
+                      whenEmpty: 'zero',
+                      widthClass: 'w-20',
+                    },
+                  ]}
                 />
               ) : null}
-              {deal.marginBps != null ? (
-                <DetailCard
-                  label="Margin"
-                  value={`${marginBpsToPct(deal.marginBps)}% · ${formatCurrency(
-                    marginMinor(deal.amountMinor, deal.marginBps),
-                    deal.currency,
-                  )}`}
-                  mono
-                />
-              ) : null}
+              <EditableDetailCard
+                dealId={deal.id}
+                label="Margin"
+                display={
+                  deal.marginBps != null
+                    ? `${marginBpsToPct(deal.marginBps)}% · ${formatCurrency(
+                        marginMinor(deal.amountMinor, deal.marginBps),
+                        deal.currency,
+                      )}`
+                    : '—'
+                }
+                mono
+                canEdit={canEdit}
+                fields={[
+                  {
+                    key: 'marginPct',
+                    type: 'number',
+                    step: '0.01',
+                    min: '0',
+                    placeholder: 'e.g. 30',
+                    value:
+                      deal.marginBps != null
+                        ? String(marginBpsToPct(deal.marginBps))
+                        : '',
+                    widthClass: 'w-24',
+                  },
+                ]}
+              />
               {deal.stage === 'won' ? (
                 <DetailCard
                   label="Approval"
@@ -269,13 +373,30 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               deal.approvalStatus === 'pending' ? (
                 <DealApprovalControls dealId={deal.id} />
               ) : null}
-              <DetailCard
+              <EditableDetailCard
+                dealId={deal.id}
                 label="Expected close"
-                value={
+                display={
                   deal.expectedCloseDate
                     ? dateFormatter.format(new Date(deal.expectedCloseDate))
                     : '—'
                 }
+                // A Lead can't hold a close date, so there's nothing to edit
+                // until the deal is qualified.
+                canEdit={canEdit && deal.stage !== 'lead'}
+                hint={
+                  deal.stage === 'lead'
+                    ? 'Set once the deal reaches Qualified'
+                    : undefined
+                }
+                fields={[
+                  {
+                    key: 'expectedCloseDate',
+                    type: 'date',
+                    value: deal.expectedCloseDate ?? '',
+                    whenEmpty: 'null',
+                  },
+                ]}
               />
               <ForecastCategorySelect
                 dealId={deal.id}
