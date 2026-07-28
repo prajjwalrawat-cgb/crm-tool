@@ -52,6 +52,7 @@ import { CreateDealForm } from './create-deal-form';
 import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
 import { LostReasonModal } from './lost-reason-modal';
+import { ClearCloseDateModal } from './clear-close-date-modal';
 import { EmptyState } from './empty-state';
 import { InlineEditCell } from '../../_components/inline-edit-cell';
 import { InlineSelectCell } from '../../_components/inline-select-cell';
@@ -178,6 +179,8 @@ export function DealsView({
   const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string[]>>({});
   // Deal awaiting a "lost reason" before it's moved to the Lost stage.
   const [lostPrompt, setLostPrompt] = useState<DealRow | null>(null);
+  // Dated deal awaiting confirmation that moving to Lead drops its close date.
+  const [clearDatePrompt, setClearDatePrompt] = useState<DealRow | null>(null);
 
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -580,13 +583,17 @@ export function DealsView({
   function handleStageChange(
     deal: DealRow,
     nextStage: DealStage,
-    opts?: { undo?: boolean; reason?: string },
+    opts?: { undo?: boolean; reason?: string; clearCloseDate?: boolean },
   ) {
     if (deal.stage === nextStage) return;
     const prevStage = deal.stage;
     const optimisticDraft: DealItem = {
       ...deal,
       stage: nextStage,
+      // Lead never keeps a close date — mirror the server so the row doesn't
+      // flash the old date before revalidation lands.
+      expectedCloseDate:
+        nextStage === 'lead' ? null : deal.expectedCloseDate,
       closedAt:
         nextStage === 'won' || nextStage === 'lost'
           ? deal.closedAt ?? new Date()
@@ -601,8 +608,16 @@ export function DealsView({
         id: deal.id,
         stage: nextStage,
         reason: opts?.reason,
+        clearCloseDate: opts?.clearCloseDate,
       });
       if (!result.ok) {
+        // Refused only because the deal is dated — ask instead of erroring.
+        // The server is the authority here: the row in hand may be stale.
+        // The optimistic move unwinds on its own as the transition ends.
+        if (result.needsCloseDateClear) {
+          setClearDatePrompt(deal);
+          return;
+        }
         toast.error(`Couldn't change stage: ${result.message}`);
       } else if (result.changed && !opts?.undo) {
         toast.success(`${deal.name} → ${DEAL_STAGE_LABELS[nextStage]}`, {
@@ -624,6 +639,13 @@ export function DealsView({
     if (deal.stage === next) return;
     if (next === 'lost') {
       setLostPrompt(deal);
+      return;
+    }
+    // Back to Lead with a date on the deal: confirm the date goes away before
+    // touching the row, so it doesn't flicker into Lead and back. A stale row
+    // that misses this still gets caught by the server's needsCloseDateClear.
+    if (next === 'lead' && deal.expectedCloseDate) {
+      setClearDatePrompt(deal);
       return;
     }
     handleStageChange(deal, next);
@@ -811,6 +833,19 @@ export function DealsView({
           onConfirm={(reason) => {
             handleStageChange(lostPrompt, 'lost', { reason });
             setLostPrompt(null);
+          }}
+        />
+      ) : null}
+
+      {clearDatePrompt ? (
+        <ClearCloseDateModal
+          dealName={clearDatePrompt.name}
+          closeDate={clearDatePrompt.expectedCloseDate ?? null}
+          pending={stagePending}
+          onCancel={() => setClearDatePrompt(null)}
+          onConfirm={() => {
+            handleStageChange(clearDatePrompt, 'lead', { clearCloseDate: true });
+            setClearDatePrompt(null);
           }}
         />
       ) : null}

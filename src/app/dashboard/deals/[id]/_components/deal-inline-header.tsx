@@ -6,37 +6,35 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
-import { updateDealAction } from '@/app/dashboard/deals/actions';
+import { patchDealAction } from '@/app/dashboard/deals/actions';
 import { marginBpsToPct } from '@/lib/deals/approval';
-import { formatCurrency, KNOWN_CURRENCIES } from '@/lib/deals/currency';
-import { DEAL_STAGES, DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/schema';
+import { formatCurrency } from '@/lib/deals/currency';
+import { DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/schema';
 import { useRealtimeEventOfType } from '@/hooks/use-realtime-events';
 import { cn } from '@/lib/utils';
 
-import { LostReasonModal } from '../../_components/lost-reason-modal';
 import { StageBadge } from '../../_components/stage-badge';
 
 /**
- * Composite inline-edit header for a deal. Renders read-only chrome
- * by default; toggling Edit reveals controls for title / stage /
- * amount / currency / expected close.
+ * Deal title bar. Renames the deal in place and renders the stage / amount /
+ * close date beneath it as read-only context.
+ *
+ * Editing anything OTHER than the name happens on its own Deal Info card
+ * (see `editable-detail-card.tsx` / `deal-stage-card.tsx`). This header used
+ * to edit all of those at once through the full edit-form action, which wrote
+ * every deal column from the submitted payload — so the fields it didn't
+ * render arrived empty and were nulled. One control per field, each patching
+ * only its own columns, makes that class of bug impossible.
  *
  * Behavior:
- *   - **Optimistic update**: local state applies immediately on save.
- *     Server action runs in the background; on success the realtime
- *     `deal.updated` event reconciles. On failure we revert + toast.
- *   - **Realtime reconcile**: subscribes to `deal.updated` events
- *     filtered to this dealId and merges incoming changes. Lets two
- *     tabs editing the same deal converge.
+ *   - **Optimistic rename**: applies locally, reverts + toasts on failure.
+ *   - **Realtime reconcile**: `deal.updated` events for this deal merge in,
+ *     so two tabs converge.
  *   - **Keyboard**: Cmd/Ctrl+S saves, Esc cancels.
- *   - **Dirty detection**: Save button disables when nothing changed.
- *
- * Owner / company / contact edits are NOT in this header — they keep
- * their dedicated pickers below (lower risk + better UX for those
- * particular controls).
  */
 
 type Editable = {
@@ -45,37 +43,45 @@ type Editable = {
   amountMajor: string;
   currency: string;
   expectedCloseDate: string | null;
-  /** Margin percent as a string (e.g. "20"). Required, same as the edit form. */
+  /** Margin percent as a string (e.g. "20"). Read-only here. */
   marginPct: string;
 };
 
 export function DealInlineHeader({
   initial,
-  initialLostReason,
   dealId,
-  companyId,
-  contactId,
   canEdit,
   tenantId,
 }: {
   initial: Editable;
-  initialLostReason: string | null;
   dealId: string;
-  companyId: string | null;
-  contactId: string | null;
   canEdit: boolean;
   tenantId: string;
 }) {
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Editable>(initial);
   const [committed, setCommitted] = useState<Editable>(initial);
   const [pending, startTransition] = useTransition();
-  // Current lost reason — sent through on every save while the deal is Lost so
-  // an unrelated edit doesn't drop it; updated when the prompt captures a new
-  // one. A permanent copy also lives in the activity log.
-  const [lostReason, setLostReason] = useState(initialLostReason ?? '');
-  const [lostPromptOpen, setLostPromptOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Adopt the server's values whenever a fresh render arrives (router.refresh
+  // after a save, a revalidation from elsewhere). `initial` is a new object on
+  // every render, so compare by value, and never clobber an edit in progress.
+  const initialKey = [
+    initial.name,
+    initial.stage,
+    initial.amountMajor,
+    initial.currency,
+    initial.expectedCloseDate ?? '',
+    initial.marginPct,
+  ].join('|');
+  const [syncedKey, setSyncedKey] = useState(initialKey);
+  if (syncedKey !== initialKey && !editing) {
+    setSyncedKey(initialKey);
+    setCommitted(initial);
+    setDraft(initial);
+  }
 
   // Reconcile from realtime when another tab/user updates the deal.
   useRealtimeEventOfType(tenantId, 'deal.updated', (event) => {
@@ -95,70 +101,39 @@ export function DealInlineHeader({
     if (!editing) setDraft(next);
   });
 
-  const isDirty =
-    draft.name !== committed.name ||
-    draft.stage !== committed.stage ||
-    draft.amountMajor !== committed.amountMajor ||
-    draft.currency !== committed.currency ||
-    draft.expectedCloseDate !== committed.expectedCloseDate ||
-    draft.marginPct !== committed.marginPct;
-
-  const doSave = useCallback(
-    (reasonOverride?: string) => {
-      const optimistic = { ...draft };
-      // Optimistic UI update: commit locally; revert on failure.
-      setCommitted(optimistic);
-      setEditing(false);
-      if (reasonOverride !== undefined) setLostReason(reasonOverride);
-
-      startTransition(async () => {
-        const formData = new FormData();
-        formData.set('id', dealId);
-        formData.set('name', optimistic.name);
-        formData.set('stage', optimistic.stage);
-        formData.set('amount', optimistic.amountMajor || '0');
-        formData.set('currency', optimistic.currency);
-        formData.set('expectedCloseDate', optimistic.expectedCloseDate ?? '');
-        formData.set('companyId', companyId ?? '');
-        formData.set('contactId', contactId ?? '');
-        formData.set('marginPct', optimistic.marginPct);
-        // While Lost, always resend the reason (new one, or the existing one)
-        // so a plain amount/name edit doesn't clear it.
-        if (optimistic.stage === 'lost') {
-          const r = reasonOverride ?? lostReason;
-          if (r) formData.set('lostReason', r);
-        }
-        const result = await updateDealAction(formData);
-        if (!result.ok) {
-          toast.error(result.message);
-          // Revert.
-          setCommitted(committed);
-          setDraft(committed);
-          return;
-        }
-      });
-    },
-    [committed, companyId, contactId, dealId, draft, lostReason],
-  );
+  // The header renames the deal; every other field is edited on its own card.
+  const isDirty = draft.name.trim() !== committed.name;
 
   const save = useCallback(() => {
     if (!isDirty || pending) {
       setEditing(false);
       return;
     }
-    // Margin is required (> 0), same rule as the edit form.
-    const m = Number(draft.marginPct);
-    if (!Number.isFinite(m) || m <= 0 || m > 100) {
-      toast.error('Enter a valid Margin % (greater than 0).');
+    const name = draft.name.trim();
+    if (!name) {
+      toast.error('Name is required.');
       return;
     }
-    // Prompt for a reason when moving the deal INTO the Lost stage.
-    if (draft.stage === 'lost' && committed.stage !== 'lost') {
-      setLostPromptOpen(true);
-      return;
-    }
-    doSave();
-  }, [committed.stage, doSave, draft.marginPct, draft.stage, isDirty, pending]);
+    const rollback = committed;
+    setCommitted({ ...committed, name });
+    setEditing(false);
+
+    startTransition(async () => {
+      // Patch only the name — the action leaves every column absent from the
+      // payload untouched, which is what keeps a rename from disturbing unit
+      // price, description, custom fields and the rest.
+      const result = await patchDealAction({ id: dealId, name });
+      if (!result.ok) {
+        toast.error(result.message);
+        setCommitted(rollback);
+        setDraft(rollback);
+      }
+      // Server-rendered siblings (the Deal Info cards, the activity feed) are
+      // a separate tree from this component's state — pull the fresh render so
+      // the page agrees with itself without a reload.
+      router.refresh();
+    });
+  }, [committed, dealId, draft.name, isDirty, pending, router]);
 
   const cancel = useCallback(() => {
     setDraft(committed);
@@ -213,96 +188,19 @@ export function DealInlineHeader({
           </h1>
         )}
 
+        {/* Read-only context only. Stage, amount, margin and close date are
+            edited on their own cards in Deal Info — one control per field,
+            each patching just its own columns. */}
         <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[13px] text-slate-500 dark:text-[#A1A1AA]">
-          {editing ? (
+          <span>{DEAL_STAGE_LABELS[display.stage]}</span>
+          <span aria-hidden>·</span>
+          <span className="font-mono">{formattedAmount}</span>
+          {display.expectedCloseDate ? (
             <>
-              <label className="flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide">Stage</span>
-                <select
-                  value={draft.stage}
-                  onChange={(e) =>
-                    setDraft({ ...draft, stage: e.target.value as DealStage })
-                  }
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[12.5px] dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA]"
-                >
-                  {DEAL_STAGES.map((s) => (
-                    <option key={s} value={s}>
-                      {DEAL_STAGE_LABELS[s]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide">Amount</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={draft.amountMajor}
-                  onChange={(e) =>
-                    setDraft({ ...draft, amountMajor: e.target.value })
-                  }
-                  className="w-28 rounded-md border border-slate-200 bg-white px-2 py-1 text-right font-mono text-[12.5px] dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA]"
-                />
-                <select
-                  value={draft.currency}
-                  onChange={(e) =>
-                    setDraft({ ...draft, currency: e.target.value })
-                  }
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[12.5px] dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA]"
-                >
-                  {KNOWN_CURRENCIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide">
-                  Margin&nbsp;%<span className="text-red-500">*</span>
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
-                  value={draft.marginPct}
-                  onChange={(e) =>
-                    setDraft({ ...draft, marginPct: e.target.value })
-                  }
-                  placeholder="e.g. 30"
-                  className="w-20 rounded-md border border-slate-200 bg-white px-2 py-1 text-right font-mono text-[12.5px] dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA]"
-                />
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide">Close</span>
-                <input
-                  type="date"
-                  value={draft.expectedCloseDate ?? ''}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      expectedCloseDate: e.target.value || null,
-                    })
-                  }
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[12.5px] dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA]"
-                />
-              </label>
-            </>
-          ) : (
-            <>
-              <span>{DEAL_STAGE_LABELS[display.stage]}</span>
               <span aria-hidden>·</span>
-              <span className="font-mono">{formattedAmount}</span>
-              {display.expectedCloseDate ? (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>close {display.expectedCloseDate}</span>
-                </>
-              ) : null}
+              <span>close {display.expectedCloseDate}</span>
             </>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -347,22 +245,11 @@ export function DealInlineHeader({
               className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2.5 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:border-[#1F1F1F] dark:text-[#A1A1AA] dark:hover:bg-[#111111] dark:hover:text-[#FAFAFA]"
             >
               <Pencil className="h-3.5 w-3.5" aria-hidden />
-              Edit
+              Rename
             </button>
           )
         ) : null}
       </div>
-
-      {lostPromptOpen ? (
-        <LostReasonModal
-          dealName={draft.name}
-          onCancel={() => setLostPromptOpen(false)}
-          onConfirm={(reason) => {
-            setLostPromptOpen(false);
-            doSave(reason);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

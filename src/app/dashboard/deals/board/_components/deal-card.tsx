@@ -29,6 +29,10 @@ type Props = {
    * the column with full sibling context.
    */
   suffix?: string | null;
+  /** Column is in bulk-select mode — render the checkbox. */
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectToggle?: (dealId: string) => void;
 };
 
 function isOverdue(deal: BoardCard, now: Date): boolean {
@@ -63,6 +67,9 @@ export const DealCard = memo(function DealCard({
   draggable,
   overlay = false,
   suffix = null,
+  selectable = false,
+  selected = false,
+  onSelectToggle,
 }: Props) {
   const displayName = suffix ? `${deal.name} — ${suffix}` : deal.name;
   const sortable = useSortable({
@@ -104,6 +111,7 @@ export const DealCard = memo(function DealCard({
             ? 'border-l-slate-400'
             : bandBorder(deal.healthBand),
         deal.__pending && 'opacity-60',
+        selected && 'ring-2 ring-indigo-400 ring-offset-1',
         !overlay && draggable && 'cursor-grab active:cursor-grabbing',
         // Lifted, slightly-rotated clone while dragging (dnd-kit DragOverlay).
         overlay && 'rotate-2 cursor-grabbing shadow-2xl ring-1 ring-indigo-300/60',
@@ -113,6 +121,18 @@ export const DealCard = memo(function DealCard({
       )}
     >
       <header className="flex items-start justify-between gap-2">
+        {selectable && !overlay ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onSelectToggle?.(deal.id)}
+            // The card is a dnd-kit sortable; without this the checkbox's
+            // pointerdown starts a drag instead of ticking the box.
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label={`Select ${deal.name}`}
+            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-indigo-600"
+          />
+        ) : null}
         {overlay ? (
           <span className="font-medium leading-tight">{displayName}</span>
         ) : (

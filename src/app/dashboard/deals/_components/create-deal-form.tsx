@@ -73,6 +73,10 @@ export function CreateDealForm({
     formRef.current?.reset();
     setClientErrors({});
     setClientMsg(null);
+    // form.reset() puts the DOM select back to Lead, so the state that mirrors
+    // it has to follow — otherwise the next deal's form shows Lead while still
+    // rendering the previous stage's conditional fields.
+    setStageValue('lead');
   }, [resetKey]);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -171,12 +175,21 @@ export function CreateDealForm({
         errors={errs}
       />
 
-      <Field
-        name="expectedCloseDate"
-        label="Expected close date"
-        type="date"
-        errors={errs.expectedCloseDate}
-      />
+      {/* A Lead can't carry a close date (see violatesLeadCloseDate), so the
+          field is hidden rather than shown-and-rejected. Nothing is submitted
+          for it while hidden, which the action reads as null. */}
+      {stageValue === 'lead' ? (
+        <p className="text-xs text-slate-500">
+          Expected close date is set once the deal reaches Qualified.
+        </p>
+      ) : (
+        <Field
+          name="expectedCloseDate"
+          label="Expected close date"
+          type="date"
+          errors={errs.expectedCloseDate}
+        />
+      )}
 
       <DealCompanyContactFields
         companyOptions={companyOptions}
