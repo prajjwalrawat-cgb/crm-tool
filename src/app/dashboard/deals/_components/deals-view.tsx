@@ -1,7 +1,6 @@
 ﻿'use client';
 
 import { Check, ChevronDown, Download, Eye, EyeOff, ExternalLink, Loader2, MoreVertical, Pencil, Search, Trash2 } from 'lucide-react';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   useEffect,
@@ -37,6 +36,7 @@ import { cn } from '@/lib/utils';
 
 import { CreateDrawer } from '../../_components/create-drawer';
 import { FilterChips, type FilterChip } from '../../_components/filter-chips';
+import { HoverPrefetchLink } from '../../_components/hover-prefetch-link';
 import { PaginationControls } from '../../_components/pagination-controls';
 import {
   createDealAction,
@@ -1386,12 +1386,12 @@ function DealsTable({
                   {isOptimistic ? (
                     <span className="text-[13px] font-medium">{d.name}</span>
                   ) : (
-                    <Link
+                    <HoverPrefetchLink
                       href={`/dashboard/deals/${d.id}`}
                       className="text-[13px] font-medium hover:underline"
                     >
                       {d.name}
-                    </Link>
+                    </HoverPrefetchLink>
                   )}
                   <p className="mt-0.5 truncate text-[11px] text-slate-500">
                     {d.companyName ?? 'No company'}
@@ -1597,13 +1597,13 @@ function DealsTable({
                       {isOptimistic ? (
                         <span className="font-medium">{d.name}</span>
                       ) : (
-                        <Link
+                        <HoverPrefetchLink
                           href={`/dashboard/deals/${d.id}`}
                           className="inline-flex items-center gap-1 font-medium hover:underline"
                         >
                           {d.name}
                           <ExternalLink className="h-3 w-3 text-slate-400" aria-hidden />
-                        </Link>
+                        </HoverPrefetchLink>
                       )}
                     </div>
                   </td>

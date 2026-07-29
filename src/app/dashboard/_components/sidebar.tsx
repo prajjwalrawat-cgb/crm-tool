@@ -8,6 +8,7 @@ import { SaleinxIcon, SaleinxWordmark } from '@/lib/brand/logo';
 import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
+import { HoverPrefetchLink } from './hover-prefetch-link';
 import { isNavActive, navGroupsForPersona } from './nav-config';
 
 type Props = {
@@ -227,7 +228,11 @@ function NavList({
                 const Icon = item.icon;
                 return (
                   <li key={item.href}>
-                    <Link
+                    {/* Intent-deferred prefetch: 19-23 nav links are in the
+                        viewport on every dashboard page, and automatic
+                        prefetch (production-only) would fire an `?_rsc=`
+                        render for all of them at once. */}
+                    <HoverPrefetchLink
                       href={item.href}
                       onClick={onLinkClick}
                       aria-current={active ? 'page' : undefined}
@@ -242,7 +247,7 @@ function NavList({
                     >
                       <Icon className="h-4 w-4 shrink-0" aria-hidden />
                       {!collapsed ? <span>{item.label}</span> : null}
-                    </Link>
+                    </HoverPrefetchLink>
                   </li>
                 );
               })}
