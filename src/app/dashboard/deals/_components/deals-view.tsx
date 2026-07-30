@@ -378,6 +378,14 @@ export function DealsView({
       source: base?.source ?? null,
       currency,
       expectedCloseDate,
+      // Pushback counters are trigger-maintained (0058), so the optimistic row
+      // carries the known values rather than guessing an increment — the
+      // authoritative ones arrive via realtime/refresh. `originalCloseDate`
+      // mirrors the trigger's write-once rule for a brand-new deal.
+      originalCloseDate: base?.originalCloseDate ?? expectedCloseDate,
+      pushCount: base?.pushCount ?? 0,
+      lastPushedAt: base?.lastPushedAt ?? null,
+      totalSlipDays: base?.totalSlipDays ?? 0,
       closedAt,
       ownerId,
       probability: base?.probability ?? null,

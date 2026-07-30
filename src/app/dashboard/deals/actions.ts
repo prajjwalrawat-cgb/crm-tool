@@ -54,6 +54,10 @@ import {
   buildDealColumnPatch,
   UnitPricingIncompleteError,
 } from '@/lib/deals/patch-columns';
+import {
+  clearCloseDateReason,
+  setCloseDateReason,
+} from '@/lib/deals/close-date-reason';
 import { HOLD_REASONS } from '@/lib/deals/hold';
 import {
   LEAD_CLOSE_DATE_MESSAGE,
@@ -1784,6 +1788,16 @@ export async function patchDealAction(
         if (Object.keys(patch).length === 0) return previous;
         patch.updatedBy = membership.userId;
 
+        // A rep's note about why the date moved. Handed to the pushback trigger
+        // via a transaction-local GUC so it lands on the same
+        // `deal_date_changes` row the trigger writes for this UPDATE. Only
+        // meaningful when the date is actually part of the patch.
+        const attachingReason =
+          d.expectedCloseDate !== undefined && !!d.closeDateChangeReason?.trim();
+        if (attachingReason) {
+          await setCloseDateReason(tx, d.closeDateChangeReason);
+        }
+
         const [row] = await tx
           .update(deals)
           .set(patch)
@@ -1795,6 +1809,9 @@ export async function patchDealAction(
             ),
           )
           .returning();
+        // Reset immediately after the write so nothing later in this
+        // transaction (or a retry of it) inherits the note.
+        if (attachingReason) await clearCloseDateReason(tx);
         if (!row) return null;
 
         if (

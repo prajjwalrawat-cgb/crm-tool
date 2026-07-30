@@ -18,6 +18,7 @@ export * from './deals';
 export * from './deal-contacts';
 export * from './deal-value-splits';
 export * from './deal-stage-history';
+export * from './deal-date-changes';
 export * from './deal-documents';
 export * from './activity-logs';
 export * from './workflow-runs';

@@ -28,7 +28,7 @@ import type { MembershipRole } from '@/db/schema';
 import { useRealtimeEvents } from '@/hooks/use-realtime-events';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { DealFilters } from '@/lib/deals/filters';
-import type { DealBoard } from '@/lib/deals/queries';
+import type { DealBoard, StageSlipRollup } from '@/lib/deals/queries';
 import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
 import { canManageDeals } from '@/lib/rbac';
 import { deserializeDeal } from '@/lib/realtime/events';
@@ -49,6 +49,7 @@ import { type BoardCard, DealCard } from './deal-card';
 import { BoardColumn } from './board-column';
 import { GateBlockPanel } from './gate-block-panel';
 import { CollapsedHoldColumn } from './collapsed-hold-column';
+import { SlippedOnlyToggle } from './slipped-only-toggle';
 import type { GateFailure } from '@/lib/stage-gates/types';
 
 type LocalBoard = Record<DealStage, BoardCard[]>;
@@ -69,6 +70,8 @@ type Props = {
   stageCounts: Record<DealStage, number>;
   /** Per-stage summed amount (minor units) across all deals in the stage. */
   stageAmounts: Record<DealStage, number>;
+  /** Per-stage pushed-deal rollup — the column's "value at risk" line. */
+  stageSlipped: Record<DealStage, StageSlipRollup>;
   /** Per-stage win probability (0–100) for the weighted total. */
   stageProbabilities: Record<DealStage, number>;
   /** Workspace currency for the column totals. */
@@ -182,6 +185,7 @@ export function BoardView({
   initialBoard,
   stageCounts,
   stageAmounts,
+  stageSlipped,
   stageProbabilities,
   boardCurrency,
   currentRole,
@@ -228,6 +232,13 @@ export function BoardView({
       id: 'unassigned',
       keys: ['unassigned'],
       label: 'Unassigned',
+    });
+  }
+  if (initialFilters.slipped) {
+    filterChips.push({
+      id: 'slipped',
+      keys: ['slipped'],
+      label: 'Slipped only',
     });
   }
   // Don't render the seed `currentUserId` — unused here but kept in the
@@ -297,6 +308,13 @@ export function BoardView({
   } | null>(null);
   // Hold column is collapsed to a slim bar by default when non-empty.
   const [holdExpanded, setHoldExpanded] = useState(false);
+
+  // Whole-board pushed count, for the header toggle's badge. Server-computed
+  // per stage, so this is a sum of counts, not a scan of the loaded cards.
+  const totalSlippedOnBoard = DEAL_STAGES.reduce(
+    (sum, s) => sum + (stageSlipped[s]?.count ?? 0),
+    0,
+  );
 
   // TEMPORARY (Lead close-date rollout): bulk-select in the Qualified column
   // to send deals the migration moved out of Lead back where they belong.
@@ -713,6 +731,8 @@ export function BoardView({
             cards={board[stage]}
             totalCount={stageCounts[stage]}
             totalAmountMinor={stageAmounts[stage] ?? 0}
+            slippedCount={stageSlipped[stage]?.count ?? 0}
+            slippedAmountMinor={stageSlipped[stage]?.amountMinor ?? 0}
             probability={stageProbabilities[stage] ?? 0}
             currency={boardCurrency}
             canMove={canMove}
@@ -732,6 +752,7 @@ export function BoardView({
       qualifiedSelection,
       stageCounts,
       stageAmounts,
+      stageSlipped,
       stageProbabilities,
       boardCurrency,
       visibleStages,
@@ -778,7 +799,15 @@ export function BoardView({
         basePath="/dashboard/deals/board"
       />
 
-      <FilterChips chips={filterChips} />
+      <div className="flex flex-wrap items-center gap-2">
+        <SlippedOnlyToggle
+          active={!!initialFilters.slipped}
+          totalSlipped={totalSlippedOnBoard}
+        />
+        <div className="min-w-0 flex-1">
+          <FilterChips chips={filterChips} />
+        </div>
+      </div>
 
       {error ? (
         <p

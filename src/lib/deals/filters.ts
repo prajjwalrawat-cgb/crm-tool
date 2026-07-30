@@ -51,6 +51,11 @@ export type DealFilters = {
   score?: 'strong' | 'moderate' | 'at_risk';
   /** Held deals whose revisit date has arrived (Module 6). */
   revisitDue?: boolean;
+  /**
+   * Deals whose close date has been pushed out at least once
+   * (`deals.push_count >= 1`) — the board's "show slipped deals only" toggle.
+   */
+  slipped?: boolean;
 };
 
 export const SCORE_BANDS = ['strong', 'moderate', 'at_risk'] as const;
@@ -72,6 +77,7 @@ const URL_FILTER_KEYS = [
   'approval',
   'score',
   'revisitDue',
+  'slipped',
 ] as const;
 
 /**
@@ -147,6 +153,7 @@ export function parseDealFilters(
         ? raw.score
         : undefined,
     revisitDue: flag(raw.revisitDue),
+    slipped: flag(raw.slipped),
   };
 }
 
@@ -187,6 +194,7 @@ export function dealFiltersToSearchParams(
   else if (filters.approvedOnly) out.set('approval', 'approved');
   if (filters.score) out.set('score', filters.score);
   if (filters.revisitDue) out.set('revisitDue', '1');
+  if (filters.slipped) out.set('slipped', '1');
   return out;
 }
 
@@ -205,6 +213,7 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.awaitingApproval ||
       filters.approvedOnly ||
       filters.score ||
-      filters.revisitDue,
+      filters.revisitDue ||
+      filters.slipped,
   );
 }

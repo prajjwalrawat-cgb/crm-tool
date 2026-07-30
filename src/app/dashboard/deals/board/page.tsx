@@ -59,6 +59,7 @@ export default async function DealsBoardPage({
           initialBoard={summary.board}
           stageCounts={summary.counts}
           stageAmounts={summary.amounts}
+          stageSlipped={summary.slipped}
           stageProbabilities={stageProbabilities}
           boardCurrency={settings.defaultCurrency}
           currentRole={membership.role}

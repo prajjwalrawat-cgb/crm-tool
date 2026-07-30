@@ -2,12 +2,18 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { Flag, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { memo } from 'react';
 
 import { formatCurrency } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
+import {
+  isDealOverdue,
+  slipChipLabel,
+  slipSeverity,
+  slipTooltip,
+} from '@/lib/deals/slip';
 import { cn } from '@/lib/utils';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -35,11 +41,11 @@ type Props = {
   onSelectToggle?: (dealId: string) => void;
 };
 
-function isOverdue(deal: BoardCard, now: Date): boolean {
-  if (!deal.expectedCloseDate) return false;
-  if (deal.stage === 'won' || deal.stage === 'lost') return false;
-  // expectedCloseDate is 'YYYY-MM-DD' from Drizzle's date column.
-  return new Date(deal.expectedCloseDate) < now;
+/** Chip colors for the "Pushed ×N" indicator, by slip severity. */
+function slipChipClass(severity: 'watch' | 'severe'): string {
+  return severity === 'severe'
+    ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
+    : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300';
 }
 
 /** Left-spine color derived from the Module 2 health band. */
@@ -91,6 +97,12 @@ export const DealCard = memo(function DealCard({
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  const overdue = isDealOverdue(deal, today);
+  // Timeline pushback (migration 0058). 'none' for a deal that has never been
+  // pushed, so a healthy board looks exactly as it did before.
+  const slip = slipSeverity(deal);
+  const slipTitle = slip === 'none' ? undefined : slipTooltip(deal);
+
   return (
     <article
       ref={overlay ? undefined : setNodeRef}
@@ -99,7 +111,7 @@ export const DealCard = memo(function DealCard({
       {...(overlay ? {} : listeners)}
       data-pending={deal.__pending ? '' : undefined}
       className={cn(
-        'group rounded-md border bg-white p-3 text-sm shadow-sm transition',
+        'group relative rounded-md border bg-white p-3 text-sm shadow-sm transition',
         'border-slate-200 border-l-4',
         // Closed deals keep their stage-colored spine; open deals get the
         // Module 2 health-band color (green strong / amber moderate / red at
@@ -120,6 +132,17 @@ export const DealCard = memo(function DealCard({
         !overlay && isDragging && 'opacity-30',
       )}
     >
+      {/* Badly-slipped deals get a second spine, stacked just inside the
+          health-band border rather than replacing it — the two say different
+          things and a manager needs both. Absolutely positioned so the card's
+          height and layout are untouched. */}
+      {slip === 'severe' ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-rose-500 dark:bg-rose-400"
+        />
+      ) : null}
+
       <header className="flex items-start justify-between gap-2">
         {selectable && !overlay ? (
           <input
@@ -192,24 +215,49 @@ export const DealCard = memo(function DealCard({
         </span>
       ) : null}
 
-      <div className="mt-2 flex items-center justify-between text-xs">
+      {/* Footer: amount, then the close date with its slip / overdue tags.
+          Wraps to at most one extra line on a narrow column rather than
+          growing every card. */}
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
         <span className="font-mono">
           {formatCurrency(deal.amountMinor, deal.currency)}
         </span>
-        {deal.expectedCloseDate ? (
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 text-slate-500',
-              isOverdue(deal, today) &&
-                'font-medium text-red-600',
-            )}
-          >
-            {isOverdue(deal, today) ? (
-              <AlertTriangle className="h-3 w-3" aria-hidden />
-            ) : null}
-            {dateFormatter.format(new Date(deal.expectedCloseDate))}
-          </span>
-        ) : null}
+        <span className="flex flex-wrap items-center justify-end gap-1">
+          {deal.expectedCloseDate ? (
+            <span
+              className={cn(
+                'text-slate-500',
+                overdue && 'font-medium text-red-600',
+              )}
+            >
+              {dateFormatter.format(new Date(deal.expectedCloseDate))}
+            </span>
+          ) : null}
+          {/* Overdue is its own failure mode: nobody has even rescheduled it.
+              Independent of pushback, so both tags can show at once. */}
+          {overdue ? (
+            <span
+              title="Past its close date and still open"
+              className="inline-flex h-4 items-center rounded-full bg-rose-100 px-1.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
+            >
+              Overdue
+            </span>
+          ) : null}
+          {slip !== 'none' ? (
+            <span
+              title={slipTitle}
+              className={cn(
+                'inline-flex h-4 items-center gap-0.5 rounded-full px-1.5 text-[10px] font-semibold tabular-nums',
+                slipChipClass(slip),
+              )}
+            >
+              {slip === 'severe' ? (
+                <Flag className="h-2.5 w-2.5" aria-hidden />
+              ) : null}
+              {slipChipLabel(deal.pushCount)}
+            </span>
+          ) : null}
+        </span>
       </div>
     </article>
   );

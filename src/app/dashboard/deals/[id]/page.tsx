@@ -49,6 +49,7 @@ import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
 import { RelationshipHealthCard } from '../../_components/relationship-health-card';
 import { DealApprovalControls } from './_components/deal-approval-controls';
+import { DealCloseDateCard } from './_components/deal-close-date-card';
 import { DealContactsCard } from './_components/deal-contacts-card';
 import { DealDocumentsCard } from './_components/deal-documents-card';
 import { DealFieldEditor } from './_components/deal-field-editor';
@@ -378,30 +379,18 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               deal.approvalStatus === 'pending' ? (
                 <DealApprovalControls dealId={deal.id} />
               ) : null}
-              <EditableDetailCard
+              {/* Close date has its own card rather than a generic editable
+                  one: it carries the pushback summary, the skippable "why is
+                  this pushed back?" prompt on a forward move, and the date
+                  history timeline. */}
+              <DealCloseDateCard
                 dealId={deal.id}
-                label="Expected close"
-                display={
-                  deal.expectedCloseDate
-                    ? dateFormatter.format(new Date(deal.expectedCloseDate))
-                    : '—'
-                }
-                // A Lead can't hold a close date, so there's nothing to edit
-                // until the deal is qualified.
-                canEdit={canEdit && deal.stage !== 'lead'}
-                hint={
-                  deal.stage === 'lead'
-                    ? 'Set once the deal reaches Qualified'
-                    : undefined
-                }
-                fields={[
-                  {
-                    key: 'expectedCloseDate',
-                    type: 'date',
-                    value: deal.expectedCloseDate ?? '',
-                    whenEmpty: 'null',
-                  },
-                ]}
+                expectedCloseDate={deal.expectedCloseDate ?? null}
+                originalCloseDate={deal.originalCloseDate ?? null}
+                pushCount={deal.pushCount}
+                totalSlipDays={deal.totalSlipDays}
+                stage={deal.stage}
+                canEdit={canEdit}
               />
               <ForecastCategorySelect
                 dealId={deal.id}
