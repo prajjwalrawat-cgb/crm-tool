@@ -7,7 +7,7 @@ import { tenantTransaction, type DbExecutor } from '@/lib/db-context';
 
 import type { SplitRow } from './value-split';
 
-/** The stored split for one deal, ordered by contract year. */
+/** The stored breakdown for one deal, ordered by element then contract year. */
 export async function listDealValueSplit(
   tenantId: string,
   dealId: string,
@@ -15,6 +15,10 @@ export async function listDealValueSplit(
   const rows = await tenantTransaction((tx) =>
     tx
       .select({
+        elementIndex: dealValueSplits.elementIndex,
+        component: dealValueSplits.component,
+        componentLabel: dealValueSplits.componentLabel,
+        billingType: dealValueSplits.billingType,
         yearIndex: dealValueSplits.yearIndex,
         periodStart: dealValueSplits.periodStart,
         periodEnd: dealValueSplits.periodEnd,
@@ -27,7 +31,7 @@ export async function listDealValueSplit(
           eq(dealValueSplits.dealId, dealId),
         ),
       )
-      .orderBy(asc(dealValueSplits.yearIndex)),
+      .orderBy(asc(dealValueSplits.elementIndex), asc(dealValueSplits.yearIndex)),
   );
   return rows;
 }
@@ -47,6 +51,10 @@ export async function listDealValueSplitsFor(
   const rows = await exec
     .select({
       dealId: dealValueSplits.dealId,
+      elementIndex: dealValueSplits.elementIndex,
+      component: dealValueSplits.component,
+      componentLabel: dealValueSplits.componentLabel,
+      billingType: dealValueSplits.billingType,
       yearIndex: dealValueSplits.yearIndex,
       periodStart: dealValueSplits.periodStart,
       periodEnd: dealValueSplits.periodEnd,
@@ -59,11 +67,15 @@ export async function listDealValueSplitsFor(
         inArray(dealValueSplits.dealId, dealIds),
       ),
     )
-    .orderBy(asc(dealValueSplits.yearIndex));
+    .orderBy(asc(dealValueSplits.elementIndex), asc(dealValueSplits.yearIndex));
 
   for (const r of rows) {
     const list = out.get(r.dealId) ?? [];
     list.push({
+      elementIndex: r.elementIndex,
+      component: r.component,
+      componentLabel: r.componentLabel,
+      billingType: r.billingType,
       yearIndex: r.yearIndex,
       periodStart: r.periodStart,
       periodEnd: r.periodEnd,
@@ -98,6 +110,10 @@ export async function replaceDealValueSplit(
     params.rows.map((r) => ({
       tenantId: params.tenantId,
       dealId: params.dealId,
+      elementIndex: r.elementIndex,
+      component: r.component,
+      componentLabel: r.componentLabel ?? null,
+      billingType: r.billingType,
       yearIndex: r.yearIndex,
       periodStart: r.periodStart,
       periodEnd: r.periodEnd,

@@ -9,15 +9,25 @@ import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import {
+  BILLING_TYPES,
   MAX_CONTRACT_YEARS,
+  MAX_ELEMENTS,
   type SplitRow,
+  VALUE_COMPONENTS,
   validateSplit,
 } from '@/lib/deals/value-split';
 import { replaceDealValueSplit } from '@/lib/deals/value-split-queries';
 
 /* -------- MULTI-YEAR CONTRACT VALUE SPLIT -------- */
 
+// One cell of the (element x year) grid.
 const rowSchema = z.object({
+  elementIndex: z.coerce.number().int().min(1).max(MAX_ELEMENTS),
+  component: z.enum(VALUE_COMPONENTS),
+  // Only meaningful for `other`; validateSplit requires it to be non-empty
+  // there and ignores it elsewhere.
+  componentLabel: z.string().trim().max(60).nullish(),
+  billingType: z.enum(BILLING_TYPES),
   yearIndex: z.coerce.number().int().min(1).max(MAX_CONTRACT_YEARS),
   periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date'),
   periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date'),
@@ -27,7 +37,8 @@ const rowSchema = z.object({
 
 const saveSchema = z.object({
   dealId: z.uuid({ message: 'Invalid deal id' }),
-  rows: z.array(rowSchema).max(MAX_CONTRACT_YEARS),
+  // A full grid, so the cap is elements x years rather than either alone.
+  rows: z.array(rowSchema).max(MAX_ELEMENTS * MAX_CONTRACT_YEARS),
 });
 
 export type SaveValueSplitResult =
@@ -57,7 +68,7 @@ export async function saveDealValueSplitAction(
       message:
         flat.formErrors[0] ??
         Object.values(flat.fieldErrors).flat()[0] ??
-        'Check the contract years and try again.',
+        'Check the breakdown and try again.',
     };
   }
 
@@ -116,7 +127,10 @@ export async function saveDealValueSplitAction(
           action: 'value_split_changed',
           metadata: {
             name: deal.name,
-            years: rows.length,
+            // `rows` is now a grid, so count the distinct dimensions rather
+            // than the cell count.
+            years: new Set(rows.map((r) => r.yearIndex)).size,
+            elements: new Set(rows.map((r) => r.elementIndex)).size,
             startISO: rows[0]?.periodStart ?? null,
             totalMinor: deal.amountMinor,
             currency: deal.currency,
