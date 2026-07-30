@@ -7,7 +7,11 @@ import { parseDealFilters } from '@/lib/deals/filters';
 import { decodeCursor, type Cursor } from '@/lib/pagination/cursor';
 import { listDeals, type DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
-import type { SplitRow } from '@/lib/deals/value-split';
+import {
+  componentDisplayName,
+  rowsToElements,
+  type SplitRow,
+} from '@/lib/deals/value-split';
 import { listDealValueSplitsFor } from '@/lib/deals/value-split-queries';
 import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
@@ -63,7 +67,7 @@ export async function GET(req: NextRequest) {
         if (!cursor) break;
       }
 
-      // Multi-year splits for the whole page set in one query, not one per deal.
+      // Breakdowns for the whole page set in one query, not one per deal.
       const byDeal = await tenantTransaction((tx) =>
         listDealValueSplitsFor(
           tx,
@@ -118,10 +122,17 @@ function buildCsv(
   ownerNames: Record<string, string>,
   splits: Map<string, SplitRow[]>,
 ): string {
+  // A breakdown is a grid of (element x year), so the number of stored rows is
+  // a CELL count — the column width is the distinct YEAR count. Reading
+  // `.length` here would over-count the years and, worse, `find`-ing one row
+  // per year would silently export a single element's cell as the year total.
+  const yearCount = (split: SplitRow[]) =>
+    split.length === 0 ? 0 : new Set(split.map((s) => s.yearIndex)).size;
+
   // Multi-year columns are only as wide as the longest contract in this
-  // export, so a workspace with no splits gets the sheet it always got.
+  // export, so a workspace with no breakdowns gets the sheet it always got.
   const maxYears = rows.reduce(
-    (max, r) => Math.max(max, splits.get(r.id)?.length ?? 0),
+    (max, r) => Math.max(max, yearCount(splits.get(r.id) ?? [])),
     0,
   );
   const header = [
@@ -130,6 +141,9 @@ function buildCsv(
       ? [
           'Contract Start',
           'Contract Years',
+          // What the value is made of, as "Element: total" pairs — keeps the
+          // element dimension in the sheet without one column per element.
+          'Contract Elements',
           ...Array.from({ length: maxYears }, (_, i) => `Year ${i + 1} Value`),
         ]
       : []),
@@ -138,16 +152,30 @@ function buildCsv(
   const lines = [header.map(csvCell).join(',')];
   for (const r of rows) {
     const split = splits.get(r.id) ?? [];
+    const years = yearCount(split);
     const splitCells =
       maxYears > 0
         ? [
             split[0]?.periodStart ?? '',
-            split.length > 0 ? String(split.length) : '',
+            years > 0 ? String(years) : '',
+            rowsToElements(split)
+              .map(
+                (el) =>
+                  `${componentDisplayName(el.component, el.componentLabel)}: ` +
+                  fromMinorUnits(
+                    el.amountsMinor.reduce((a, b) => a + b, 0),
+                    r.currency,
+                  ).toFixed(2),
+              )
+              .join('; '),
+            // Every element contributes to a year, so a year's value is the
+            // sum down that column.
             ...Array.from({ length: maxYears }, (_, i) => {
-              const row = split.find((s) => s.yearIndex === i + 1);
-              return row
-                ? fromMinorUnits(row.amountMinor, r.currency).toFixed(2)
-                : '';
+              if (i >= years) return '';
+              const yearTotal = split
+                .filter((s) => s.yearIndex === i + 1)
+                .reduce((acc, s) => acc + s.amountMinor, 0);
+              return fromMinorUnits(yearTotal, r.currency).toFixed(2);
             }),
           ]
         : [];

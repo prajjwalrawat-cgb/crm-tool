@@ -5,9 +5,10 @@ config({ path: '.env.local' });
 config();
 
 /**
- * Self-test for the multi-year TCV split. Covers the pure contract-year rules
- * (generation, leap-year anniversaries, remainder handling, the sum-to-Amount
- * rule) and a DB round-trip through the replace-wholesale write under RLS.
+ * Self-test for the TCV breakdown. Covers the pure rules — contract-year
+ * generation, leap-year anniversaries, remainder handling, the one-time vs
+ * recurring auto-fill, the element/year grid invariants and the sum-to-Amount
+ * rule — plus a DB round-trip through the replace-wholesale write under RLS.
  */
 let exitCode = 0;
 const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
@@ -21,105 +22,257 @@ type TenantRow = { id: string };
 async function main() {
   const {
     addYearsISO,
-    generateContractYears,
+    componentDisplayName,
+    contractYearPeriods,
+    elementsToRows,
+    generateElementAmounts,
+    rowsToElements,
+    spreadEvenly,
     sumSplit,
     validateSplit,
     splitSummary,
+    yearTotals,
   } = await import('../src/lib/deals/value-split');
+  type SplitElement = import('../src/lib/deals/value-split').SplitElement;
 
-  /* ---------- pure rules ---------- */
+  /* ---------- contract years ---------- */
 
-  const years = generateContractYears('2026-08-01', 3, 3_000_000);
-  check('generates one row per contract year', years.length === 3);
+  const periods = contractYearPeriods('2026-08-01', 3);
+  check('generates one period per contract year', periods.length === 3);
   check(
     'year 1 starts on the contract start',
-    years[0]!.periodStart === '2026-08-01',
-    years[0]!.periodStart,
+    periods[0]!.periodStart === '2026-08-01',
   );
   check(
     'later years start on the anniversary',
-    years[1]!.periodStart === '2027-08-01' && years[2]!.periodStart === '2028-08-01',
-    `${years[1]!.periodStart}, ${years[2]!.periodStart}`,
+    periods[1]!.periodStart === '2027-08-01' &&
+      periods[2]!.periodStart === '2028-08-01',
   );
   check(
-    'each year ends where the next begins',
-    years[0]!.periodEnd === years[1]!.periodStart &&
-      years[1]!.periodEnd === years[2]!.periodStart,
+    "a year's end is the next year's start",
+    periods[0]!.periodEnd === periods[1]!.periodStart,
   );
   check(
-    'even split sums to the total',
-    sumSplit(years) === 3_000_000,
-    String(sumSplit(years)),
-  );
-
-  // Minor units are integers: 10,000 over 3 years cannot be three equal rows.
-  const uneven = generateContractYears('2026-01-01', 3, 10_000);
-  check(
-    'indivisible total still sums exactly',
-    sumSplit(uneven) === 10_000,
-    `${uneven.map((r) => r.amountMinor).join('+')}=${sumSplit(uneven)}`,
-  );
-  check(
-    'remainder lands on year 1',
-    uneven[0]!.amountMinor === 3334 && uneven[1]!.amountMinor === 3333,
-    uneven.map((r) => r.amountMinor).join(','),
-  );
-
-  // 29 Feb has no anniversary in a common year.
-  check(
-    'leap-day start clamps to 28 Feb',
+    'a 29-Feb start clamps to 28-Feb in common years',
     addYearsISO('2028-02-29', 1) === '2029-02-28',
-    addYearsISO('2028-02-29', 1),
   );
   check(
-    'leap-day start keeps 29 Feb four years on',
+    'a 29-Feb start stays 29-Feb across a leap gap',
     addYearsISO('2028-02-29', 4) === '2032-02-29',
-    addYearsISO('2028-02-29', 4),
-  );
-
-  /* ---------- the sum-to-Amount rule ---------- */
-
-  check('a balanced split validates', validateSplit(years, 3_000_000).ok);
-
-  const short = validateSplit(years, 3_500_000);
-  check('a short split is rejected', !short.ok);
-  check(
-    'the shortfall is reported',
-    !short.ok && short.differenceMinor === 500_000,
-    String(!short.ok ? short.differenceMinor : ''),
-  );
-
-  const over = validateSplit(years, 2_500_000);
-  check(
-    'an over-allocated split reports a negative difference',
-    !over.ok && over.differenceMinor === -500_000,
-    String(!over.ok ? over.differenceMinor : ''),
-  );
-
-  check('an empty split is rejected', !validateSplit([], 1000).ok);
-  check(
-    'gapped year numbering is rejected',
-    !validateSplit(
-      [
-        { yearIndex: 1, periodStart: '2026-01-01', periodEnd: '2027-01-01', amountMinor: 500 },
-        { yearIndex: 3, periodStart: '2027-01-01', periodEnd: '2028-01-01', amountMinor: 500 },
-      ],
-      1000,
-    ).ok,
   );
   check(
-    'a backwards period is rejected',
-    !validateSplit(
-      [
-        { yearIndex: 1, periodStart: '2027-01-01', periodEnd: '2026-01-01', amountMinor: 1000 },
-      ],
-      1000,
-    ).ok,
+    'term below 1 is rejected',
+    (() => {
+      try {
+        contractYearPeriods('2026-08-01', 0);
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+  );
+
+  /* ---------- even spread and remainders ---------- */
+
+  const spread = spreadEvenly(1_000_000, 3);
+  check(
+    'an even spread sums to the total exactly',
+    spread.reduce((a, b) => a + b, 0) === 1_000_000,
   );
   check(
-    'summary reads back the start and term',
-    splitSummary(years)?.startISO === '2026-08-01' &&
-      splitSummary(years)?.termYears === 3,
+    'the remainder lands on the first slot',
+    spread[0]! === 333_334 && spread[1]! === 333_333 && spread[2]! === 333_333,
+    spread.join('/'),
+  );
+
+  /* ---------- billing type auto-fill ---------- */
+
+  const oneTime = generateElementAmounts('one_time', 3, 500_000);
+  check(
+    'a one-time element puts everything in year 1',
+    oneTime[0]! === 500_000 && oneTime[1]! === 0 && oneTime[2]! === 0,
+    oneTime.join('/'),
+  );
+  const recurring = generateElementAmounts('recurring', 3, 900_000);
+  check(
+    'a recurring element spreads across the term',
+    recurring.every((v) => v === 300_000),
+    recurring.join('/'),
+  );
+  check(
+    'auto-fill never loses money to rounding',
+    generateElementAmounts('recurring', 7, 1_000_000).reduce((a, b) => a + b, 0) ===
+      1_000_000,
+  );
+
+  /* ---------- the grid ---------- */
+
+  // A realistic mix: one-off licence + implementation, recurring AMC.
+  const elements: SplitElement[] = [
+    {
+      elementIndex: 1,
+      component: 'license',
+      componentLabel: null,
+      billingType: 'one_time',
+      amountsMinor: generateElementAmounts('one_time', 3, 1_000_000),
+    },
+    {
+      elementIndex: 2,
+      component: 'implementation',
+      componentLabel: null,
+      billingType: 'one_time',
+      amountsMinor: generateElementAmounts('one_time', 3, 300_000),
+    },
+    {
+      elementIndex: 3,
+      component: 'amc',
+      componentLabel: null,
+      billingType: 'recurring',
+      amountsMinor: generateElementAmounts('recurring', 3, 600_000),
+    },
+  ];
+  const TOTAL = 1_900_000;
+
+  const rows = elementsToRows(elements, '2026-08-01', 3);
+  check(
+    'the grid has one cell per element per year',
+    rows.length === 9,
+    String(rows.length),
+  );
+  check(
+    'the grid sums to the deal amount',
+    sumSplit(rows) === TOTAL,
+    String(sumSplit(rows)),
+  );
+  check('a balanced grid validates', validateSplit(rows, TOTAL).ok);
+
+  const totals = yearTotals(elements, 3);
+  check(
+    'year 1 carries both one-off fees plus the first AMC',
+    totals[0]! === 1_000_000 + 300_000 + 200_000,
+    String(totals[0]),
+  );
+  check(
+    'later years carry only the recurring element',
+    totals[1]! === 200_000 && totals[2]! === 200_000,
+    totals.join('/'),
+  );
+
+  // elementsToRows / rowsToElements are inverses.
+  const roundTripped = rowsToElements(rows);
+  check(
+    'rows convert back to the same elements',
+    JSON.stringify(roundTripped) === JSON.stringify(elements),
+  );
+
+  /* ---------- validation rules ---------- */
+
+  const short = validateSplit(rows, TOTAL + 100_000);
+  check('a short grid is rejected', !short.ok);
+  check(
+    'the shortfall is reported as a signed difference',
+    !short.ok && short.differenceMinor === 100_000,
+    !short.ok ? String(short.differenceMinor) : undefined,
+  );
+  check('an over-allocated grid is rejected', !validateSplit(rows, TOTAL - 1).ok);
+  check('an empty grid is rejected', !validateSplit([], 1000).ok);
+
+  // A gap in element numbering would make the grid ambiguous.
+  const gapped = rows.filter((r) => r.elementIndex !== 2);
+  check(
+    'a gap in the element numbering is rejected',
+    !validateSplit(gapped, sumSplit(gapped)).ok,
+  );
+
+  // Every element needs a cell for every year, or per-year totals under-report.
+  const incomplete = rows.filter(
+    (r) => !(r.elementIndex === 3 && r.yearIndex === 3),
+  );
+  check(
+    'a missing cell is rejected',
+    !validateSplit(incomplete, sumSplit(incomplete)).ok,
+  );
+
+  // An element must describe itself the same way in every year.
+  const inconsistent = rows.map((r) =>
+    r.elementIndex === 3 && r.yearIndex === 2
+      ? { ...r, component: 'support' as const }
+      : r,
+  );
+  check(
+    'an element that changes identity mid-term is rejected',
+    !validateSplit(inconsistent, TOTAL).ok,
+  );
+
+  // `other` is the escape hatch, but it has to be named.
+  const unnamedOther = elementsToRows(
+    [
+      {
+        elementIndex: 1,
+        component: 'other',
+        componentLabel: '   ',
+        billingType: 'one_time',
+        amountsMinor: [TOTAL],
+      },
+    ],
+    '2026-08-01',
+    1,
+  );
+  check(
+    'an unnamed custom element is rejected',
+    !validateSplit(unnamedOther, TOTAL).ok,
+  );
+
+  const namedOther = elementsToRows(
+    [
+      {
+        elementIndex: 1,
+        component: 'other',
+        componentLabel: 'Data migration',
+        billingType: 'one_time',
+        amountsMinor: [TOTAL],
+      },
+    ],
+    '2026-08-01',
+    1,
+  );
+  check('a named custom element is accepted', validateSplit(namedOther, TOTAL).ok);
+  check(
+    'a custom element displays its own label',
+    componentDisplayName('other', 'Data migration') === 'Data migration',
+  );
+  check(
+    'a standard element displays its canonical name',
+    componentDisplayName('amc', null) === 'AMC',
+  );
+
+  // billingType is intent, not a constraint: a one-time fee invoiced over two
+  // years is a legitimate contract and must not be rejected.
+  const instalments = elementsToRows(
+    [
+      {
+        elementIndex: 1,
+        component: 'implementation',
+        componentLabel: null,
+        billingType: 'one_time',
+        amountsMinor: [600_000, 400_000],
+      },
+    ],
+    '2026-08-01',
+    2,
+  );
+  check(
+    'a one-time element paid in instalments is allowed',
+    validateSplit(instalments, 1_000_000).ok,
+  );
+
+  const summary = splitSummary(rows);
+  check(
+    'summary reads back the start, term and element count',
+    summary?.startISO === '2026-08-01' &&
+      summary?.termYears === 3 &&
+      summary?.elementCount === 3,
+    JSON.stringify(summary),
   );
 
   /* ---------- DB round-trip ---------- */
@@ -163,7 +316,7 @@ async function main() {
           tenantId,
           name: 'value-split selftest',
           stage: 'qualified',
-          amountMinor: 3_000_000,
+          amountMinor: TOTAL,
           currency: 'INR',
           ownerId: 'value-split-selftest-owner',
         })
@@ -172,36 +325,72 @@ async function main() {
     });
 
     await txAs(tenantId, (tx) =>
-      replaceDealValueSplit(tx, { tenantId, dealId, rows: years }),
+      replaceDealValueSplit(tx, { tenantId, dealId, rows }),
     );
     const stored = await txAs(tenantId, (tx) =>
       listDealValueSplitsFor(tx, tenantId, [dealId]),
     );
     const back = stored.get(dealId) ?? [];
-    check('round-trips every year', back.length === 3, String(back.length));
+    check('round-trips every cell of the grid', back.length === 9, String(back.length));
+    check(
+      'round-trips the element identity',
+      back.every(
+        (r) =>
+          r.component ===
+          rows.find(
+            (o) => o.elementIndex === r.elementIndex && o.yearIndex === r.yearIndex,
+          )?.component,
+      ),
+    );
+    check(
+      'round-trips billing type',
+      back.find((r) => r.elementIndex === 1)?.billingType === 'one_time' &&
+        back.find((r) => r.elementIndex === 3)?.billingType === 'recurring',
+    );
     check(
       'round-trips the amounts and dates',
-      back[0]!.amountMinor === years[0]!.amountMinor &&
+      sumSplit(back) === TOTAL &&
         back[0]!.periodStart === '2026-08-01' &&
-        back[2]!.periodEnd === '2029-08-01',
-      `${back[0]!.amountMinor} ${back[0]!.periodStart} ${back[2]!.periodEnd}`,
+        back.find((r) => r.yearIndex === 3)?.periodEnd === '2029-08-01',
+      `${sumSplit(back)} ${back[0]!.periodStart}`,
+    );
+    check(
+      'the stored grid still validates after a round-trip',
+      validateSplit(back, TOTAL).ok,
     );
 
-    // Saving again replaces rather than accumulates.
-    const shorter = generateContractYears('2026-08-01', 2, 3_000_000);
-    await txAs(tenantId, (tx) =>
-      replaceDealValueSplit(tx, { tenantId, dealId, rows: shorter }),
+    // A custom element survives its label, and re-saving replaces wholesale.
+    const withCustom = elementsToRows(
+      [
+        {
+          elementIndex: 1,
+          component: 'other',
+          componentLabel: 'Data migration',
+          billingType: 'one_time',
+          amountsMinor: [TOTAL],
+        },
+      ],
+      '2026-08-01',
+      1,
     );
-    const afterReplace = await txAs(tenantId, (tx) =>
+    await txAs(tenantId, (tx) =>
+      replaceDealValueSplit(tx, { tenantId, dealId, rows: withCustom }),
+    );
+    const customBack = await txAs(tenantId, (tx) =>
       listDealValueSplitsFor(tx, tenantId, [dealId]),
     );
     check(
-      're-saving replaces the previous years',
-      (afterReplace.get(dealId) ?? []).length === 2,
-      String((afterReplace.get(dealId) ?? []).length),
+      'a custom element round-trips its label',
+      (customBack.get(dealId) ?? [])[0]?.componentLabel === 'Data migration',
+      String((customBack.get(dealId) ?? [])[0]?.componentLabel),
+    );
+    check(
+      're-saving replaces the previous grid',
+      (customBack.get(dealId) ?? []).length === 1,
+      String((customBack.get(dealId) ?? []).length),
     );
 
-    // Clearing leaves the deal amount untouched — the split is reporting only.
+    // Clearing leaves the deal amount untouched — the breakdown is reporting only.
     await txAs(tenantId, (tx) =>
       replaceDealValueSplit(tx, { tenantId, dealId, rows: [] }),
     );
@@ -218,8 +407,8 @@ async function main() {
       return d!.amountMinor;
     });
     check(
-      'the deal amount is never touched by the split',
-      amountAfter === 3_000_000,
+      'the deal amount is never touched by the breakdown',
+      amountAfter === TOTAL,
       String(amountAfter),
     );
   } finally {

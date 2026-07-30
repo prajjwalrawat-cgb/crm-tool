@@ -74,6 +74,31 @@ export const dealContactRole = pgEnum('deal_contact_role', [
   'other',
 ]);
 
+/**
+ * Commercial elements a contract value can be made of. `other` carries a
+ * free-text label (`deal_value_splits.component_label`) so a one-off line
+ * doesn't need an enum change.
+ */
+export const dealValueComponent = pgEnum('deal_value_component', [
+  'license',
+  'implementation',
+  'support',
+  'amc',
+  'training',
+  'hardware',
+  'other',
+]);
+
+/**
+ * How an element is charged. Drives the year auto-fill (one-time → year 1,
+ * recurring → spread across the term); it records intent and is not a
+ * constraint, since any cell stays editable afterwards.
+ */
+export const dealValueBillingType = pgEnum('deal_value_billing_type', [
+  'one_time',
+  'recurring',
+]);
+
 export const dealDocumentCategory = pgEnum('deal_document_category', [
   'proposal',
   'contract',
