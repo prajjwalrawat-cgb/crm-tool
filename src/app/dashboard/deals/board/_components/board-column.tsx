@@ -39,6 +39,10 @@ type Props = {
   totalCount: number;
   /** Summed amount (minor units) across ALL deals in the stage. */
   totalAmountMinor: number;
+  /** Deals in this stage whose close date has been pushed at least once. */
+  slippedCount: number;
+  /** Their summed amount (minor units) — the column's raw value at risk. */
+  slippedAmountMinor: number;
   /** Win probability (0–100) for this stage — weights the pipeline value. */
   probability: number;
   /** Workspace currency for the totals. */
@@ -88,6 +92,8 @@ export const BoardColumn = memo(function BoardColumn({
   cards,
   totalCount,
   totalAmountMinor,
+  slippedCount,
+  slippedAmountMinor,
   probability,
   currency,
   canMove,
@@ -161,6 +167,11 @@ export const BoardColumn = memo(function BoardColumn({
   // Raw total is the server-computed sum across ALL deals in the stage (not
   // just the loaded page). Weighted = raw × stage probability.
   const weightedMinor = Math.round((totalAmountMinor * probability) / 100);
+  // Same weighting applied to the pushed cohort only, so the "at risk" figure
+  // is comparable with the column's weighted total rather than its raw one.
+  const slippedWeightedMinor = Math.round(
+    (slippedAmountMinor * probability) / 100,
+  );
 
   return (
     <section
@@ -206,6 +217,22 @@ export const BoardColumn = memo(function BoardColumn({
             >
               {formatCurrency(weightedMinor, currency)} weighted
             </span>
+            {/* Pushback rollup — rendered only when this column actually has a
+                slipping cohort, so healthy columns stay uncluttered. */}
+            {slippedCount > 0 ? (
+              <span
+                className="truncate text-[10px] font-medium tabular-nums text-rose-600 dark:text-rose-400"
+                title={`${slippedCount} ${
+                  slippedCount === 1 ? 'deal' : 'deals'
+                } in this stage have had their close date pushed at least once. ${formatCurrency(
+                  slippedAmountMinor,
+                  currency,
+                )} raw, weighted at ${probability}% stage probability.`}
+              >
+                {formatCurrency(slippedWeightedMinor, currency)} at risk (
+                {slippedCount} pushed)
+              </span>
+            ) : null}
           </div>
         ) : null}
       </header>

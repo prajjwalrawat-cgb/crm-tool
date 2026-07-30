@@ -129,6 +129,15 @@ export const patchDealSchema = z.object({
   expectedCloseDate: z
     .union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date'), z.null()])
     .optional(),
+  /**
+   * Optional "why is this pushed back?" note that rides along with a close-date
+   * change. NOT a deal column — the action hands it to the pushback trigger,
+   * which stores it on the `deal_date_changes` row it writes. Never blocking:
+   * an absent or empty reason still saves the date.
+   */
+  closeDateChangeReason: z
+    .union([z.string().trim().max(500, 'Keep the reason under 500 characters'), z.null()])
+    .optional(),
   // Same bounds the create/edit forms enforce.
   marginPct: z.coerce
     .number({ message: 'Enter a valid margin' })

@@ -90,6 +90,12 @@ export async function loadSerializedDeal(
       source: deals.source,
       currency: deals.currency,
       expectedCloseDate: deals.expectedCloseDate,
+      // Pushback cache (0058) — without these the board's realtime reconcile
+      // would drop a card's slip chip until the next full page load.
+      originalCloseDate: deals.originalCloseDate,
+      pushCount: deals.pushCount,
+      lastPushedAt: deals.lastPushedAt,
+      totalSlipDays: deals.totalSlipDays,
       closedAt: deals.closedAt,
       ownerId: deals.ownerId,
       probability: deals.probability,

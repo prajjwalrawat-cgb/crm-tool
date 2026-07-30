@@ -144,6 +144,10 @@ export function DealFilterBar({
     (next: boolean) => pushFilters({ ...initialFilters, revisitDue: next }),
     [initialFilters, pushFilters],
   );
+  const setSlipped = useCallback(
+    (next: boolean) => pushFilters({ ...initialFilters, slipped: next }),
+    [initialFilters, pushFilters],
+  );
 
   const clearAll = useCallback(
     () => pushFilters({}),
@@ -203,6 +207,12 @@ export function DealFilterBar({
           label="Revisit due"
           active={!!initialFilters.revisitDue}
           onClick={() => setRevisitDue(!initialFilters.revisitDue)}
+        />
+        <ToggleChip
+          label="Slipped only"
+          title="Deals whose expected close date has been pushed out at least once"
+          active={!!initialFilters.slipped}
+          onClick={() => setSlipped(!initialFilters.slipped)}
         />
         <CompanyPopover
           selectedIds={initialFilters.companyIds ?? []}
@@ -285,15 +295,19 @@ function ToggleChip({
   label,
   active,
   onClick,
+  title,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  /** Hover text for chips whose label alone doesn't explain the predicate. */
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={cn(
         'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition',
         active

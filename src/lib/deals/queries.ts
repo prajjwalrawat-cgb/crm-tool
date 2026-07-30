@@ -109,6 +109,10 @@ type RawJoinedRow = {
   source: string | null;
   currency: string;
   expectedCloseDate: string | null;
+  originalCloseDate: string | null;
+  pushCount: number;
+  lastPushedAt: Date | null;
+  totalSlipDays: number;
   closedAt: Date | null;
   ownerId: string | null;
   probability: number | null;
@@ -157,6 +161,12 @@ const DEALS_PROJECTION = {
   source: deals.source,
   currency: deals.currency,
   expectedCloseDate: deals.expectedCloseDate,
+  // Pushback cache (0058) — every card on the board renders its slip
+  // indicator straight from these, no per-card aggregate.
+  originalCloseDate: deals.originalCloseDate,
+  pushCount: deals.pushCount,
+  lastPushedAt: deals.lastPushedAt,
+  totalSlipDays: deals.totalSlipDays,
   closedAt: deals.closedAt,
   ownerId: deals.ownerId,
   probability: deals.probability,
@@ -322,6 +332,9 @@ export async function listDeals(
     conditions.push(
       sql`${deals.stage} = 'hold' AND ${deals.holdRevisitOn} IS NOT NULL AND ${deals.holdRevisitOn} <= CURRENT_DATE`,
     );
+  }
+  if (f.slipped) {
+    conditions.push(gte(deals.pushCount, 1));
   }
   // Hard scope: members see only their deals + unassigned. URL params
   // cannot widen this — they're additive within the allowed set.
@@ -509,6 +522,19 @@ export async function listDeletedDeals(
 export const BOARD_PER_STAGE_LIMIT = 50;
 
 export type DealBoard = Record<DealStage, DealRow[]>;
+
+/**
+ * Per-stage pushback rollup: how much of the column's value sits on deals whose
+ * close date has moved out at least once. Computed over ALL deals in the stage,
+ * like `amounts` — the column header reports the stage, not the loaded page.
+ */
+export type StageSlipRollup = {
+  /** Deals in this stage with pushCount >= 1. */
+  count: number;
+  /** Their summed amount in minor units. */
+  amountMinor: number;
+};
+
 export type DealBoardSummary = {
   board: DealBoard;
   /** Per-stage total count (after RLS) — surfaces "X+ more" in the UI. */
@@ -518,6 +544,8 @@ export type DealBoardSummary = {
    * (not just the loaded page) — drives the column's raw + weighted totals.
    */
   amounts: Record<DealStage, number>;
+  /** Per-stage "value at risk" from pushed deals. Zeroed for healthy columns. */
+  slipped: Record<DealStage, StageSlipRollup>;
   /** True if any stage was capped. */
   capped: boolean;
 };
@@ -588,6 +616,10 @@ function boardSharedConditions(
     conds.push(
       sql`${deals.stage} = 'hold' AND ${deals.holdRevisitOn} IS NOT NULL AND ${deals.holdRevisitOn} <= CURRENT_DATE`,
     );
+  }
+  // "Show slipped deals only" — the whole pushed cohort across every column.
+  if (f.slipped) {
+    conds.push(gte(deals.pushCount, 1));
   }
   if (options.restrictToOwnerOrUnassigned) {
     const me = options.restrictToOwnerOrUnassigned;
@@ -716,6 +748,15 @@ export async function listDealsForBoard(
         won: 0,
         lost: 0,
       };
+      const slipped: Record<DealStage, StageSlipRollup> = {
+        lead: { count: 0, amountMinor: 0 },
+        qualified: { count: 0, amountMinor: 0 },
+        proposal: { count: 0, amountMinor: 0 },
+        negotiation: { count: 0, amountMinor: 0 },
+        hold: { count: 0, amountMinor: 0 },
+        won: { count: 0, amountMinor: 0 },
+        lost: { count: 0, amountMinor: 0 },
+      };
 
       // Conditions shared between the per-stage SELECTs and the
       // totals GROUP BY. The `stage` filter is excluded here because
@@ -760,6 +801,10 @@ export async function listDealsForBoard(
           stage: deals.stage,
           n: sql<number>`count(*)::int`,
           amount: sql<string>`coalesce(sum(${deals.amountMinor}), 0)::bigint`,
+          // Pushed cohort rides along on the same GROUP BY via FILTER — the
+          // column's "value at risk" line costs no extra round trip.
+          slippedN: sql<number>`count(*) filter (where ${deals.pushCount} >= 1)::int`,
+          slippedAmount: sql<string>`coalesce(sum(${deals.amountMinor}) filter (where ${deals.pushCount} >= 1), 0)::bigint`,
         })
         .from(deals)
         .where(and(...totalsConds))
@@ -769,10 +814,14 @@ export async function listDealsForBoard(
         // sum(bigint) comes back as a string from postgres.js — coerce for
         // display. Deal totals are well within Number's safe range.
         amounts[t.stage as DealStage] = Number(t.amount ?? 0);
+        slipped[t.stage as DealStage] = {
+          count: t.slippedN,
+          amountMinor: Number(t.slippedAmount ?? 0),
+        };
       }
 
       const capped = STAGES.some((s) => counts[s] > board[s].length);
-      return { board, counts, amounts, capped };
+      return { board, counts, amounts, slipped, capped };
     });
   });
 }

@@ -102,6 +102,25 @@ export const deals = pgTable(
     // create/edit (see migration 0046).
     currency: text('currency').notNull().default('INR'),
     expectedCloseDate: date('expected_close_date'),
+    /**
+     * Close-date pushback tracking (migration 0058). All four are maintained by
+     * the `deal_close_date_pushback_sync` trigger and must NOT be written by
+     * the app — the trigger pins them on every close-date UPDATE, so an app
+     * write is silently discarded rather than honoured. The append-only
+     * `deal_date_changes` table is the source of truth; these are the cache the
+     * board reads per card.
+     *
+     * `originalCloseDate` is the FIRST close date the deal ever carried (write
+     * once, then immutable) — not necessarily the value at creation, since a
+     * Lead-stage deal may not carry a date at all. `pushCount` counts only
+     * forward moves between two real dates. `totalSlipDays` is recomputed on
+     * every change as (current − original), floored at 0, so a deal pulled back
+     * to its original commitment reads as no longer slipping.
+     */
+    originalCloseDate: date('original_close_date'),
+    pushCount: integer('push_count').notNull().default(0),
+    lastPushedAt: timestamp('last_pushed_at', { withTimezone: true }),
+    totalSlipDays: integer('total_slip_days').notNull().default(0),
     closedAt: timestamp('closed_at', { withTimezone: true }),
     ownerId: text('owner_id'),
     /**
@@ -147,6 +166,9 @@ export const deals = pgTable(
     index('deals_tenant_company_idx').on(t.tenantId, t.companyId),
     index('deals_tenant_contact_idx').on(t.tenantId, t.contactId),
     index('deals_tenant_close_date_idx').on(t.tenantId, t.expectedCloseDate),
+    // Board's "slipped only" filter. Partial (push_count > 0) in 0058 — the
+    // slipping cohort is a small minority of a healthy pipeline.
+    index('deals_tenant_pushed_idx').on(t.tenantId, t.pushCount),
     index('deals_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
   ],
 );
