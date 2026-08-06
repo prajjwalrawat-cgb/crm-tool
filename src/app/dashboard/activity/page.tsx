@@ -40,6 +40,7 @@ export default async function ActivityPage({
           initialRows={page.items}
           nextCursor={page.nextCursor}
           pageSize={page.size}
+          liveUpdates={cursor === null}
         />
       </main>
     );
