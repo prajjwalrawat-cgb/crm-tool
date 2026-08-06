@@ -75,7 +75,11 @@ export function PaginationControls({
   return (
     <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
       <div className="flex items-center gap-2">
-        <span>Showing {visibleCount} per page</span>
+        {/* `visibleCount` is how many rows this page actually returned,
+            which is <= the selected size on the last page. Labelling it
+            "per page" made a 100-row selection that yielded 63 rows look
+            like the selector had been ignored. */}
+        <span>Showing {visibleCount === 1 ? '1 row' : `${visibleCount} rows`}</span>
         <select
           aria-label="Page size"
           value={size}
@@ -89,6 +93,7 @@ export function PaginationControls({
             </option>
           ))}
         </select>
+        <span>per page</span>
       </div>
       <div className="flex items-center gap-1.5">
         <button
