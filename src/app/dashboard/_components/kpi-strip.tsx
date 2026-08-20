@@ -6,6 +6,12 @@ import {
   type TenantCurrencyContext,
 } from '@/lib/currency/format';
 import {
+  computeCoverage,
+  formatCoverageRatio,
+  AT_RISK_COVERAGE_MULTIPLE,
+  HEALTHY_COVERAGE_MULTIPLE,
+} from '@/lib/dashboard/coverage';
+import {
   computeDelta,
   computePointsDelta,
   deltaDirection,
@@ -51,9 +57,10 @@ import { cn } from '@/lib/utils';
  *     such thing as "pipeline during May"; only the delta looks back.
  *   · win rate / avg deal / avg cycle → FLOWS over the selected
  *     range, on close date.
- *   · quota attainment → the FISCAL YEAR to date, which is what a
- *     quota is set against. It does not follow the range picker and
- *     never should: a 7-day view of an annual target is meaningless.
+ *   · quota attainment + coverage ratio → the FISCAL YEAR to date,
+ *     which is what a quota is set against. They do not follow the
+ *     range picker and never should: a 7-day view of an annual
+ *     target is meaningless.
  *
  * A reader comparing "55% win rate" against a 24-won stage table is
  * not looking at a bug; they are looking at 90 days beside all time.
@@ -265,12 +272,62 @@ export function KpiStrip({
     });
   }
 
+  // ------------------------------------------------------------------
+  // Coverage ratio — open pipeline against the quota still to be closed.
+  // Math + banding live in `lib/dashboard/coverage` so they can be
+  // tested without rendering; this only decides how it looks.
+  const coverage = computeCoverage({
+    openPipelineMinor: kpis.pipelineMinor.value,
+    targetMinor: kpis.quota?.targetMinor ?? null,
+    achievedMinor: kpis.quota?.achievedMinor ?? 0,
+  });
+
+  if (coverage.state !== 'no-target') {
+    const met = coverage.state === 'met';
+    const tint: Tile['tint'] = met
+      ? 'emerald'
+      : coverage.band === 'healthy'
+        ? 'emerald'
+        : coverage.band === 'thin'
+          ? 'amber'
+          : 'slate';
+
+    tiles.push({
+      key: 'coverage',
+      label: 'Coverage ratio',
+      value: met ? 'Met' : formatCoverageRatio(coverage.ratio),
+      sub: met
+        ? 'target already closed'
+        : `${money(kpis.pipelineMinor.value)} open vs ${money(coverage.gapMinor)} to go`,
+      // No prior figure worth showing: the gap moves every time a deal
+      // closes, so a period-over-period coverage delta would compare
+      // two different denominators.
+      delta: { kind: 'none' },
+      formatChange: money,
+      scope: `Open pipeline today vs remaining ${fyLabel} quota`,
+      higherIsBetter: true,
+      tint,
+      footnote:
+        !met && coverage.band !== 'healthy'
+          ? `Under-covered — ${HEALTHY_COVERAGE_MULTIPLE}x (${money(coverage.healthyPipelineMinor)}) is the usual floor`
+          : undefined,
+      title: met
+        ? `The ${fyLabel} revenue target is already met, so there is no gap left to cover.`
+        : `${coverage.ratio.toFixed(2)}x — ${exact(kpis.pipelineMinor.value)} of open pipeline against ${exact(coverage.gapMinor)} still needed to reach the ${fyLabel} target. Roughly ${HEALTHY_COVERAGE_MULTIPLE}x or more is healthy at typical win rates; below ${AT_RISK_COVERAGE_MULTIPLE}x the remaining pipeline is unlikely to close the gap. The two figures are different kinds — pipeline is a snapshot as of today, the gap is fiscal-year-to-date.`,
+    });
+  }
+
   return (
     <section
       aria-label={`Key metrics · ${range.label}`}
       className={cn(
         'grid grid-cols-2 gap-2 sm:grid-cols-3',
-        tiles.length === 6 ? 'xl:grid-cols-6' : 'lg:grid-cols-5',
+        // 5 base tiles, plus quota and coverage when a target exists.
+        tiles.length >= 7
+          ? 'lg:grid-cols-4 xl:grid-cols-7'
+          : tiles.length === 6
+            ? 'xl:grid-cols-6'
+            : 'lg:grid-cols-5',
         className,
       )}
     >

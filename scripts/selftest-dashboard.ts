@@ -36,6 +36,9 @@ async function main() {
     formatDelta,
     ABSURD_PCT_THRESHOLD,
   } = await import('../src/lib/dashboard/delta');
+  const { computeCoverage, formatCoverageRatio } = await import(
+    '../src/lib/dashboard/coverage'
+  );
 
   /* ---------------- shared range ---------------- */
 
@@ -246,6 +249,91 @@ async function main() {
         return d.kind !== 'points' || Math.abs(d.points) <= 100;
       }),
     ),
+  );
+
+  /* ---------------- coverage ratio ---------------- */
+
+  // CGB Solutions, as the DB stands: ₹29,14,67,000 open pipeline,
+  // ₹9,00,00,000 target, ₹3,16,53,123 credited. Gap ₹5,83,46,877 →
+  // just under 5x, comfortably healthy.
+  // Minor units (paise) straight out of the DB, not rupees.
+  const cgb = computeCoverage({
+    openPipelineMinor: 29_146_700_000, //  Rs 29,14,67,000 open
+    targetMinor: 9_000_000_000, //          Rs  9,00,00,000 target
+    achievedMinor: 3_165_312_300, //        Rs  3,16,53,123 credited
+  });
+  check(
+    'real CGB figures land in the healthy band',
+    cgb.state === 'covered' && cgb.band === 'healthy',
+    cgb.state === 'covered' ? `${cgb.ratio.toFixed(2)}x` : cgb.state,
+  );
+
+  check(
+    'no target → no ratio (never Infinity, never 0)',
+    computeCoverage({
+      openPipelineMinor: 5_000_00,
+      targetMinor: null,
+      achievedMinor: 0,
+    }).state === 'no-target',
+  );
+  check(
+    'a zero target counts as no target',
+    computeCoverage({
+      openPipelineMinor: 5_000_00,
+      targetMinor: 0,
+      achievedMinor: 0,
+    }).state === 'no-target',
+  );
+
+  // Dividing by a closed gap is the crash this state exists to avoid.
+  const exactlyMet = computeCoverage({
+    openPipelineMinor: 1_000_00,
+    targetMinor: 500_00,
+    achievedMinor: 500_00,
+  });
+  check('quota exactly met is its own state', exactlyMet.state === 'met');
+  const overAttained = computeCoverage({
+    openPipelineMinor: 1_000_00,
+    targetMinor: 500_00,
+    achievedMinor: 900_00,
+  });
+  check(
+    'over-attainment reads Met, not a negative gap',
+    overAttained.state === 'met',
+    overAttained.state,
+  );
+
+  const bandAt = (ratio: number) => {
+    const c = computeCoverage({
+      openPipelineMinor: Math.round(ratio * 100_000_00),
+      targetMinor: 100_000_00,
+      achievedMinor: 0,
+    });
+    return c.state === 'covered' ? c.band : c.state;
+  };
+  check('3.0x is healthy (boundary inclusive)', bandAt(3) === 'healthy', String(bandAt(3)));
+  check('2.9x is thin', bandAt(2.9) === 'thin', String(bandAt(2.9)));
+  check('2.0x is thin (boundary inclusive)', bandAt(2) === 'thin', String(bandAt(2)));
+  check('1.9x is at-risk', bandAt(1.9) === 'at-risk', String(bandAt(1.9)));
+  check('an empty pipeline against a real gap is at-risk', bandAt(0) === 'at-risk', String(bandAt(0)));
+
+  const thinCoverage = computeCoverage({
+    openPipelineMinor: 250_000_00,
+    targetMinor: 100_000_00,
+    achievedMinor: 0,
+  });
+  check(
+    'healthyPipelineMinor states what 3x coverage would require',
+    thinCoverage.state === 'covered' &&
+      thinCoverage.healthyPipelineMinor === 300_000_00,
+    thinCoverage.state === 'covered'
+      ? String(thinCoverage.healthyPipelineMinor)
+      : thinCoverage.state,
+  );
+  check(
+    'ratio renders to one decimal',
+    formatCoverageRatio(4.987) === '5.0x' && formatCoverageRatio(1.24) === '1.2x',
+    `${formatCoverageRatio(4.987)} / ${formatCoverageRatio(1.24)}`,
   );
 
   /* ---------------- weekly bucketing ---------------- */
