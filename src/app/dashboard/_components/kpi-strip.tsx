@@ -158,17 +158,25 @@ export function KpiStrip({
     {
       key: 'winRate',
       label: 'Win rate',
-      value: `${Math.round(kpis.winRate.value * 100)}%`,
+      // Nothing closed → the rate is undefined, not zero. "0%" here
+      // reads as "we lost everything", which is a different and much
+      // worse claim than "nothing came up for decision".
+      value: closed === 0 ? '—' : `${Math.round(kpis.winRate.value * 100)}%`,
       sub:
         closed === 0
           ? 'no deals closed in period'
           : `${kpis.wonCount.value} won · ${kpis.lostCount.value} lost`,
-      delta: computePointsDelta(kpis.winRate.value, kpis.winRate.priorValue),
+      delta:
+        closed === 0
+          ? { kind: 'none' }
+          : computePointsDelta(kpis.winRate.value, kpis.winRate.priorValue),
       formatChange: (n) => `${n.toFixed(1)} pts`,
       scope: `Deals closed in ${rangeLower}`,
       higherIsBetter: true,
       tint: 'emerald',
-      title: `${(kpis.winRate.value * 100).toFixed(1)}% of the ${closed} deals that CLOSED in ${rangeLower} were won. Counts only deals with a close date in the window — not every won deal the workspace has ever recorded, which is what the stage chart below shows.`,
+      title: closed === 0
+        ? `No deals closed in ${rangeLower}, so there is no win rate to report. This is not a 0% win rate.`
+        : `${(kpis.winRate.value * 100).toFixed(1)}% of the ${closed} deals that CLOSED in ${rangeLower} were won. Counts only deals with a close date in the window — not every won deal the workspace has ever recorded, which is what the stage chart below shows.`,
     },
     {
       key: 'avgDeal',

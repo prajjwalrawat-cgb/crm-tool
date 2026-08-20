@@ -140,6 +140,10 @@ export function DashboardGridCell({
  * Larger sibling of MetricCard — meant for a single insight with a
  * one-line "why it matters" hint. Use for hero numbers that deserve
  * vertical breathing room (e.g. forecast likely, top performer).
+ *
+ * Carries the same `emptyState` contract as MetricCard: use it when
+ * the source has NO data, never for a genuine zero. See that
+ * component's header for why the distinction matters.
  */
 export function InsightCard({
   label,
@@ -147,6 +151,7 @@ export function InsightCard({
   hint,
   tone = 'neutral',
   href,
+  emptyState,
   className,
 }: {
   label: string;
@@ -155,6 +160,12 @@ export function InsightCard({
   tone?: 'info' | 'success' | 'warning' | 'danger' | 'neutral';
   /** If provided, the whole card becomes a link. */
   href?: string;
+  /**
+   * Guidance shown in place of the number when there is nothing to
+   * report. Suppresses the tone colour and the link. MISSING data
+   * only — never a real zero.
+   */
+  emptyState?: string;
   className?: string;
 }) {
   const toneRing: Record<typeof tone, string> = {
@@ -171,6 +182,28 @@ export function InsightCard({
     danger: 'text-rose-700 dark:text-rose-300',
     neutral: 'text-slate-900 dark:text-[#FAFAFA]',
   };
+
+  if (emptyState) {
+    // No href either: there is nothing on the far side worth a click.
+    return (
+      <div
+        className={cn(
+          'rounded-md border border-dashed border-slate-300 bg-slate-50/40 p-4 dark:border-[#2A2A2A] dark:bg-[#111111]',
+          className,
+        )}
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#71717A]">
+          {label}
+        </div>
+        <div className="mt-1 font-mono text-2xl font-semibold leading-tight text-slate-300 dark:text-[#3F3F46]">
+          &mdash;
+        </div>
+        <div className="mt-1.5 text-[11.5px] leading-snug text-slate-500 dark:text-[#A1A1AA]">
+          {emptyState}
+        </div>
+      </div>
+    );
+  }
 
   const body = (
     <>
@@ -216,6 +249,32 @@ export function InsightCard({
     >
       {body}
     </div>
+  );
+}
+
+/**
+ * Stand-in for a monetary figure that was never entered.
+ *
+ * `deals.amount_minor` is NOT NULL DEFAULT 0, so an unfilled deal and a
+ * genuinely worthless one are the same row. Rendering the default as
+ * "₹0" states a fact about the business that nobody ever asserted —
+ * and in an Attention Queue sorted partly by value it also silently
+ * buries deals whose real size is simply unknown.
+ *
+ * Audited before choosing this: across the connected database, all 197
+ * zero-amount open deals have `offer_price_minor` NULL, no
+ * `deal_value_splits` rows, and `unit_price_minor`/`quantity` either
+ * NULL or zero. The value is not hiding behind a bad join — it was
+ * never captured.
+ */
+export function ValueNotSet() {
+  return (
+    <span
+      title="No amount has been entered on this deal. Not the same as a deal worth nothing."
+      className="inline-flex items-center rounded-full border border-dashed border-slate-300 px-1.5 py-px text-[9.5px] font-medium uppercase tracking-wide text-slate-400 dark:border-[#3F3F46] dark:text-[#71717A]"
+    >
+      Value not set
+    </span>
   );
 }
 

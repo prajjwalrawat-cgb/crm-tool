@@ -33,6 +33,7 @@ import {
   ExecutiveSection,
   InsightCard,
   SectionLink,
+  ValueNotSet,
 } from './_components/executive-primitives';
 
 export const metadata = {
@@ -66,6 +67,15 @@ export const metadata = {
  * 90-day window — it used to be captioned "(90d)", which was simply
  * false. Left as all-time deliberately: it is the same figure the
  * Dashboard's stage chart shows, so the two views agree.
+ *
+ * ZERO VS NO DATA. Several cards here can legitimately read zero and
+ * several cannot read anything at all, and they used to look
+ * identical — worse, the empty ones were styled in danger red, which
+ * turned "you never configured email" into "your email is failing".
+ * Cards whose source may be absent pass `emptyState` (see MetricCard)
+ * and render muted guidance instead of a number. Cards where zero is
+ * a real answer — no stalled deals, no active deals — keep the zero,
+ * because that is genuinely the news.
  */
 export default async function ExecutiveDashboardPage() {
   await requirePersonas(['manager', 'admin']);
@@ -111,7 +121,21 @@ export default async function ExecutiveDashboardPage() {
       .reduce((s, r) => s + r.totalAmountMinor, 0);
     const wonRevenueMinor = pipeline.rows.find((r) => r.stage === 'won')?.totalAmountMinor ?? 0;
 
-    const topRep = reps.rows.slice(0, 3);
+    // A rep with nothing closed and nothing earned in the window is
+    // not a low-ranking performer, they are absent from the data.
+    // Padding the leaderboard to three rows with zero-activity reps
+    // made the board look like a losing team rather than a quiet one.
+    const activeReps = reps.rows.filter(
+      (r) => r.wonCount > 0 || r.lostCount > 0 || r.revenueMinor > 0,
+    );
+    const topRep = activeReps.slice(0, 3);
+    const dormantRepCount = reps.rows.length - activeReps.length;
+
+    const emailConfigured = email.extras?.hasEverSent ?? false;
+    const closedInWindow = winLoss.extras?.totalClosed ?? 0;
+    const forecastDeals = forecast.extras?.totalDeals ?? 0;
+    const wonDealCount =
+      pipeline.rows.find((r) => r.stage === 'won')?.count ?? 0;
     const staleByCriticality = [...stale.rows].sort(
       (a, b) =>
         severityRank(b.severity) - severityRank(a.severity) ||
@@ -162,33 +186,54 @@ export default async function ExecutiveDashboardPage() {
                 <InsightCard
                   label="Won revenue"
                   value={money(wonRevenueMinor)}
-                  hint={`${pipeline.rows.find((r) => r.stage === 'won')?.count ?? 0} won deals · all time`}
+                  hint={`${wonDealCount} won ${wonDealCount === 1 ? 'deal' : 'deals'} · all time`}
                   tone="success"
                   href="/dashboard/reports/win-loss-rate"
+                  emptyState={
+                    wonDealCount === 0
+                      ? 'No deals marked Won yet. Close one and it lands here.'
+                      : undefined
+                  }
                 />
               </DashboardGridCell>
               <DashboardGridCell span={3}>
                 <InsightCard
                   label="Likely forecast"
                   value={money(forecast.extras?.totalLikelyMinor ?? 0)}
-                  hint={`${forecast.extras?.totalDeals ?? 0} open deals · ${Math.round((forecast.extras?.avgConfidence ?? 0) * 100)}% avg confidence`}
+                  hint={`${forecastDeals} open deals · ${Math.round((forecast.extras?.avgConfidence ?? 0) * 100)}% avg confidence`}
                   tone="info"
                   href="/dashboard/reports/revenue-forecast"
+                  emptyState={
+                    forecastDeals === 0
+                      ? 'No open deals carry a close date in the next 180 days — nothing to forecast from.'
+                      : undefined
+                  }
                 />
               </DashboardGridCell>
               <DashboardGridCell span={3}>
                 <InsightCard
                   label="Best case"
                   value={money(forecast.extras?.totalBestCaseMinor ?? 0)}
-                  hint="If every open deal closes"
+                  hint="If every open deal in the window closes"
                   tone="success"
+                  emptyState={
+                    forecastDeals === 0
+                      ? 'Set expected close dates on open deals to get a best case.'
+                      : undefined
+                  }
                 />
               </DashboardGridCell>
               <DashboardGridCell span={3}>
                 <InsightCard
                   label="Win rate"
                   value={`${Math.round((winLoss.extras?.winRate ?? 0) * 100)}%`}
-                  hint={`${winLoss.extras?.totalClosed ?? 0} deals closed in the last 90 days`}
+                  hint={`${closedInWindow} deals closed in the last 90 days`}
+                  // Nothing closed means the rate is undefined, not 0%.
+                  emptyState={
+                    closedInWindow === 0
+                      ? 'No deals closed in the last 90 days, so there is no win rate to compute.'
+                      : undefined
+                  }
                   tone={
                     (winLoss.extras?.winRate ?? 0) >= 0.5
                       ? 'success'
@@ -237,10 +282,14 @@ export default async function ExecutiveDashboardPage() {
             <DashboardGridCell span={6}>
               <ExecutiveSection
                 title="Top performers"
-                subtitle="Highest revenue contributors · deals closed in the last 90 days"
+                subtitle={
+                  dormantRepCount > 0
+                    ? `Deals closed in the last 90 days · ${dormantRepCount} rep${dormantRepCount === 1 ? '' : 's'} with no closed deals omitted`
+                    : 'Highest revenue contributors · deals closed in the last 90 days'
+                }
                 action={<SectionLink href="/dashboard/reports/rep-performance" />}
               >
-                <AttentionList emptyMessage="No closed deals in this window yet.">
+                <AttentionList emptyMessage="No rep closed a deal in the last 90 days.">
                   {topRep.length === 0
                     ? null
                     : topRep.map((rep, i) => (
@@ -255,7 +304,13 @@ export default async function ExecutiveDashboardPage() {
                             </span>
                           }
                           detail={`${rep.wonCount} won · ${rep.lostCount} lost · ${Math.round(rep.winRate * 100)}% win rate`}
-                          meta={money(rep.revenueMinor)}
+                          meta={
+                            rep.revenueMinor > 0 ? (
+                              money(rep.revenueMinor)
+                            ) : (
+                              <ValueNotSet />
+                            )
+                          }
                           severity="info"
                         />
                       ))}
@@ -280,6 +335,11 @@ export default async function ExecutiveDashboardPage() {
                       }
                       hint={`${velocity.extras?.dealsWithHistory ?? 0} closed deals tracked`}
                       tone="info"
+                      emptyState={
+                        velocity.extras?.dealsWithHistory
+                          ? undefined
+                          : 'No deal has closed with stage history recorded yet.'
+                      }
                     />
                   </DashboardGridCell>
                   <DashboardGridCell span={3}>
@@ -292,6 +352,11 @@ export default async function ExecutiveDashboardPage() {
                       }
                       hint="Highest avg time-in-stage"
                       tone="warning"
+                      emptyState={
+                        velocity.extras?.bottleneckStage
+                          ? undefined
+                          : 'Not enough stage movement to rank stages.'
+                      }
                     />
                   </DashboardGridCell>
                   <DashboardGridCell span={3}>
@@ -304,6 +369,11 @@ export default async function ExecutiveDashboardPage() {
                       }
                       hint="Lowest avg time-in-stage"
                       tone="success"
+                      emptyState={
+                        velocity.extras?.fastestStage
+                          ? undefined
+                          : 'Not enough stage movement to rank stages.'
+                      }
                     />
                   </DashboardGridCell>
                 </DashboardGrid>
@@ -329,6 +399,14 @@ export default async function ExecutiveDashboardPage() {
                         ? 'warning'
                         : 'danger'
                   }
+                  // Never sent ANY mail, ever → the integration is not
+                  // wired up. Sent mail before but none in this window →
+                  // a real, reportable zero.
+                  emptyState={
+                    emailConfigured
+                      ? undefined
+                      : 'Connect email tracking to see deliverability.'
+                  }
                 />
               </DashboardGridCell>
               <DashboardGridCell span={3}>
@@ -342,6 +420,13 @@ export default async function ExecutiveDashboardPage() {
                       : (email.extras?.retryRate ?? 0) <= 0.15
                         ? 'warning'
                         : 'danger'
+                  }
+                  emptyState={
+                    emailConfigured
+                      ? (email.extras?.totalAttempted ?? 0) === 0
+                        ? 'No mail attempted in the last 90 days.'
+                        : undefined
+                      : 'Connect email tracking to see deliverability.'
                   }
                 />
               </DashboardGridCell>
@@ -385,7 +470,13 @@ export default async function ExecutiveDashboardPage() {
                           ? ` · ${row.daysSinceStageChange}d in stage`
                           : ''
                       }`}
-                      meta={money(row.amountMinor)}
+                      meta={
+                        row.amountMinor > 0 ? (
+                          money(row.amountMinor)
+                        ) : (
+                          <ValueNotSet />
+                        )
+                      }
                       severity={
                         row.severity === 'critical'
                           ? 'danger'
