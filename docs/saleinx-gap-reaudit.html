@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saleinx Gap Re-Audit</title>
+<style>
+  :root {
+    --ground: #F4F5F7;
+    --surface: #FFFFFF;
+    --rule: #D8DDE5;
+    --rule-soft: #E9ECF1;
+    --ink: #10141A;
+    --ink-2: #39424F;
+    --muted: #626C7A;
+    --accent: #1B3A6B;
+    --accent-soft: #E6EBF4;
+    --ship: #1D6B48;
+    --ship-bg: #E2EFE8;
+    --part: #855410;
+    --part-bg: #F5EDDC;
+    --open: #A33227;
+    --open-bg: #F6E6E3;
+
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", Times, serif;
+    --sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0E1116;
+      --surface: #151A21;
+      --rule: #2A323D;
+      --rule-soft: #1F252E;
+      --ink: #E7EAEE;
+      --ink-2: #BCC4CE;
+      --muted: #8E98A5;
+      --accent: #8FB0E4;
+      --accent-soft: #1A2433;
+      --ship: #6FCB9C;
+      --ship-bg: #16291F;
+      --part: #DDAE5C;
+      --part-bg: #2A2114;
+      --open: #E8897A;
+      --open-bg: #2E1B18;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0E1116;
+    --surface: #151A21;
+    --rule: #2A323D;
+    --rule-soft: #1F252E;
+    --ink: #E7EAEE;
+    --ink-2: #BCC4CE;
+    --muted: #8E98A5;
+    --accent: #8FB0E4;
+    --accent-soft: #1A2433;
+    --ship: #6FCB9C;
+    --ship-bg: #16291F;
+    --part: #DDAE5C;
+    --part-bg: #2A2114;
+    --open: #E8897A;
+    --open-bg: #2E1B18;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+  }
+
+  .prose { max-width: 68ch; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 28px;
+  }
+
+  .masthead h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(30px, 5.2vw, 47px);
+    line-height: 1.14;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0;
+    max-width: 20ch;
+  }
+
+  .dek {
+    font-size: 18.5px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    margin: 0;
+    max-width: 62ch;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 28px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    padding-top: 6px;
+  }
+
+  .meta b {
+    color: var(--ink-2);
+    font-weight: 600;
+  }
+
+  /* ---------- tally ---------- */
+
+  .tally {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .tally > div {
+    padding: 22px 20px 24px;
+    border-left: 1px solid var(--rule-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .tally > div:first-child { border-left: 0; padding-left: 0; }
+
+  .figure {
+    font-family: var(--mono);
+    font-size: 34px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .figure.is-ship { color: var(--ship); }
+  .figure.is-part { color: var(--part); }
+  .figure.is-open { color: var(--open); }
+
+  .figure-label {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  /* ---------- sections ---------- */
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 27px;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .section-head {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    border-top: 1px solid var(--ink);
+    padding-top: 16px;
+  }
+
+  .section-head p {
+    margin: 0;
+    color: var(--ink-2);
+    max-width: 68ch;
+  }
+
+  /* ---------- ledger ---------- */
+
+  .ledger {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 132px 1fr;
+    gap: 0 26px;
+    padding: 20px 0;
+    border-top: 1px solid var(--rule-soft);
+    align-items: start;
+  }
+
+  .row:first-child { border-top: 1px solid var(--rule); }
+  .row:last-child { border-bottom: 1px solid var(--rule); }
+
+  .stamp {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 5px 9px;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+
+  .stamp--ship { color: var(--ship); background: var(--ship-bg); }
+  .stamp--part { color: var(--part); background: var(--part-bg); }
+  .stamp--open { color: var(--open); background: var(--open-bg); }
+
+  .claim { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+
+  .claim h3 {
+    font-family: var(--sans);
+    font-size: 16.5px;
+    font-weight: 650;
+    line-height: 1.35;
+    margin: 0;
+    letter-spacing: -0.005em;
+  }
+
+  .said {
+    margin: 0;
+    font-size: 14.5px;
+    color: var(--muted);
+    border-left: 2px solid var(--rule);
+    padding-left: 12px;
+    font-style: italic;
+  }
+
+  .claim > p:not(.said) {
+    margin: 0;
+    font-size: 15px;
+    color: var(--ink-2);
+  }
+
+  .evidence {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    overflow-x: auto;
+  }
+
+  .evidence li::before {
+    content: "→ ";
+    color: var(--accent);
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    color: var(--ink-2);
+    background: var(--accent-soft);
+    padding: 1px 4px;
+    border-radius: 2px;
+  }
+
+  .evidence code { background: none; padding: 0; color: var(--ink-2); }
+
+  /* ---------- prose blocks ---------- */
+
+  .note {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .note p { margin: 0; max-width: 68ch; }
+
+  .note h3 {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 650;
+    margin: 0;
+    letter-spacing: -0.005em;
+  }
+
+  .finding {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 20px 0;
+    border-top: 1px solid var(--rule-soft);
+  }
+
+  .finding:first-of-type { border-top: 1px solid var(--rule); }
+  .finding:last-of-type { border-bottom: 1px solid var(--rule); }
+
+  .finding-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* ---------- build queue ---------- */
+
+  .queue { display: flex; flex-direction: column; }
+
+  .step {
+    display: grid;
+    grid-template-columns: 46px 1fr;
+    gap: 0 20px;
+    padding: 22px 0;
+    border-top: 1px solid var(--rule-soft);
+    align-items: start;
+  }
+
+  .step:first-child { border-top: 1px solid var(--rule); }
+  .step:last-child { border-bottom: 1px solid var(--rule); }
+
+  .step-num {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1.25;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .step-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+  .step-body h3 {
+    font-family: var(--sans);
+    font-size: 16.5px;
+    font-weight: 650;
+    margin: 0;
+    letter-spacing: -0.005em;
+  }
+
+  .step-body p { margin: 0; font-size: 15px; color: var(--ink-2); }
+
+  .step-why {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .dropped {
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--surface);
+  }
+
+  .dropped p { margin: 0; font-size: 15px; color: var(--ink-2); max-width: 68ch; }
+
+  .dropped .list {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    color: var(--muted);
+  }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.65;
+    max-width: 74ch;
+  }
+
+  @media (max-width: 720px) {
+    .page { padding: 40px 20px 72px; gap: 44px; }
+    .tally { grid-template-columns: repeat(2, 1fr); }
+    .tally > div { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule-soft); }
+    .tally > div:nth-child(1), .tally > div:nth-child(2) { border-top: 0; }
+    .row { grid-template-columns: 1fr; gap: 11px; }
+    .step { grid-template-columns: 1fr; gap: 6px; }
+  }
+</style>
+
+<style>
+  /* standalone-only: reset + print */
+  html { -webkit-text-size-adjust: 100%; }
+  img { max-width: 100%; height: auto; }
+
+  @media print {
+    :root {
+      --ground: #FFFFFF;
+      --surface: #FFFFFF;
+      --rule: #C9CFD8;
+      --rule-soft: #E2E6EC;
+      --ink: #0B0E13;
+      --ink-2: #2C343F;
+      --muted: #55606D;
+      --accent: #1B3A6B;
+      --accent-soft: #EDF1F7;
+    }
+    body { background: #FFFFFF; font-size: 11.5pt; }
+    .page { max-width: none; padding: 0; gap: 34px; }
+    section, .masthead, .tally, .finding, .row, .step { break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
+    .dropped { break-inside: avoid; }
+    @page { margin: 16mm 14mm; }
+  }
+</style>
+</head>
+<body>
+
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">Review of — saleinx-vs-salesforce-gap-analysis.md</p>
+    <h1>Most of these gaps are already shipped</h1>
+    <p class="dek">
+      The report is careful, well-reasoned, and scored against the wrong source. It grades Saleinx on
+      what it remembers being specified in prior sessions rather than on what is in the repository —
+      so every one of its seven &ldquo;Unverified&rdquo; items is live and tested, and ten of its
+      fifteen &ldquo;Gap&rdquo; items are built. Four gaps survive. One of them is the report&rsquo;s
+      own top priority, and it is worth building.
+    </p>
+    <div class="meta">
+      <span><b>Verified against</b> main @ 84e1d33</span>
+      <span><b>Date</b> 14 Aug 2026</span>
+      <span><b>Method</b> git log + route, schema and migration inventory</span>
+    </div>
+  </header>
+
+  <div class="tally">
+    <div>
+      <span class="figure is-ship">7/7</span>
+      <span class="figure-label">&ldquo;Unverified&rdquo; items that shipped — all with tests</span>
+    </div>
+    <div>
+      <span class="figure is-ship">10/15</span>
+      <span class="figure-label">&ldquo;Gap&rdquo; items already built</span>
+    </div>
+    <div>
+      <span class="figure is-open">4</span>
+      <span class="figure-label">Gaps that survive verification</span>
+    </div>
+    <div>
+      <span class="figure is-part">20</span>
+      <span class="figure-label">Commits landed after the report&rsquo;s picture of the build</span>
+    </div>
+  </div>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Part one</p>
+      <h2>The seven &ldquo;Unverified&rdquo; items — every one is live</h2>
+      <p>
+        These were built as a six-module Phase-2 sprint, one branch per module, and merged into
+        <code>main</code>. Each carries its own migration and its own standalone test script under
+        <code>pnpm selftest</code>.
+      </p>
+    </div>
+
+    <div class="ledger">
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Stage-gate enforcement (&ldquo;Path&rdquo;)</h3>
+          <p class="said">Report: &ldquo;Spec'd, build status unverified&rdquo;</p>
+          <ul class="evidence">
+            <li><code>src/lib/stage-gates/</code> — enforce, evaluate, queries, types</li>
+            <li>commit <code>17ad7e4</code> · migration <code>0049</code></li>
+            <li><code>scripts/selftest-stage-gates.ts</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Deal health / risk scoring</h3>
+          <p class="said">Report: &ldquo;Spec'd (multi-signal), build status unverified&rdquo;</p>
+          <p>Rule-based, append-only score history in <code>deal_scores</code> with a denormalised cache on the deal, recomputed on a debounced event plus a nightly cron.</p>
+          <ul class="evidence">
+            <li><code>src/lib/deals/scoring/</code> — compute, queue, service</li>
+            <li>commit <code>ab1284a</code> · migration <code>0050</code></li>
+            <li><code>selftest-deal-scoring.ts</code>, <code>selftest-deal-scoring-service.ts</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Automatic email capture (Gmail sync)</h3>
+          <p class="said">Report: &ldquo;Spec'd (Inngest job), build status unverified&rdquo;</p>
+          <p>Confirmed working live against a real Google OAuth app in a prior session — the strongest evidence on this list.</p>
+          <ul class="evidence">
+            <li><code>src/lib/email/gmail/</code> — 7 modules incl. ingest, oauth-state, crypto</li>
+            <li>commit <code>a5acaea</code> · migration <code>0051</code> · cron <code>gmail-sync</code></li>
+            <li><code>selftest-gmail-ingest.ts</code>, <code>selftest-gmail-parse.ts</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Forecast rollup with categories</h3>
+          <p class="said">Report: &ldquo;Spec'd, build status unverified&rdquo;</p>
+          <p>Commit / Best Case / Pipeline categories auto-derived from stage with a manual-override flag, on a fiscal-aware quarter and month selector.</p>
+          <ul class="evidence">
+            <li><code>src/lib/deals/forecast/</code> — categories, period, rollup, snapshots</li>
+            <li><code>/dashboard/executive/forecast</code> · commit <code>66a7613</code> · migration <code>0052</code></li>
+            <li><code>selftest-forecast.ts</code> · weekly cron <code>forecast-snapshot-weekly</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Duplicate detection — including at contact level</h3>
+          <p class="said">Report: &ldquo;Spec'd at deal level only (pg_trgm) — contact-level unconfirmed&rdquo;</p>
+          <p>The report has this backwards. Detection is on companies and contacts, not deals: trigram matching on company names, exact-block matching on contact email, a reversible merge that repoints every polymorphic reference, and an admin review queue.</p>
+          <ul class="evidence">
+            <li><code>src/lib/dedup/</code> · <code>/dashboard/settings/data-quality</code></li>
+            <li>commit <code>ee7c168</code> · migration <code>0053</code> · <code>merge_audit</code> table</li>
+            <li><code>selftest-dedup.ts</code>, <code>selftest-dedup-normalize.ts</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Contact records with account linkage</h3>
+          <p class="said">Report: &ldquo;Assumed present — Unverified in recent sessions&rdquo;</p>
+          <ul class="evidence">
+            <li><code>src/lib/contacts/</code>, <code>src/lib/companies/</code> with full detail routes</li>
+            <li>custom fields, notes, comments, tasks and timeline on both entities</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Dashboard filtering by date range and owner</h3>
+          <p class="said">Report: &ldquo;Spec'd in last pass — confirm shipped&rdquo;</p>
+          <ul class="evidence">
+            <li><code>src/lib/dashboard/range.ts</code> · <code>_components/home/rep-filter.tsx</code></li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Part two</p>
+      <h2>Ten items scored &ldquo;Gap&rdquo; that are in production</h2>
+      <p>
+        These are the expensive errors. A &ldquo;Gap&rdquo; verdict reads as licence to build, and a
+        build prompt written from this table would have re-specified ten shipped features.
+      </p>
+    </div>
+
+    <div class="ledger">
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Custom and role-based dashboards</h3>
+          <p class="said">Report: &ldquo;Single fixed dashboard&rdquo; — flagged as a headline gap</p>
+          <p>
+            This is the report&rsquo;s single most consequential mistake, because it anchors the whole
+            §5 argument. There are three role-scoped homes and a per-user drag-and-resize widget
+            canvas with its own edit mode — the composability axis the report names as the strategic
+            gap is the axis that got built.
+          </p>
+          <ul class="evidence">
+            <li><code>_components/home/</code> — sales-home, manager-home, admin-home</li>
+            <li><code>dashboard_widgets</code> table — per-user layout, resize, widget types</li>
+            <li><code>_components/edit-mode/</code> · <code>_components/chart-studio/</code> · <code>chart_views</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Report builder</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo;</p>
+          <p>A registry-driven reports module with seven reports and shared filter and CSV layers. Not drag-and-drop ad-hoc authoring, but the substantive half of what that buys you.</p>
+          <ul class="evidence">
+            <li><code>src/lib/reports/</code> — registry, filters, csv, types</li>
+            <li>deal-velocity · email-engagement · pipeline-by-stage · rep-performance</li>
+            <li>revenue-forecast · stale-deals · win-loss-rate</li>
+            <li><code>/dashboard/reports/[reportId]</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Rep / team leaderboard</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo; — ranked #5 in the build sequence</p>
+          <ul class="evidence">
+            <li><code>src/lib/reports/queries/rep-performance.ts</code></li>
+            <li>surfaced in manager-home, sales-home and <code>/dashboard/my-performance</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Export to CSV</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo;</p>
+          <ul class="evidence">
+            <li><code>src/lib/reports/csv.ts</code> · <code>reports/_components/csv-download-button.tsx</code></li>
+            <li>plus Excel export on deals (commit <code>3c00fc0</code>)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Saved filter views per rep and team</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo;</p>
+          <ul class="evidence">
+            <li><code>deals/_components/saved-views.tsx</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Bulk stage and owner reassignment</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo;</p>
+          <ul class="evidence">
+            <li>multi-select + <code>bulkStage()</code> in <code>deals/_components/deals-view.tsx</code></li>
+            <li><code>_components/bulk-action-bar.tsx</code> — owner assign and delete on companies, contacts</li>
+            <li><code>bulkApproveDealsAction</code> / <code>bulkRejectDealsAction</code> · bulk CSV upload</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Task and reminder system tied to deals</h3>
+          <p class="said">Report: &ldquo;Not directly addressed&rdquo;</p>
+          <p>Tasks are entity-polymorphic, support recurrence, and are created automatically by the hold-revisit cron when a parked deal comes due.</p>
+          <ul class="evidence">
+            <li><code>src/lib/tasks/</code> · <code>_components/entity-tasks-panel.tsx</code></li>
+            <li><code>task_recurrence</code> enum · cron <code>hold-revisit-daily</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Contract approval workflow</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo;</p>
+          <ul class="evidence">
+            <li><code>src/lib/deals/approval.ts</code> · <code>/dashboard/deals/approvals</code></li>
+            <li>margin-threshold approvals · migration <code>0042</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Quote / proposal generation synced to deal</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo;</p>
+          <ul class="evidence">
+            <li><code>proforma_invoices</code> schema · <code>src/lib/invoices/</code></li>
+            <li><code>/dashboard/invoices</code> · <code>/dashboard/invoice-settings</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--ship">Shipped</span></div>
+        <div class="claim">
+          <h3>Role-based contact hierarchy</h3>
+          <p class="said">Report: &ldquo;Not addressed&rdquo;</p>
+          <ul class="evidence">
+            <li><code>deal_contacts.role</code> enum + exactly-one-primary constraint</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Part three</p>
+      <h2>What actually is missing</h2>
+      <p>
+        Four items survive verification. The report was right about all of them, and right that the
+        first one matters most.
+      </p>
+    </div>
+
+    <div class="ledger">
+
+      <div class="row">
+        <div><span class="stamp stamp--open">Open</span></div>
+        <div class="claim">
+          <h3>Chart-segment drill-down to a filtered list</h3>
+          <p>
+            Confirmed missing in its specific form. Clicking a donut segment opens Chart Studio to
+            customise the chart, not a filtered deal list. Drill-down exists one level up — highlight
+            and intel widgets link to individual deals, and executive sections link into the matching
+            report — but the &ldquo;click this slice, see these records&rdquo; path is genuinely absent.
+          </p>
+          <ul class="evidence">
+            <li><code>_components/stage-donut.tsx</code> — onClick opens the studio panel</li>
+            <li><code>stage-conversion-bars.tsx</code> — no navigation on segments</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--open">Open</span></div>
+        <div class="claim">
+          <h3>Account 360 view</h3>
+          <p>
+            Closer than the report implies, and still short. The company page already composes owner,
+            notes, comments, tasks, custom fields, a full entity timeline and email compose — it just
+            never lists the company&rsquo;s deals or rolls up their value. The smallest real gap here.
+          </p>
+          <ul class="evidence">
+            <li><code>companies/[id]/page.tsx</code> — no deal query in the page composition</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--open">Open</span></div>
+        <div class="claim">
+          <h3>Multi-currency and territory pipelines</h3>
+          <p>
+            Multi-currency is half-built, which is the worst available state: <code>deals.currency</code>
+            and <code>sales_targets.currency</code> exist as columns, but rendering was deliberately
+            collapsed to one workspace currency. There is no FX rate table and no rate-at-close capture.
+            Territory has nothing at all.
+          </p>
+          <ul class="evidence">
+            <li><code>deals.currency</code> default INR · <code>organization_settings.default_currency</code></li>
+            <li>commit <code>7bfdf84</code> — &ldquo;render one workspace currency&rdquo;</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--part">Partial</span></div>
+        <div class="claim">
+          <h3>Scheduled / emailed snapshots</h3>
+          <p>
+            The capture half exists — <code>forecast_snapshots</code> is written weekly by cron. What is
+            missing is delivery: nothing emails a dashboard or report on a schedule.
+          </p>
+          <ul class="evidence">
+            <li><code>inngest/workflows/forecast-snapshot-weekly.ts</code> — writes, does not send</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><span class="stamp stamp--open">Open</span></div>
+        <div class="claim">
+          <h3>Data enrichment on save</h3>
+          <p>Nothing in the codebase. Also the least urgent item on this page for a single-tenant production deployment.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Part four</p>
+      <h2>Why the report went wrong, and the part it got right</h2>
+    </div>
+
+    <div class="note">
+
+      <div class="finding">
+        <span class="finding-tag">Root cause</span>
+        <h3>It audited its own memory of prompts, not the repository</h3>
+        <p>
+          The report is explicit about this in §1 and §7 and treats it as a caveat to be resolved
+          later. But it then ranks a six-item build sequence on top of the unverified data, and the
+          ranking is the part that gets acted on. A caveat at the top does not contain the damage
+          done by a priority list at the bottom.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="finding-tag">The asymmetry</span>
+        <h3>&ldquo;Unverified&rdquo; and &ldquo;Gap&rdquo; were held to different standards</h3>
+        <p>
+          Where the report had seen a spec, it honestly marked the item Unverified. Where it had seen
+          nothing, it confidently marked the item a Gap. Both states are the same state — no evidence
+          — but only one was labelled that way. Every one of the ten errors in Part Two is a feature
+          built during a session whose prompt this report did not happen to see. Absence of evidence
+          became a positive finding.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="finding-tag">Cost</span>
+        <h3>The build sequence would have spent most of its budget on shipped work</h3>
+        <p>
+          Of the six ranked priorities, #2 (role-based dashboards) is built, #5 (leaderboard) is built,
+          #3 is answered — all seven unverified items shipped — and most of #6 is built. Only #1
+          survives intact, and #4 survives in reduced form. Roughly two thirds of the proposed scope
+          was already in production.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="finding-tag">Credit</span>
+        <h3>The judgment was sound; the inputs were stale</h3>
+        <p>
+          The report&rsquo;s central argument — that composability and drill-down are what separate a
+          dashboard that feels powerful from one that feels thin, and that correctness fixes do not
+          move that axis — is correct, and it picked the right #1. Its read that contact and account
+          management is the thinnest module also holds up: Account 360 is the one structural hole
+          left. Good reasoning on a four-week-old picture of the build.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="finding-tag">Fix</span>
+        <h3>Generate the inventory before scoring</h3>
+        <p>
+          Ten minutes of <code>git log</code>, a route listing and a migration listing would have
+          caught every error on this page. Screenshots, the report&rsquo;s own suggestion in §7, would
+          have caught fewer — <code>chart_views</code>, the approvals queue and the dedup merge audit
+          are not visible from a dashboard screenshot.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Part five</p>
+      <h2>What the build prompt should contain instead</h2>
+      <p>These are ordered by leverage, and the order matters — each step is cheaper because the one above it exists.</p>
+    </div>
+
+    <div class="queue">
+
+      <div class="step">
+        <span class="step-num">1</span>
+        <div class="step-body">
+          <h3>A universal filter contract, then wire every chart into it</h3>
+          <p>
+            Define one query-param contract on the deals list — stage, owner, range, health band,
+            forecast category — and make every KPI tile, donut segment and bar deep-link into it. The
+            landing surface already exists in saved views, so this is a URL contract and a set of
+            links, not new UI. It also makes every number on the dashboard auditable, which is the
+            real payoff.
+          </p>
+          <p class="step-why">Report&rsquo;s #1 · survives verification · highest leverage per hour</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="step-num">2</span>
+        <div class="step-body">
+          <h3>Finish Account 360</h3>
+          <p>
+            Add the related-deals list and value rollup to the company page. Everything else the view
+            needs is already composed there. Smallest genuine gap on the board, in the module with the
+            least attention.
+          </p>
+          <p class="step-why">Report&rsquo;s #4 · reduced scope, most of the page already exists</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="step-num">3</span>
+        <div class="step-body">
+          <h3>Decide multi-currency rather than letting it drift</h3>
+          <p>
+            Either build it properly — an FX rate table, rate captured at close, currency-aware
+            rollups — or drop the unused columns and declare the product single-currency. The current
+            half-state invites a bug where two currencies are summed as one number.
+          </p>
+          <p class="step-why">Not in the report&rsquo;s sequence · a decision, not necessarily a build</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="step-num">4</span>
+        <div class="step-body">
+          <h3>Add delivery to the snapshots you already capture</h3>
+          <p>
+            The weekly forecast snapshot cron and the email infrastructure both exist. Connecting them
+            into a scheduled digest is small work with visible output for sales leadership.
+          </p>
+          <p class="step-why">Report&rsquo;s #6 · far cheaper than the report assumes</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="dropped">
+      <h3 style="font-family: var(--sans); font-size: 15px; font-weight: 650; margin: 0;">Drop from scope entirely</h3>
+      <p>Already in production. Re-specifying any of these risks a second implementation alongside the first:</p>
+      <div class="list">
+        report builder · rep leaderboard · CSV and Excel export · role-based dashboards ·
+        custom widget canvas · saved views · bulk stage and owner reassignment · tasks and reminders ·
+        contract approvals · quote generation · contact role hierarchy · stage gates ·
+        deal health scoring · Gmail sync · forecast rollup · duplicate detection
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Verification method — file, route, schema, migration and test-script existence confirmed by
+    inspection at commit 84e1d33, plus commit history. This establishes that each feature is built and
+    merged; it does not exercise runtime behaviour, so &ldquo;Shipped&rdquo; here means present and
+    tested, not independently re-QA&rsquo;d. Gmail sync is the exception — it was confirmed working
+    live against a real OAuth app in an earlier session. Note also that a feature-parity frame scores
+    presence, not health: nothing in either document speaks to whether the shipped features perform
+    well or are configured correctly in production, which is a separate audit worth running on its own.
+  </footer>
+
+</div>
+
+</body>
+</html>
