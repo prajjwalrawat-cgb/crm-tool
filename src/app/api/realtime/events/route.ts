@@ -31,7 +31,13 @@ export const dynamic = 'force-dynamic';
 
 // Platform ceiling for a single connection. Backstops the absolute lifetime
 // cap below so a function instance can never run unbounded on Vercel.
-export const maxDuration = 800;
+//
+// 300 is the maximum the Hobby plan accepts — the builder REJECTS the whole
+// deployment (not just this route) for anything higher, so this is a hard
+// deploy-time constraint, not a soft limit. Keep it >= MAX_STREAM_MS below,
+// so our own clean teardown always fires first and the platform ceiling is
+// only ever a backstop. If the plan changes, both numbers can rise together.
+export const maxDuration = 300;
 
 // Absolute lifetime cap for one SSE connection. When it fires we close the
 // stream cleanly; the browser's EventSource auto-reconnects and the server

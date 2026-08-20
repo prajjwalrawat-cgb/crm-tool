@@ -187,6 +187,36 @@ async function main(): Promise<void> {
   again();
   await sleep(3_400);
 
+  /* 10. Deploy-time constraints on the SSE route ---------------------- */
+  // These only fail on Vercel's builder, which rejects the ENTIRE deployment
+  // for an out-of-range maxDuration — a green local build tells you nothing.
+  // Cheaper to assert here than to discover it in a failed production deploy.
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const routeSrc = readFileSync(
+    join(process.cwd(), 'src', 'app', 'api', 'realtime', 'events', 'route.ts'),
+    'utf8',
+  );
+
+  const declared = Number(
+    /export const maxDuration = (\d+)/.exec(routeSrc)?.[1] ?? NaN,
+  );
+  // Hobby caps serverless functions at 300s. Raise only alongside the plan.
+  const PLAN_MAX_DURATION_S = 300;
+  check(
+    `SSE maxDuration is within the plan ceiling (<= ${PLAN_MAX_DURATION_S}s)`,
+    Number.isFinite(declared) && declared >= 1 && declared <= PLAN_MAX_DURATION_S,
+    `declared=${declared}`,
+  );
+
+  const capMin = Number(/const MAX_STREAM_MS = (\d+) \* 60 \* 1000/.exec(routeSrc)?.[1] ?? NaN);
+  const capSeconds = capMin * 60;
+  check(
+    'the stream lifetime cap fires before the platform ceiling',
+    Number.isFinite(capSeconds) && capSeconds < declared,
+    `cap=${capSeconds}s vs maxDuration=${declared}s`,
+  );
+
   /* ----------------------------- report ------------------------------ */
   for (const r of results) {
     const detail = r.detail ? `  (${r.detail})` : '';
