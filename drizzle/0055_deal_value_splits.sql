@@ -28,8 +28,31 @@ CREATE TABLE IF NOT EXISTS "deal_value_splits" (
 --> statement-breakpoint
 
 -- One row per contract year per deal; the UI rewrites the whole set on save.
-CREATE UNIQUE INDEX IF NOT EXISTS "deal_value_splits_deal_year_uniq"
-  ON "deal_value_splits" ("deal_id", "year_index");
+--
+-- SUPERSEDED BY 0057. That migration drops this index and replaces it with
+-- (deal_id, element_index, year_index), because a deal may legitimately carry
+-- two commercial elements in the same contract year.
+--
+-- The guard below matters because `pnpm build` replays every migration from
+-- 0024 on each deploy, in order. Once a real two-element deal exists, this
+-- statement can no longer succeed — and because a unique violation is fatal
+-- (unlike "already exists", which the apply scripts skip), the build aborts
+-- here and 0057 never gets the chance to run. That armed itself the first
+-- time someone saved a multi-element deal and would have broken the next
+-- deploy regardless of what that deploy changed.
+--
+-- So: only create the old index when 0057 has not already replaced it. On a
+-- fresh database this still runs, and 0057 still swaps it afterwards, so the
+-- end state is identical either way.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class WHERE relname = 'deal_value_splits_deal_element_year_uniq'
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS "deal_value_splits_deal_year_uniq"
+      ON "deal_value_splits" ("deal_id", "year_index");
+  END IF;
+END $$;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "deal_value_splits_tenant_deal_idx"
   ON "deal_value_splits" ("tenant_id", "deal_id");
