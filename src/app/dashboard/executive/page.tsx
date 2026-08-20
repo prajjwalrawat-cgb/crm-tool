@@ -1,9 +1,15 @@
 import { Sparkles } from 'lucide-react';
 
 import { withTenantSession } from '@/lib/auth-guard';
+import { readRevenueTrendView } from '@/lib/chart-studio/queries';
 import { getAIMode } from '@/lib/ai/config';
 import { formatCompactTenantCurrency, formatTenantCurrency } from '@/lib/currency/format';
 import { formatDate, formatNumber } from '@/lib/dates/format';
+import { getRevenueTrend } from '@/lib/dashboard/queries';
+import {
+  resolveDashboardRange,
+  type DashboardRange,
+} from '@/lib/dashboard/range';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
@@ -25,6 +31,7 @@ import {
 } from '../intelligence/_components/live-ai-card';
 
 import { MetricCard } from '../_components/metric-card';
+import { RevenueTrendChart } from '../_components/revenue-trend-chart';
 import {
   AttentionItem,
   AttentionList,
@@ -68,6 +75,15 @@ export const metadata = {
  * false. Left as all-time deliberately: it is the same figure the
  * Dashboard's stage chart shows, so the two views agree.
  *
+ * THE TREND CHART IS THE DASHBOARD'S, NOT A COPY. `RevenueTrendChart`
+ * is imported from `../_components`, fed by the same
+ * `getRevenueTrend` query and the same per-user Chart Studio view
+ * (`CHART_KEY_REVENUE_TREND`). One implementation, two mount points:
+ * a fix to the shaping math or the capping rule lands on both views
+ * at once, and a Studio tweak a user saves on one shows up on the
+ * other — which is the point of it being the same chart rather than
+ * a lookalike.
+ *
  * ZERO VS NO DATA. Several cards here can legitimately read zero and
  * several cannot read anything at all, and they used to look
  * identical — worse, the empty ones were styled in danger red, which
@@ -77,9 +93,18 @@ export const metadata = {
  * a real answer — no stalled deals, no active deals — keep the zero,
  * because that is genuinely the news.
  */
-export default async function ExecutiveDashboardPage() {
+export default async function ExecutiveDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant, userId }) => {
+    const sp = await searchParams;
+    // Same resolver, same `?range=` contract, same default (90d) as
+    // the main Dashboard — so a window chosen there means the same
+    // thing if the URL is carried across.
+    const range: DashboardRange = resolveDashboardRange(sp);
     const filter = { range: 'last_90d', owner: { type: 'all' } } as const;
     const ctx = { currentUserId: userId };
 
@@ -100,6 +125,8 @@ export default async function ExecutiveDashboardPage() {
       stale,
       dailyInsight,
       recsInsight,
+      revenueTrend,
+      savedTrendView,
     ] = await Promise.all([
       pipelineByStageRunner(tenant.id, filter, ctx),
       winLossRateRunner(tenant.id, filter, ctx),
@@ -114,6 +141,8 @@ export default async function ExecutiveDashboardPage() {
       staleDealsRunner(tenant.id, filter, ctx),
       getDailyExecInsight(tenant.id, userId, today),
       getRecommendationInsight(tenant.id, userId),
+      getRevenueTrend(tenant.id, { days: range.days, ownerId: null }),
+      readRevenueTrendView({ tenantId: tenant.id, userId }),
     ]);
 
     const totalPipelineMinor = pipeline.rows
@@ -246,6 +275,16 @@ export default async function ExecutiveDashboardPage() {
               </DashboardGridCell>
             </DashboardGrid>
           </ExecutiveSection>
+
+          <RevenueTrendChart
+            data={revenueTrend}
+            currency={settings}
+            title="Revenue trend"
+            subtitle={`${range.label} · weekly buckets · ${tenant.name}`}
+            initialConfig={savedTrendView?.config ?? null}
+            initialTitleOverride={savedTrendView?.title ?? null}
+            persona="admin"
+          />
 
           <ExecutiveSection
             title="Pipeline health"
