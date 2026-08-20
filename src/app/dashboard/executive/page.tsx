@@ -10,6 +10,7 @@ import {
   resolveDashboardRange,
   type DashboardRange,
 } from '@/lib/dashboard/range';
+import { rankAttentionQueue } from '@/lib/dashboard/attention-score';
 import { parseViewScope, scopeOwnerId } from '@/lib/dashboard/view-scope';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { getOrgSettings } from '@/lib/org-settings/queries';
@@ -204,12 +205,13 @@ export default async function ExecutiveDashboardPage({
     const forecastDeals = forecast.extras?.totalDeals ?? 0;
     const wonDealCount =
       pipeline.rows.find((r) => r.stage === 'won')?.count ?? 0;
-    const staleByCriticality = [...stale.rows].sort(
-      (a, b) =>
-        severityRank(b.severity) - severityRank(a.severity) ||
-        (b.daysSinceActivity ?? 0) - (a.daysSinceActivity ?? 0),
-    );
-    const attentionRows = staleByCriticality.slice(0, 6);
+    // Ranked by composite risk, not by age. Sorting on staleness alone
+    // put a ₹0 lead nobody had touched above a large negotiation that
+    // had just slid backwards — see lib/dashboard/attention-score.
+    // Severity still drives the row colour; it is deliberately NOT an
+    // input to the score, because it is derived from the same staleness
+    // signals and would double-count age.
+    const attentionRows = rankAttentionQueue(stale.rows).slice(0, 6);
 
     const focusedRep =
       view.mode === 'rep'
@@ -562,7 +564,7 @@ export default async function ExecutiveDashboardPage({
 
           <ExecutiveSection
             title="Attention queue"
-            subtitle="Every open deal showing stall signals, any age · not limited to 90 days"
+            subtitle="Ranked by days stalled, deal value, stage regression and missing next steps · every open deal, any age"
             action={<SectionLink href="/dashboard/reports/stale-deals" />}
           >
             <AttentionList emptyMessage="Nothing stalled. Pipeline is healthy.">
@@ -572,11 +574,18 @@ export default async function ExecutiveDashboardPage({
                     <AttentionItem
                       key={row.dealId}
                       title={row.name}
-                      detail={`${DEAL_STAGE_LABELS[row.stage]} · ${row.daysSinceActivity ?? '∞'}d since activity${
-                        row.daysSinceStageChange != null
-                          ? ` · ${row.daysSinceStageChange}d in stage`
-                          : ''
-                      }`}
+                      detail={
+                        <>
+                          <span className="font-medium text-slate-600 dark:text-[#D4D4D8]">
+                            {row.attention.reason}
+                          </span>
+                          {' · '}
+                          {DEAL_STAGE_LABELS[row.stage]}
+                          {row.daysSinceStageChange != null
+                            ? ` · ${row.daysSinceStageChange}d in stage`
+                            : ''}
+                        </>
+                      }
                       meta={
                         row.amountMinor > 0 ? (
                           money(row.amountMinor)
@@ -651,17 +660,4 @@ export default async function ExecutiveDashboardPage({
       </main>
     );
   });
-}
-
-function severityRank(s: 'ok' | 'watch' | 'stale' | 'critical'): number {
-  switch (s) {
-    case 'critical':
-      return 3;
-    case 'stale':
-      return 2;
-    case 'watch':
-      return 1;
-    default:
-      return 0;
-  }
 }

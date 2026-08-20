@@ -32,6 +32,20 @@ import type { OwnerScope, ReportFilter, ReportRunner } from '../types';
  * neglected deals surface first. The UI shows them in a table grouped
  * by severity.
  *
+ * THREE EXTRA FIELDS FOR RISK SCORING (`hasNextStep`,
+ * `hasCloseDate`, `regressedAt`). Staleness alone ranks a ₹0 lead
+ * nobody has touched above a ₹2 crore negotiation that just slid
+ * backwards — the first is neglect, the second is a deal in trouble.
+ * These let `lib/dashboard/attention-score` weigh value, direction
+ * and preparedness alongside age. They are cheap: two column reads
+ * and one extra self-join on the already-indexed stage history.
+ *
+ * `regressedAt` is the most recent time the deal moved BACKWARDS
+ * through the pipeline (Negotiation → Proposal, say). Derived from
+ * consecutive `deal_stage_history` intervals rather than from
+ * activity logs, because the trigger-maintained history is the only
+ * complete record of stage occupancy.
+ *
  * Query shape: 3 CTEs that aggregate the latest timestamp per deal
  * across the activity/email/stage-change sources, then a single LEFT
  * JOIN onto the deal row. Indexes `activity_logs_tenant_entity_created_desc_idx`
@@ -64,6 +78,14 @@ export type StaleDealsRow = {
     stageStale: boolean;
   };
   severity: StaleSeverity;
+  /** Is there a written "what has to happen to close" line? */
+  hasNextStep: boolean;
+  /** Is an expected close date set? */
+  hasCloseDate: boolean;
+  /** Last backwards stage move, ISO. Null if it never went back. */
+  regressedAt: string | null;
+  /** Whole days since that backwards move. Null if none. */
+  daysSinceRegression: number | null;
 };
 
 export type StaleDealsFilter = ReportFilter & {
@@ -122,6 +144,9 @@ export const staleDealsRunner: ReportRunner<
     lastActivityAt: Date | null;
     lastEmailAt: Date | null;
     lastStageChangeAt: Date | null;
+    nextStep: string | null;
+    expectedCloseDate: string | null;
+    regressedAt: Date | null;
   };
 
   const raw = (await tenantTransaction(async (tx) =>
@@ -156,6 +181,42 @@ export const staleDealsRunner: ReportRunner<
           AND action = 'stage_changed'
           AND entity_id ~ ${sql.raw(`'${UUID_REGEX_LITERAL}'`)}
         GROUP BY entity_id
+      ),
+      -- Backwards moves. deal_stage_history holds one row per stage
+      -- occupancy with exited_at NULL on the current one, so ordering by
+      -- entered_at and comparing each row to its predecessor recovers
+      -- the full path. A move counts as a regression when the new
+      -- stage's pipeline position is LOWER than the previous one's.
+      -- 'hold', 'won' and 'lost' are excluded from the ordering: parking
+      -- a deal or closing it is not a backwards step through the funnel.
+      stage_walk AS (
+        SELECT
+          deal_id,
+          entered_at,
+          CASE stage::text
+            WHEN 'lead' THEN 1
+            WHEN 'qualified' THEN 2
+            WHEN 'proposal' THEN 3
+            WHEN 'negotiation' THEN 4
+            ELSE NULL
+          END AS pos,
+          lag(
+            CASE stage::text
+              WHEN 'lead' THEN 1
+              WHEN 'qualified' THEN 2
+              WHEN 'proposal' THEN 3
+              WHEN 'negotiation' THEN 4
+              ELSE NULL
+            END
+          ) OVER (PARTITION BY deal_id ORDER BY entered_at) AS prev_pos
+        FROM deal_stage_history
+        WHERE tenant_id = ${tenantId}::uuid
+      ),
+      last_regression AS (
+        SELECT deal_id, max(entered_at) AS at
+        FROM stage_walk
+        WHERE pos IS NOT NULL AND prev_pos IS NOT NULL AND pos < prev_pos
+        GROUP BY deal_id
       )
       SELECT
         d.id                AS "dealId",
@@ -167,11 +228,15 @@ export const staleDealsRunner: ReportRunner<
         d.updated_at        AS "updatedAt",
         la.at               AS "lastActivityAt",
         le.at               AS "lastEmailAt",
-        ls.at               AS "lastStageChangeAt"
+        ls.at               AS "lastStageChangeAt",
+        d.next_step         AS "nextStep",
+        d.expected_close_date AS "expectedCloseDate",
+        lr.at               AS "regressedAt"
       FROM deals d
       LEFT JOIN last_activity la ON la.deal_id = d.id
       LEFT JOIN last_email    le ON le.deal_id = d.id
       LEFT JOIN last_stage    ls ON ls.deal_id = d.id
+      LEFT JOIN last_regression lr ON lr.deal_id = d.id
       WHERE d.tenant_id = ${tenantId}::uuid
         AND d.deleted_at IS NULL
         AND d.stage IN ('lead','qualified','proposal','negotiation')
@@ -256,6 +321,14 @@ export const staleDealsRunner: ReportRunner<
       daysSinceStageChange,
       triggers: { activityStale, emailStale, stageStale },
       severity,
+      hasNextStep: (r.nextStep ?? '').trim().length > 0,
+      hasCloseDate: r.expectedCloseDate != null,
+      regressedAt: r.regressedAt
+        ? new Date(r.regressedAt).toISOString()
+        : null,
+      daysSinceRegression: r.regressedAt
+        ? Math.floor((now - new Date(r.regressedAt).getTime()) / dayMs)
+        : null,
     };
   });
 

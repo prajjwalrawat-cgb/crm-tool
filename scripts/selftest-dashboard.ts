@@ -39,6 +39,8 @@ async function main() {
   const { computeCoverage, formatCoverageRatio } = await import(
     '../src/lib/dashboard/coverage'
   );
+  const { scoreAttention, rankAttentionQueue, ATTENTION_WEIGHTS } =
+    await import('../src/lib/dashboard/attention-score');
 
   /* ---------------- shared range ---------------- */
 
@@ -334,6 +336,166 @@ async function main() {
     'ratio renders to one decimal',
     formatCoverageRatio(4.987) === '5.0x' && formatCoverageRatio(1.24) === '1.2x',
     `${formatCoverageRatio(4.987)} / ${formatCoverageRatio(1.24)}`,
+  );
+
+  /* ---------------- attention scoring ---------------- */
+
+  check(
+    'weights sum to 1, so the composite is always 0-1',
+    Math.abs(
+      Object.values(ATTENTION_WEIGHTS).reduce((a, b) => a + b, 0) - 1,
+    ) < 1e-9,
+    String(Object.values(ATTENTION_WEIGHTS).reduce((a, b) => a + b, 0)),
+  );
+
+  const MAX = 200_000_000_00; // Rs 20 crore, the queue's largest deal
+
+  // THE BUG THIS REPLACES: a worthless untouched lead outranking a
+  // large deal that just slid backwards, purely because it is older.
+  const junkLead = {
+    dealId: 'junk',
+    daysSinceActivity: 300,
+    amountMinor: 0,
+    daysSinceRegression: null,
+    hasNextStep: false,
+    hasCloseDate: false,
+  };
+  const bigSlipping = {
+    dealId: 'big',
+    daysSinceActivity: 12,
+    amountMinor: MAX,
+    daysSinceRegression: 3,
+    hasNextStep: true,
+    hasCloseDate: true,
+  };
+  const ranked = rankAttentionQueue([junkLead, bigSlipping]);
+  check(
+    'a large regressing deal outranks an ancient worthless lead',
+    ranked[0]!.dealId === 'big',
+    ranked.map((r) => `${r.dealId}=${r.attention.score.toFixed(3)}`).join(' '),
+  );
+  // Value outweighs regression by design, so `value` is legitimately
+  // the top factor here — but the backwards move is the most alarming
+  // thing about this deal and must not be dropped from the line.
+  check(
+    'a strong regression is named even when value is the top factor',
+    ranked[0]!.attention.topFactor === 'value' &&
+      ranked[0]!.attention.reason.includes('moved backwards'),
+    ranked[0]!.attention.reason,
+  );
+  const purelyRegressed = scoreAttention(
+    {
+      daysSinceActivity: 2,
+      amountMinor: 1,
+      daysSinceRegression: 1,
+      hasNextStep: true,
+      hasCloseDate: true,
+    },
+    MAX,
+  );
+  check(
+    'regression leads the line when it IS the top factor',
+    purelyRegressed.topFactor === 'regressed' &&
+      purelyRegressed.reason.startsWith('Moved backwards'),
+    purelyRegressed.reason,
+  );
+  check(
+    'the junk lead still explains itself',
+    ranked[1]!.attention.reason.length > 0 &&
+      ranked[1]!.attention.reason.includes('no next step or close date'),
+    ranked[1]!.attention.reason,
+  );
+
+  // Every composite must stay inside 0-1 across the input space.
+  const scores: number[] = [];
+  for (const days of [null, 0, 30, 120, 5000]) {
+    for (const amt of [0, 1, 50_000_00, MAX]) {
+      for (const reg of [null, 0, 45, 400]) {
+        for (const ns of [true, false]) {
+          for (const cd of [true, false]) {
+            scores.push(
+              scoreAttention(
+                {
+                  daysSinceActivity: days,
+                  amountMinor: amt,
+                  daysSinceRegression: reg,
+                  hasNextStep: ns,
+                  hasCloseDate: cd,
+                },
+                MAX,
+              ).score,
+            );
+          }
+        }
+      }
+    }
+  }
+  check(
+    'composite stays within 0-1 across the whole input space',
+    scores.every((v) => v >= 0 && v <= 1),
+    `${scores.length} combinations, max=${Math.max(...scores).toFixed(3)}`,
+  );
+
+  const worst = scoreAttention(
+    {
+      daysSinceActivity: 5000,
+      amountMinor: MAX,
+      daysSinceRegression: 0,
+      hasNextStep: false,
+      hasCloseDate: false,
+    },
+    MAX,
+  );
+  check('the worst possible deal scores 1.0', Math.abs(worst.score - 1) < 1e-9, worst.score.toFixed(4));
+
+  const best = scoreAttention(
+    {
+      daysSinceActivity: 0,
+      amountMinor: 0,
+      daysSinceRegression: null,
+      hasNextStep: true,
+      hasCloseDate: true,
+    },
+    MAX,
+  );
+  check('a healthy deal scores 0', best.score === 0, best.score.toFixed(4));
+
+  check(
+    'never-logged activity is treated as fully stalled, not fresh',
+    scoreAttention({ ...junkLead, daysSinceActivity: null }, MAX).factors
+      .stalled === 1,
+  );
+  check(
+    'a year-old regression has decayed to nothing',
+    scoreAttention({ ...bigSlipping, daysSinceRegression: 400 }, MAX).factors
+      .regressed === 0,
+  );
+
+  // Log scaling: a mid-size deal must stay discriminable next to a
+  // 20-crore outlier. Linear scaling would put this at 0.0025.
+  const midValue = scoreAttention(
+    {
+      daysSinceActivity: 0,
+      amountMinor: 50_000_00,
+      daysSinceRegression: null,
+      hasNextStep: true,
+      hasCloseDate: true,
+    },
+    MAX,
+  ).factors.value;
+  check(
+    'log scaling keeps mid-size deals discriminable beside an outlier',
+    midValue > 0.5 && midValue < 1,
+    midValue.toFixed(3),
+  );
+
+  // Determinism: identical inputs in a different order must produce the
+  // same ranking and the same reasons.
+  const shuffled = rankAttentionQueue([bigSlipping, junkLead]);
+  check(
+    'ranking is order-independent',
+    shuffled.map((r) => r.dealId).join() === ranked.map((r) => r.dealId).join(),
+    shuffled.map((r) => r.dealId).join(),
   );
 
   /* ---------------- weekly bucketing ---------------- */
