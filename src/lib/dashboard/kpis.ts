@@ -7,6 +7,10 @@ import type { StageProbabilities } from '@/lib/deals/stage-probability';
 import { timeQuery } from '@/lib/pagination/timing';
 import { currentFiscalYear, fiscalYearRange } from '@/lib/targets/fiscal';
 import { listTargets } from '@/lib/targets/queries';
+import {
+  QUOTA_CREDIT_SQL,
+  QUOTA_WITHHELD_SQL,
+} from '@/lib/targets/quota-credit';
 
 import type { DashboardRange } from './range';
 
@@ -63,7 +67,18 @@ export type DashboardKpis = {
     achievedMinor: number;
     /** Achieved as of the start of the window — the delta basis. */
     priorAchievedMinor: number;
+    /**
+     * Won revenue in the same FY window held back by the manager
+     * approval gate. `achievedMinor + pendingApprovalMinor` is the
+     * total won revenue for the fiscal year, which is what lets the
+     * tile reconcile against every other won figure on the page.
+     */
+    pendingApprovalMinor: number;
+    pendingApprovalCount: number;
     fiscalYear: number;
+    /** FY window actually measured — drives the tile's scope label. */
+    fromISO: string;
+    toISO: string;
   } | null;
 };
 
@@ -183,10 +198,21 @@ async function closedWindow(
 }
 
 /**
- * Fiscal-year-to-date approved-won revenue, split at `splitAt` so the
- * quota tile can show both the current figure and where it stood when
- * the window opened. Mirrors `targetAchievement`'s predicates (won +
- * manager-approved) so the dashboard and the Targets page agree.
+ * Fiscal-year-to-date won revenue that earns quota credit, split at
+ * `splitAt` so the tile can show both the current figure and where it
+ * stood when the window opened.
+ *
+ * Credit rule lives in `lib/targets/quota-credit` and is shared
+ * verbatim with `targetAchievement`, so the dashboard tile and the
+ * Targets page cannot disagree. The gist: 'none' and 'approved' count,
+ * 'pending' and 'rejected' don't. Filtering on `= 'approved'` alone —
+ * which is what this did — dropped every deal that never entered the
+ * approval workflow, i.e. the default state of the column, i.e. almost
+ * all of them.
+ *
+ * The withheld figure comes back in the same scan so the tile can name
+ * the gap instead of leaving the reader to wonder why attainment
+ * disagrees with the won total elsewhere on the page.
  */
 async function quotaAchievement(
   tenantId: string,
@@ -194,20 +220,32 @@ async function quotaAchievement(
   now: Date,
   splitAt: Date,
   ownerId: string | null,
-): Promise<{ achievedMinor: number; priorAchievedMinor: number }> {
+): Promise<{
+  achievedMinor: number;
+  priorAchievedMinor: number;
+  pendingApprovalMinor: number;
+  pendingApprovalCount: number;
+}> {
   const rows = (await tenantTransaction(async (tx) =>
     tx.execute(sql`
       SELECT
-        COALESCE(SUM(amount_minor), 0)::bigint AS achieved,
+        COALESCE(SUM(amount_minor) FILTER (WHERE ${sql.raw(QUOTA_CREDIT_SQL)}), 0)::bigint
+          AS achieved,
         COALESCE(
-          SUM(amount_minor) FILTER (WHERE closed_at < ${splitAt.toISOString()}::timestamptz),
+          SUM(amount_minor) FILTER (
+            WHERE ${sql.raw(QUOTA_CREDIT_SQL)}
+              AND closed_at < ${splitAt.toISOString()}::timestamptz
+          ),
           0
-        )::bigint AS prior_achieved
+        )::bigint AS prior_achieved,
+        COALESCE(SUM(amount_minor) FILTER (WHERE ${sql.raw(QUOTA_WITHHELD_SQL)}), 0)::bigint
+          AS pending_amount,
+        COUNT(*) FILTER (WHERE ${sql.raw(QUOTA_WITHHELD_SQL)})::int
+          AS pending_count
       FROM deals
       WHERE tenant_id = ${tenantId}::uuid
         AND deleted_at IS NULL
         AND stage = 'won'
-        AND approval_status = 'approved'
         AND closed_at IS NOT NULL
         AND closed_at >= ${fyStart.toISOString()}::timestamptz
         AND closed_at <  ${now.toISOString()}::timestamptz
@@ -216,11 +254,20 @@ async function quotaAchievement(
   )) as unknown as Array<{
     achieved: string | number;
     prior_achieved: string | number;
+    pending_amount: string | number;
+    pending_count: string | number;
   }>;
-  const r = rows[0] ?? { achieved: 0, prior_achieved: 0 };
+  const r = rows[0] ?? {
+    achieved: 0,
+    prior_achieved: 0,
+    pending_amount: 0,
+    pending_count: 0,
+  };
   return {
     achievedMinor: Number(r.achieved) || 0,
     priorAchievedMinor: Number(r.prior_achieved) || 0,
+    pendingApprovalMinor: Number(r.pending_amount) || 0,
+    pendingApprovalCount: Number(r.pending_count) || 0,
   };
 }
 
@@ -297,7 +344,11 @@ export async function getDashboardKpis(
               targetMinor,
               achievedMinor: achievement.achievedMinor,
               priorAchievedMinor: achievement.priorAchievedMinor,
+              pendingApprovalMinor: achievement.pendingApprovalMinor,
+              pendingApprovalCount: achievement.pendingApprovalCount,
               fiscalYear,
+              fromISO: fyStart.toISOString(),
+              toISO: now.toISOString(),
             }
           : null,
     };

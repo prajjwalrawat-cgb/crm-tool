@@ -8,6 +8,7 @@ import {
 import type { DashboardKpis } from '@/lib/dashboard/kpis';
 import type { DashboardRange } from '@/lib/dashboard/range';
 import { fiscalYearLabel } from '@/lib/targets/fiscal';
+import { pendingApprovalNote } from '@/lib/targets/quota-credit';
 import { cn } from '@/lib/utils';
 
 /**
@@ -42,6 +43,13 @@ type Tile = {
   tint: 'indigo' | 'violet' | 'emerald' | 'amber' | 'sky' | 'slate';
   /** Full-precision figure for the title tooltip. */
   title?: string;
+  /**
+   * Optional caveat rendered under the tile in amber — for when a
+   * number is correct but incomplete, and saying so is the difference
+   * between a trusted tile and a suspected bug. Currently only the
+   * quota tile uses it (revenue withheld by the approval gate).
+   */
+  footnote?: string;
 };
 
 export function KpiStrip({
@@ -150,6 +158,16 @@ export function KpiStrip({
     const priorAttainment =
       kpis.quota.priorAchievedMinor / kpis.quota.targetMinor;
     const attainmentPct = Math.round(attainment * 100);
+    // Won revenue the approval gate is holding back. Named out loud
+    // rather than silently omitted — `achieved + pending` is the total
+    // won revenue for the fiscal year, which is how a reader
+    // reconciles this tile against the won figures elsewhere on the
+    // page. See lib/targets/quota-credit.
+    const withheld = pendingApprovalNote(
+      kpis.quota.pendingApprovalMinor,
+      kpis.quota.pendingApprovalCount,
+      money,
+    );
     tiles.push({
       key: 'quota',
       label: `Quota attainment · ${fiscalYearLabel(fiscalYearStartMonth, kpis.quota.fiscalYear)}`,
@@ -167,7 +185,16 @@ export function KpiStrip({
       },
       higherIsBetter: true,
       tint: 'slate',
-      title: `${attainmentPct.toLocaleString()}% — ${exact(kpis.quota.achievedMinor)} approved-won revenue against a ${exact(kpis.quota.targetMinor)} target`,
+      title: [
+        `${attainmentPct.toLocaleString()}% — ${exact(kpis.quota.achievedMinor)} won revenue counting toward quota, against a ${exact(kpis.quota.targetMinor)} target.`,
+        'Measured over the fiscal year to date, on close date.',
+        withheld
+          ? `A further ${exact(kpis.quota.pendingApprovalMinor)} is won but awaiting manager approval, so it is excluded until approved.`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' '),
+      footnote: withheld ?? undefined,
     });
   }
 
@@ -221,6 +248,11 @@ function KpiTile({ tile, priorLabel }: { tile: Tile; priorLabel: string }) {
       <div className="mt-1 truncate text-[10.5px] text-slate-500 dark:text-[#A1A1AA]">
         {tile.sub}
       </div>
+      {tile.footnote ? (
+        <div className="mt-1 text-[10px] leading-snug text-amber-700 dark:text-amber-300">
+          {tile.footnote}
+        </div>
+      ) : null}
     </div>
   );
 }
