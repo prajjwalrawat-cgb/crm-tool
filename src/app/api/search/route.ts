@@ -162,8 +162,10 @@ export async function GET(req: NextRequest): Promise<Response> {
               WHERE tenant_id = ${tenant.id}::uuid
                 AND deleted_at IS NULL
                 AND title ILIKE ${pattern}
-                AND (${mineOnlyId}::uuid IS NULL
-                     OR assigned_user_id = ${mineOnlyId}::uuid
+                -- assigned_user_id is text (Clerk-style ids like
+                -- "user_xxx"), not uuid — same rule as owner_id above.
+                AND (${mineOnlyId}::text IS NULL
+                     OR assigned_user_id = ${mineOnlyId}::text
                      OR assigned_user_id IS NULL)
               ORDER BY
                 CASE WHEN status IN ('todo','in_progress') THEN 0 ELSE 1 END,
