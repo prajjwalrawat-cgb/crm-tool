@@ -29,6 +29,24 @@ export const runtime = 'nodejs';
 // Don't try to cache or pre-render an event stream.
 export const dynamic = 'force-dynamic';
 
+// Platform ceiling for a single connection. Backstops the absolute lifetime
+// cap below so a function instance can never run unbounded on Vercel.
+export const maxDuration = 800;
+
+// Absolute lifetime cap for one SSE connection. When it fires we close the
+// stream cleanly; the browser's EventSource auto-reconnects and the server
+// replays anything missed via Last-Event-ID. Without this, a client that
+// dies uncleanly (laptop sleep, network drop, browser crash) never triggers
+// `request.signal.aborted`, so its LISTEN connection + instance memory would
+// stay provisioned forever — the main driver of leaked GB-Hours.
+//
+// 4 min is long enough that an actively-used tab rarely cycles (avoiding
+// reconnect churn: Clerk lookups, new LISTEN connections, presence
+// re-broadcasts) yet short enough to reclaim genuinely-leaked instances
+// quickly. Keep it under the platform's function-duration ceiling so the
+// clean teardown + replay runs instead of a hard kill.
+const MAX_STREAM_MS = 4 * 60 * 1000;
+
 /**
  * Server-Sent Events stream of realtime tenant events.
  *
@@ -85,6 +103,7 @@ async function handleSseConnection(request: NextRequest): Promise<Response> {
       let closed = false;
       let listenHandle: { unlisten: () => Promise<void> } | null = null;
       let heartbeat: ReturnType<typeof setInterval> | null = null;
+      let lifetimeCap: ReturnType<typeof setTimeout> | null = null;
       const openedAt = Date.now();
       adjustGauge('sse.connections', 1);
       adjustGauge('sse.connections', 1, { tenantId: tenant.id });
@@ -118,10 +137,14 @@ async function handleSseConnection(request: NextRequest): Promise<Response> {
         safeEnqueue(encoder.encode(`data: ${data}\n\n`));
       };
 
-      const cleanup = async () => {
+      // `silentPresence` skips the presence "left" broadcast — used when the
+      // teardown is our own lifetime cap (the client reconnects immediately),
+      // not a genuine disconnect. Avoids offline→online flicker on every cycle.
+      const cleanup = async (opts: { silentPresence?: boolean } = {}) => {
         if (closed) return;
         closed = true;
         if (heartbeat) clearInterval(heartbeat);
+        if (lifetimeCap) clearTimeout(lifetimeCap);
         try {
           if (listenHandle) await listenHandle.unlisten();
         } catch (err) {
@@ -133,7 +156,9 @@ async function handleSseConnection(request: NextRequest): Promise<Response> {
           });
         }
         try {
-          await untrackPresence(tenant.id, userId);
+          await untrackPresence(tenant.id, userId, {
+            notify: !opts.silentPresence,
+          });
         } catch (err) {
           captureError(err, {
             category: 'realtime.untrack_presence',
@@ -212,6 +237,15 @@ async function handleSseConnection(request: NextRequest): Promise<Response> {
         heartbeat = setInterval(() => {
           safeEnqueue(encoder.encode(': keepalive\n\n'));
         }, 25000);
+
+        // Absolute lifetime cap — force a clean teardown so no connection
+        // (including uncleanly-dropped ones) holds an instance indefinitely.
+        // EventSource reconnects and replays via Last-Event-ID. Presence is
+        // torn down silently: the client is about to reconnect, so a "left"
+        // broadcast would only flicker the user for other members.
+        lifetimeCap = setTimeout(() => {
+          void cleanup({ silentPresence: true });
+        }, MAX_STREAM_MS);
       } catch (err) {
         console.error('[realtime] setup failed:', err);
         await cleanup();

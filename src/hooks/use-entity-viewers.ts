@@ -22,8 +22,22 @@ export type EntityViewer = {
   lastSeen: number;
 };
 
-const VIEWER_TTL_MS = 30_000;
-const HEARTBEAT_MS = 22_000;
+/**
+ * Liveness window for a remote viewer, and how often we refresh our own.
+ *
+ * Every heartbeat is a POST to /api/realtime/publish — a serverless
+ * invocation that verifies the session, reads the `users` row for display
+ * info, and issues a pg_notify. At the previous 22s cadence a single deal
+ * page left open cost ~160 invocations an hour, per viewer, forever.
+ *
+ * A clean unmount still publishes `viewing.stopped` immediately, so the TTL
+ * only governs how long a *crashed* tab lingers in the list. Trading a
+ * slower fade-out for a third of the request volume is the right side of
+ * that deal. TTL stays above 2x the heartbeat so a single dropped beat
+ * never makes a live viewer flicker out.
+ */
+const VIEWER_TTL_MS = 140_000;
+const HEARTBEAT_MS = 55_000;
 
 export function useEntityViewers(args: {
   tenantId: string;

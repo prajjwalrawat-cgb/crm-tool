@@ -66,15 +66,26 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Resolve display info once. Cached by Clerk SDK so this is cheap.
-  const clerk = await clerkClient();
-  const user = await clerk.users.getUser(userId).catch(() => null);
-  const displayName = user
-    ? [user.firstName, user.lastName].filter(Boolean).join(' ') ||
-      user.primaryEmailAddress?.emailAddress ||
-      null
-    : null;
-  const imageUrl = user?.imageUrl ?? null;
+  // Display info is only carried on the `.started` events — a `.stopped`
+  // event is keyed by userId alone. `clerkClient()` is the local-auth shim,
+  // so `getUser` is a real `users` table read, and this endpoint is hit on a
+  // fixed heartbeat by every open entity page. Skipping the lookup on stop
+  // events drops a DB round trip from a request that never used the result.
+  const needsDisplayInfo =
+    body.kind === 'viewing.started' || body.kind === 'typing.started';
+
+  let displayName: string | null = null;
+  let imageUrl: string | null = null;
+  if (needsDisplayInfo) {
+    const clerk = await clerkClient();
+    const user = await clerk.users.getUser(userId).catch(() => null);
+    displayName = user
+      ? [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+        user.primaryEmailAddress?.emailAddress ||
+        null
+      : null;
+    imageUrl = user?.imageUrl ?? null;
+  }
 
   try {
     if (body.kind === 'viewing.started') {
