@@ -18,6 +18,14 @@ import { cn } from '@/lib/utils';
  * hint) so grids of tiles line up vertically even when individual
  * hint text differs in length. The `hint` falls back to a non-
  * breaking space when missing.
+ *
+ * ZERO IS NOT THE SAME AS NO DATA. Pass `emptyState` when the source
+ * has nothing to report — not when it reports a genuine zero. A card
+ * rendering "0 · 0% delivered" in danger red because email was never
+ * configured is accusing the workspace of failing at something it
+ * never switched on. `emptyState` replaces the number with muted
+ * guidance and drops the tone colour entirely, so an unconfigured
+ * integration can never be mistaken for a bad result.
  */
 export type MetricTone =
   | 'info'
@@ -32,6 +40,7 @@ export function MetricCard({
   hint,
   tone = 'neutral',
   trend,
+  emptyState,
   className,
 }: {
   label: string;
@@ -40,6 +49,11 @@ export function MetricCard({
   tone?: MetricTone;
   /** Optional small trend indicator slot (e.g. `+12%` arrow). */
   trend?: ReactNode;
+  /**
+   * When set, the card shows this guidance instead of `value`/`hint`
+   * and ignores `tone`. For MISSING data only — never for a real zero.
+   */
+  emptyState?: string;
   className?: string;
 }) {
   const toneClass: Record<MetricTone, string> = {
@@ -56,6 +70,27 @@ export function MetricCard({
     danger: 'text-rose-700 dark:text-rose-300',
     neutral: 'text-slate-900 dark:text-[#FAFAFA]',
   };
+
+  if (emptyState) {
+    return (
+      <div
+        className={cn(
+          'rounded-md border border-dashed border-slate-300 bg-slate-50/40 p-3 dark:border-[#2A2A2A] dark:bg-[#111111]',
+          className,
+        )}
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#71717A]">
+          {label}
+        </div>
+        <div className="mt-1 font-mono text-xl font-semibold leading-tight text-slate-300 dark:text-[#3F3F46]">
+          &mdash;
+        </div>
+        <div className="mt-1 text-[10.5px] leading-snug text-slate-500 dark:text-[#A1A1AA]">
+          {emptyState}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

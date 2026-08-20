@@ -281,6 +281,16 @@ export type StageConversionConfig = {
   variant: StageConversionVariant;
   metric: StageConversionMetric;
   display: {
+    /**
+     * Toggles the "Share of stage above" column — this stage's value
+     * as a proportion of the stage before it, on the current snapshot.
+     *
+     * The key name is legacy and is deliberately NOT renamed: it is
+     * persisted per-user in `chart_views.config`, so changing it would
+     * silently reset every saved view. It has never actually toggled a
+     * conversion rate; see the module header of
+     * `stage-conversion-bars.tsx` for why that label was wrong.
+     */
     showConversionPct: boolean;
     showCloseProb: boolean;
     animated: boolean;

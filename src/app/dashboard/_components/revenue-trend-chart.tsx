@@ -174,6 +174,25 @@ export function RevenueTrendChart({
     [config.variant, config.metric, config.display.cumulative, shaped.points],
   );
 
+  // Axis capping used to announce itself in an always-on amber banner
+  // above the chart ("N weeks exceed the won/lost axis. Hover the
+  // marked point for real value."). That is console-note phrasing —
+  // it read as leaked debug output sitting permanently on the
+  // dashboard, and it duplicated information the chart already
+  // conveys in place: a capped bar draws a torn top edge and that
+  // week's tooltip states the figures shown are the real ones.
+  //
+  // The diagnostic still exists, it just goes where diagnostics go.
+  // Dev only — `process.env.NODE_ENV` is inlined at build time, so
+  // this whole block is dead code in a production bundle.
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+    if (!weekly?.devNotices.length) return;
+    console.warn(
+      `[revenue-trend] axis capped — ${weekly.devNotices.join(' ')}`,
+    );
+  }, [weekly]);
+
   const formatValue = useCallback(
     (v: number) => formatMetricValue(v, config.metric, formatCurrency),
     [config.metric, formatCurrency],
@@ -289,12 +308,6 @@ export function RevenueTrendChart({
             </div>
           ) : (
             <>
-              {weekly?.notices.length ? (
-                <p className="mx-3 mb-1.5 rounded-md border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-[10.5px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                  {weekly.notices.join(' ')} Hover the marked point for its real
-                  value.
-                </p>
-              ) : null}
               <ResponsiveContainer width="100%" height={weekly ? 280 : 260}>
                 <ChartBody
                   variant={config.variant}

@@ -32,6 +32,20 @@ export type EmailEngagementExtras = {
   totalSent: number;
   successRate: number; // 0-1 ratio across sent+delivered vs total
   retryRate: number; // 0-1 ratio of retries / total attempts
+  /** Attempts inside the window, whatever their status. */
+  totalAttempted: number;
+  /**
+   * Has this workspace EVER sent outbound mail — ignoring the window?
+   *
+   * The difference between "nothing sent this quarter" and "email was
+   * never wired up" is invisible in the windowed counts: both are
+   * zero. Rendering the second as "0 sent · 0% delivered" in danger
+   * red accuses a workspace of failing at something it never
+   * switched on. Consumers use this to pick an empty state instead.
+   *
+   * Cheap: an EXISTS probe that stops at the first matching row.
+   */
+  hasEverSent: boolean;
 };
 
 const STATUSES: EmailEngagementRow['status'][] = [
@@ -95,6 +109,23 @@ export const emailEngagementRunner: ReportRunner<
     (byStatus.get('delivered')?.count ?? 0);
   const totalRetries = ordered.reduce((sum, r) => sum + r.retrySum, 0);
 
+  // Only ask when the window is empty — a workspace with traffic in
+  // the window has self-evidently sent mail before, so the extra probe
+  // would be pure overhead on the common path.
+  const hasEverSent =
+    total > 0 ||
+    (await tenantTransaction(async (tx) => {
+      const rows = (await tx.execute(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM email_messages
+          WHERE tenant_id = ${tenantId}::uuid
+            AND direction = 'outbound'
+          LIMIT 1
+        ) AS ever
+      `)) as unknown as Array<{ ever: boolean }>;
+      return rows[0]?.ever === true;
+    }));
+
   return {
     rows: ordered,
     extras: {
@@ -103,6 +134,8 @@ export const emailEngagementRunner: ReportRunner<
       totalSent: successful,
       successRate: total === 0 ? 0 : successful / total,
       retryRate: total === 0 ? 0 : totalRetries / total,
+      totalAttempted: total,
+      hasEverSent,
     },
     meta: {
       generatedAt: new Date().toISOString(),

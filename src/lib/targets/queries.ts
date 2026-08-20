@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, gte, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { deals, salesTargets, type SalesTarget } from '@/db/schema';
@@ -8,6 +8,10 @@ import { tenantTransaction } from '@/lib/db-context';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import { fiscalYearRange } from './fiscal';
+import {
+  QUOTA_CREDIT_APPROVAL_STATUSES,
+  QUOTA_WITHHELD_APPROVAL_STATUSES,
+} from './quota-credit';
 
 /** All targets set for a tenant in a given fiscal year. */
 export async function listTargets(
@@ -30,12 +34,20 @@ export type TargetAchievement = {
   revenueAchievedMinor: number;
   marginAchievedMinor: number;
   wonCount: number;
+  /** Won revenue in-window held back by the approval gate. */
+  pendingApprovalMinor: number;
+  pendingApprovalCount: number;
 };
 
 /**
- * Achieved revenue + margin per owner from Won AND manager-approved deals
- * whose close date falls in the fiscal-year window. Margin value is
- * amount × margin% (basis points), summed in minor units.
+ * Achieved revenue + margin per owner from won deals whose close date
+ * falls in the fiscal-year window and which earn quota credit — see
+ * `./quota-credit` for the rule and why `= 'approved'` was wrong.
+ * Margin value is amount × margin% (basis points), in minor units.
+ *
+ * Deals withheld by the gate are counted separately rather than
+ * dropped, so a rep looking at "₹0 achieved" can tell the difference
+ * between "you closed nothing" and "your manager hasn't clicked yet".
  */
 export async function targetAchievement(
   tenantId: string,
@@ -43,20 +55,30 @@ export async function targetAchievement(
   startMonth: number,
 ): Promise<TargetAchievement[]> {
   const { start, end } = fiscalYearRange(startMonth, fiscalYear);
+  // Both aggregates scan the same won-deals-in-window set; FILTER
+  // splits it so credited and withheld revenue come back in one pass
+  // and are guaranteed to sum to the period's total won revenue.
+  const credits = inArray(deals.approvalStatus, [
+    ...QUOTA_CREDIT_APPROVAL_STATUSES,
+  ]);
+  const withheld = inArray(deals.approvalStatus, [
+    ...QUOTA_WITHHELD_APPROVAL_STATUSES,
+  ]);
   const rows = await tenantTransaction(async (tx) =>
     tx
       .select({
         userId: deals.ownerId,
-        revenueAchievedMinor: sql<string>`COALESCE(SUM(${deals.amountMinor}), 0)`,
-        marginAchievedMinor: sql<string>`COALESCE(ROUND(SUM(${deals.amountMinor}::numeric * COALESCE(${deals.marginBps}, 0) / 10000)), 0)`,
-        wonCount: sql<string>`COUNT(*)`,
+        revenueAchievedMinor: sql<string>`COALESCE(SUM(${deals.amountMinor}) FILTER (WHERE ${credits}), 0)`,
+        marginAchievedMinor: sql<string>`COALESCE(ROUND(SUM(${deals.amountMinor}::numeric * COALESCE(${deals.marginBps}, 0) / 10000) FILTER (WHERE ${credits})), 0)`,
+        wonCount: sql<string>`COUNT(*) FILTER (WHERE ${credits})`,
+        pendingApprovalMinor: sql<string>`COALESCE(SUM(${deals.amountMinor}) FILTER (WHERE ${withheld}), 0)`,
+        pendingApprovalCount: sql<string>`COUNT(*) FILTER (WHERE ${withheld})`,
       })
       .from(deals)
       .where(
         and(
           eq(deals.tenantId, tenantId),
           eq(deals.stage, 'won'),
-          eq(deals.approvalStatus, 'approved'),
           isNotNull(deals.ownerId),
           isNull(deals.deletedAt),
           gte(deals.closedAt, start),
@@ -73,6 +95,8 @@ export async function targetAchievement(
       revenueAchievedMinor: Number(r.revenueAchievedMinor) || 0,
       marginAchievedMinor: Number(r.marginAchievedMinor) || 0,
       wonCount: Number(r.wonCount) || 0,
+      pendingApprovalMinor: Number(r.pendingApprovalMinor) || 0,
+      pendingApprovalCount: Number(r.pendingApprovalCount) || 0,
     }));
 }
 
@@ -85,6 +109,9 @@ export type TargetProgressRow = {
   marginTargetMinor: number;
   marginAchievedMinor: number;
   wonCount: number;
+  /** Won revenue held back by the approval gate — shown as a footnote. */
+  pendingApprovalMinor: number;
+  pendingApprovalCount: number;
 };
 
 /**
@@ -133,6 +160,8 @@ export async function getTargetProgress(
         marginTargetMinor: target?.marginTargetMinor ?? 0,
         marginAchievedMinor: ach?.marginAchievedMinor ?? 0,
         wonCount: ach?.wonCount ?? 0,
+        pendingApprovalMinor: ach?.pendingApprovalMinor ?? 0,
+        pendingApprovalCount: ach?.pendingApprovalCount ?? 0,
       };
     });
 

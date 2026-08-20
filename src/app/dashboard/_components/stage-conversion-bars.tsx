@@ -64,12 +64,31 @@ import { useStudioRegistration } from './edit-mode/edit-mode-context';
  *                     (organization_settings.stage_probabilities,
  *                     falling back to DEFAULT_STAGE_PROBABILITY).
  *                     A forward-looking constant, not an observation.
- *   · ratio chip    → this stage's value ÷ the previous stage's value.
- *                     On a snapshot this legitimately exceeds 100%
- *                     (Qualified can hold 11× Lead's revenue), so it
- *                     is labeled "vs prev stage" — calling it
- *                     "conversion" implied a ≤100% cohort rate and
- *                     produced the 1121% trust bug.
+ *   · ratio chip    → this stage's value ÷ the previous stage's value,
+ *                     labeled "SHARE OF STAGE ABOVE".
+ *
+ *                     It compares the SIZE of two stages right now. It
+ *                     is not a conversion rate and legitimately exceeds
+ *                     100% — CGB Solutions currently holds ₹92.1M in
+ *                     Qualified against ₹45.5M in Lead, so Qualified
+ *                     reads 202%. Nothing has converted at 202%; there
+ *                     is simply more money sitting one stage down.
+ *
+ *                     The label has been through two failures. First
+ *                     "conversion", which promised a ≤100% cohort rate
+ *                     and produced the 1121% trust bug. Then "vs prev
+ *                     stage", which said what it was measured AGAINST
+ *                     but never what it measured — leaving a reader to
+ *                     supply "conversion" from context anyway and land
+ *                     back in the same confusion. "Share of stage
+ *                     above" names the quantity itself, and a share
+ *                     obviously can exceed 100%.
+ *
+ *                     If you want a real, bounded lead→won conversion
+ *                     rate, that is a different query over
+ *                     `deal_stage_history` (cohort: deals that ever
+ *                     ENTERED each stage) and belongs in its own
+ *                     column, not this one.
  *
  * Metrics:
  *   revenue   → stage revenue (currency)
@@ -115,7 +134,7 @@ function ratioTitle(
   prevStage: Stage,
   metricLabel: string,
 ): string {
-  return `${LABELS[stage]} ${metricLabel} is ${pct.toLocaleString()}% of ${LABELS[prevStage]} ${metricLabel}. Snapshot ratio between two stages — not a cohort conversion rate, so it can exceed 100%.`;
+  return `${LABELS[stage]} currently holds ${pct.toLocaleString()}% of the ${metricLabel} sitting in ${LABELS[prevStage]}. This compares the size of two stages as they stand today — it is not a conversion rate, and a fatter stage below a thinner one legitimately reads above 100%.`;
 }
 const STAGE_TINT: Record<
   Stage,
@@ -391,10 +410,12 @@ function BarsBody({
         ) : null}
         {config.display.showConversionPct ? (
           <span
-            className="w-20 shrink-0 text-right"
-            title={`Each stage's ${metricLabel} as a share of the stage above it, on the current snapshot. Not a cohort conversion rate — it can exceed 100%.`}
+            className="w-20 shrink-0 text-right leading-[1.15]"
+            title={`Each stage's ${metricLabel} as a share of the stage above it, measured on the current snapshot. This is a size comparison, not a conversion rate — it can exceed 100% when a lower stage holds more than the one above it.`}
           >
-            vs prev stage
+            Share of
+            <br />
+            stage above
           </span>
         ) : null}
       </div>
@@ -1029,8 +1050,8 @@ function StageConversionStudio({
 
       <StudioSection label="Appearance">
         <StudioToggleRow
-          label="Vs prev stage"
-          hint="Each stage's value as a share of the one above it (snapshot ratio, can exceed 100%)"
+          label="Share of stage above"
+          hint="Each stage's value as a share of the one above it, on the current snapshot. A size comparison, not a conversion rate — it can exceed 100%."
           checked={config.display.showConversionPct}
           onChange={(v) => update('showConversionPct', v)}
         />

@@ -29,6 +29,18 @@ async function main() {
   const { buildWeekly, isoWeekStart, quantile } = await import(
     '../src/lib/dashboard/trend-shaping'
   );
+  const {
+    computeDelta,
+    computePointsDelta,
+    deltaDirection,
+    formatDelta,
+    ABSURD_PCT_THRESHOLD,
+  } = await import('../src/lib/dashboard/delta');
+  const { computeCoverage, formatCoverageRatio } = await import(
+    '../src/lib/dashboard/coverage'
+  );
+  const { scoreAttention, rankAttentionQueue, ATTENTION_WEIGHTS } =
+    await import('../src/lib/dashboard/attention-score');
 
   /* ---------------- shared range ---------------- */
 
@@ -125,6 +137,367 @@ async function main() {
     roundTrip.toString(),
   );
 
+  /* ---------------- delta formatting ---------------- */
+
+  // The money formatter the KPI strip would inject. Compact-ish, and
+  // deliberately unsigned — the chip owns the sign.
+  const money = (n: number) => `Rs${Math.round(n / 100).toLocaleString('en-IN')}`;
+
+  check(
+    'ordinary growth stays a percentage',
+    computeDelta(137, 100).kind === 'percent',
+    JSON.stringify(computeDelta(137, 100)),
+  );
+  check(
+    'ordinary growth rounds to one decimal under 10%',
+    formatDelta(computeDelta(105, 100), money) === '5.0%',
+    formatDelta(computeDelta(105, 100), money),
+  );
+  check(
+    'growth over 10% drops the decimal',
+    formatDelta(computeDelta(137, 100), money) === '37%',
+    formatDelta(computeDelta(137, 100), money),
+  );
+
+  // THE BUG: weighted pipeline read "+900%+" because the prior window
+  // was a rounding error, not because the business grew nine-fold.
+  const fromNothing = computeDelta(4_200_000_00, 0);
+  check(
+    'zero baseline never produces a percentage',
+    fromNothing.kind === 'new',
+    fromNothing.kind,
+  );
+  check(
+    'zero baseline reads as New this period',
+    formatDelta(fromNothing, money) === 'New this period',
+    formatDelta(fromNothing, money),
+  );
+  check(
+    'zero baseline still points up',
+    deltaDirection(fromNothing) === 'up',
+  );
+
+  const fromCrumbs = computeDelta(4_200_000_00, 1_000_00);
+  check(
+    'near-zero baseline falls back to the absolute change',
+    fromCrumbs.kind === 'absolute',
+    JSON.stringify(fromCrumbs),
+  );
+  check(
+    'absolute fallback renders a signed money figure, not a ratio',
+    formatDelta(fromCrumbs, money).startsWith('+Rs') &&
+      !formatDelta(fromCrumbs, money).includes('%'),
+    formatDelta(fromCrumbs, money),
+  );
+
+  // Nothing anywhere may render a percentage past the threshold.
+  const sweep: number[] = [];
+  for (let prior = 1; prior <= 2000; prior += 1) {
+    for (const current of [0, 1, 37, 999, 10_000, 5_000_000]) {
+      const d = computeDelta(current, prior);
+      if (d.kind === 'percent') sweep.push(Math.abs(d.pct));
+    }
+  }
+  check(
+    'no percentage delta anywhere exceeds the absurdity threshold',
+    sweep.every((v) => v <= ABSURD_PCT_THRESHOLD),
+    `max=${Math.max(...sweep).toFixed(1)}% over ${sweep.length} combinations`,
+  );
+  check(
+    'the threshold is well below the 900% that triggered this fix',
+    ABSURD_PCT_THRESHOLD < 900,
+    String(ABSURD_PCT_THRESHOLD),
+  );
+
+  check(
+    '0 → 0 is flat, not New',
+    computeDelta(0, 0).kind === 'flat',
+    computeDelta(0, 0).kind,
+  );
+  check(
+    'collapsing to zero is a legitimate -100%',
+    formatDelta(computeDelta(0, 500), money) === '100%' &&
+      deltaDirection(computeDelta(0, 500)) === 'down',
+    formatDelta(computeDelta(0, 500), money),
+  );
+  check(
+    'NaN input degrades to n/a rather than rendering',
+    computeDelta(Number.NaN, 100).kind === 'none' &&
+      computeDelta(100, Number.NaN).kind === 'none',
+  );
+  check(
+    'a sub-epsilon wobble reads flat',
+    computeDelta(100.01, 100).kind === 'flat',
+    JSON.stringify(computeDelta(100.01, 100)),
+  );
+
+  // Rates use points, which are bounded by construction and must never
+  // be routed through the percentage path.
+  check(
+    'win rate 40% → 44% is +4 points',
+    formatDelta(computePointsDelta(0.44, 0.4), money) === '4.0 pts',
+    formatDelta(computePointsDelta(0.44, 0.4), money),
+  );
+  check(
+    'a rate rising from zero is points, never New',
+    computePointsDelta(0.55, 0).kind === 'points',
+    computePointsDelta(0.55, 0).kind,
+  );
+  check(
+    'points are bounded to +/-100 across the whole rate domain',
+    [0, 0.01, 0.5, 0.99, 1].every((a) =>
+      [0, 0.01, 0.5, 0.99, 1].every((b) => {
+        const d = computePointsDelta(a, b);
+        return d.kind !== 'points' || Math.abs(d.points) <= 100;
+      }),
+    ),
+  );
+
+  /* ---------------- coverage ratio ---------------- */
+
+  // CGB Solutions, as the DB stands: ₹29,14,67,000 open pipeline,
+  // ₹9,00,00,000 target, ₹3,16,53,123 credited. Gap ₹5,83,46,877 →
+  // just under 5x, comfortably healthy.
+  // Minor units (paise) straight out of the DB, not rupees.
+  const cgb = computeCoverage({
+    openPipelineMinor: 29_146_700_000, //  Rs 29,14,67,000 open
+    targetMinor: 9_000_000_000, //          Rs  9,00,00,000 target
+    achievedMinor: 3_165_312_300, //        Rs  3,16,53,123 credited
+  });
+  check(
+    'real CGB figures land in the healthy band',
+    cgb.state === 'covered' && cgb.band === 'healthy',
+    cgb.state === 'covered' ? `${cgb.ratio.toFixed(2)}x` : cgb.state,
+  );
+
+  check(
+    'no target → no ratio (never Infinity, never 0)',
+    computeCoverage({
+      openPipelineMinor: 5_000_00,
+      targetMinor: null,
+      achievedMinor: 0,
+    }).state === 'no-target',
+  );
+  check(
+    'a zero target counts as no target',
+    computeCoverage({
+      openPipelineMinor: 5_000_00,
+      targetMinor: 0,
+      achievedMinor: 0,
+    }).state === 'no-target',
+  );
+
+  // Dividing by a closed gap is the crash this state exists to avoid.
+  const exactlyMet = computeCoverage({
+    openPipelineMinor: 1_000_00,
+    targetMinor: 500_00,
+    achievedMinor: 500_00,
+  });
+  check('quota exactly met is its own state', exactlyMet.state === 'met');
+  const overAttained = computeCoverage({
+    openPipelineMinor: 1_000_00,
+    targetMinor: 500_00,
+    achievedMinor: 900_00,
+  });
+  check(
+    'over-attainment reads Met, not a negative gap',
+    overAttained.state === 'met',
+    overAttained.state,
+  );
+
+  const bandAt = (ratio: number) => {
+    const c = computeCoverage({
+      openPipelineMinor: Math.round(ratio * 100_000_00),
+      targetMinor: 100_000_00,
+      achievedMinor: 0,
+    });
+    return c.state === 'covered' ? c.band : c.state;
+  };
+  check('3.0x is healthy (boundary inclusive)', bandAt(3) === 'healthy', String(bandAt(3)));
+  check('2.9x is thin', bandAt(2.9) === 'thin', String(bandAt(2.9)));
+  check('2.0x is thin (boundary inclusive)', bandAt(2) === 'thin', String(bandAt(2)));
+  check('1.9x is at-risk', bandAt(1.9) === 'at-risk', String(bandAt(1.9)));
+  check('an empty pipeline against a real gap is at-risk', bandAt(0) === 'at-risk', String(bandAt(0)));
+
+  const thinCoverage = computeCoverage({
+    openPipelineMinor: 250_000_00,
+    targetMinor: 100_000_00,
+    achievedMinor: 0,
+  });
+  check(
+    'healthyPipelineMinor states what 3x coverage would require',
+    thinCoverage.state === 'covered' &&
+      thinCoverage.healthyPipelineMinor === 300_000_00,
+    thinCoverage.state === 'covered'
+      ? String(thinCoverage.healthyPipelineMinor)
+      : thinCoverage.state,
+  );
+  check(
+    'ratio renders to one decimal',
+    formatCoverageRatio(4.987) === '5.0x' && formatCoverageRatio(1.24) === '1.2x',
+    `${formatCoverageRatio(4.987)} / ${formatCoverageRatio(1.24)}`,
+  );
+
+  /* ---------------- attention scoring ---------------- */
+
+  check(
+    'weights sum to 1, so the composite is always 0-1',
+    Math.abs(
+      Object.values(ATTENTION_WEIGHTS).reduce((a, b) => a + b, 0) - 1,
+    ) < 1e-9,
+    String(Object.values(ATTENTION_WEIGHTS).reduce((a, b) => a + b, 0)),
+  );
+
+  const MAX = 200_000_000_00; // Rs 20 crore, the queue's largest deal
+
+  // THE BUG THIS REPLACES: a worthless untouched lead outranking a
+  // large deal that just slid backwards, purely because it is older.
+  const junkLead = {
+    dealId: 'junk',
+    daysSinceActivity: 300,
+    amountMinor: 0,
+    daysSinceRegression: null,
+    hasNextStep: false,
+    hasCloseDate: false,
+  };
+  const bigSlipping = {
+    dealId: 'big',
+    daysSinceActivity: 12,
+    amountMinor: MAX,
+    daysSinceRegression: 3,
+    hasNextStep: true,
+    hasCloseDate: true,
+  };
+  const ranked = rankAttentionQueue([junkLead, bigSlipping]);
+  check(
+    'a large regressing deal outranks an ancient worthless lead',
+    ranked[0]!.dealId === 'big',
+    ranked.map((r) => `${r.dealId}=${r.attention.score.toFixed(3)}`).join(' '),
+  );
+  // Value outweighs regression by design, so `value` is legitimately
+  // the top factor here — but the backwards move is the most alarming
+  // thing about this deal and must not be dropped from the line.
+  check(
+    'a strong regression is named even when value is the top factor',
+    ranked[0]!.attention.topFactor === 'value' &&
+      ranked[0]!.attention.reason.includes('moved backwards'),
+    ranked[0]!.attention.reason,
+  );
+  const purelyRegressed = scoreAttention(
+    {
+      daysSinceActivity: 2,
+      amountMinor: 1,
+      daysSinceRegression: 1,
+      hasNextStep: true,
+      hasCloseDate: true,
+    },
+    MAX,
+  );
+  check(
+    'regression leads the line when it IS the top factor',
+    purelyRegressed.topFactor === 'regressed' &&
+      purelyRegressed.reason.startsWith('Moved backwards'),
+    purelyRegressed.reason,
+  );
+  check(
+    'the junk lead still explains itself',
+    ranked[1]!.attention.reason.length > 0 &&
+      ranked[1]!.attention.reason.includes('no next step or close date'),
+    ranked[1]!.attention.reason,
+  );
+
+  // Every composite must stay inside 0-1 across the input space.
+  const scores: number[] = [];
+  for (const days of [null, 0, 30, 120, 5000]) {
+    for (const amt of [0, 1, 50_000_00, MAX]) {
+      for (const reg of [null, 0, 45, 400]) {
+        for (const ns of [true, false]) {
+          for (const cd of [true, false]) {
+            scores.push(
+              scoreAttention(
+                {
+                  daysSinceActivity: days,
+                  amountMinor: amt,
+                  daysSinceRegression: reg,
+                  hasNextStep: ns,
+                  hasCloseDate: cd,
+                },
+                MAX,
+              ).score,
+            );
+          }
+        }
+      }
+    }
+  }
+  check(
+    'composite stays within 0-1 across the whole input space',
+    scores.every((v) => v >= 0 && v <= 1),
+    `${scores.length} combinations, max=${Math.max(...scores).toFixed(3)}`,
+  );
+
+  const worst = scoreAttention(
+    {
+      daysSinceActivity: 5000,
+      amountMinor: MAX,
+      daysSinceRegression: 0,
+      hasNextStep: false,
+      hasCloseDate: false,
+    },
+    MAX,
+  );
+  check('the worst possible deal scores 1.0', Math.abs(worst.score - 1) < 1e-9, worst.score.toFixed(4));
+
+  const best = scoreAttention(
+    {
+      daysSinceActivity: 0,
+      amountMinor: 0,
+      daysSinceRegression: null,
+      hasNextStep: true,
+      hasCloseDate: true,
+    },
+    MAX,
+  );
+  check('a healthy deal scores 0', best.score === 0, best.score.toFixed(4));
+
+  check(
+    'never-logged activity is treated as fully stalled, not fresh',
+    scoreAttention({ ...junkLead, daysSinceActivity: null }, MAX).factors
+      .stalled === 1,
+  );
+  check(
+    'a year-old regression has decayed to nothing',
+    scoreAttention({ ...bigSlipping, daysSinceRegression: 400 }, MAX).factors
+      .regressed === 0,
+  );
+
+  // Log scaling: a mid-size deal must stay discriminable next to a
+  // 20-crore outlier. Linear scaling would put this at 0.0025.
+  const midValue = scoreAttention(
+    {
+      daysSinceActivity: 0,
+      amountMinor: 50_000_00,
+      daysSinceRegression: null,
+      hasNextStep: true,
+      hasCloseDate: true,
+    },
+    MAX,
+  ).factors.value;
+  check(
+    'log scaling keeps mid-size deals discriminable beside an outlier',
+    midValue > 0.5 && midValue < 1,
+    midValue.toFixed(3),
+  );
+
+  // Determinism: identical inputs in a different order must produce the
+  // same ranking and the same reasons.
+  const shuffled = rankAttentionQueue([bigSlipping, junkLead]);
+  check(
+    'ranking is order-independent',
+    shuffled.map((r) => r.dealId).join() === ranked.map((r) => r.dealId).join(),
+    shuffled.map((r) => r.dealId).join(),
+  );
+
   /* ---------------- weekly bucketing ---------------- */
 
   check('ISO week start is Monday', isoWeekStart('2026-07-02') === '2026-06-29');
@@ -151,7 +524,7 @@ async function main() {
     flat.points[0]!.newPipeline === 140,
     String(flat.points[0]!.newPipeline),
   );
-  check('no outlier → no cap', flat.pipelineCap === null && flat.notices.length === 0);
+  check('no outlier → no cap', flat.pipelineCap === null && flat.devNotices.length === 0);
 
   // Cumulative mode must take the week's LAST value, not the sum.
   const cumulative = buildWeekly(
@@ -196,10 +569,20 @@ async function main() {
       cappedWeeks[0]!.newPipeline >= 9_500_000,
     `real=${cappedWeeks[0]!.newPipeline} plotted=${cappedWeeks[0]!.newPipelinePlot}`,
   );
+  // Capping is surfaced to the user IN the chart — the capped bar draws
+  // a torn top edge and its tooltip states the figures are real. The
+  // string below is a dev-console diagnostic only; A1 removed the amber
+  // banner that used to render it verbatim on the dashboard.
   check(
-    'user is told the axis was capped (no silent truncation)',
-    spiky.notices.length > 0,
-    spiky.notices.join(' '),
+    'axis capping is recorded as a dev diagnostic (never rendered)',
+    spiky.devNotices.length > 0,
+    spiky.devNotices.join(' '),
+  );
+  check(
+    'every capped week is individually flagged for its in-chart marker',
+    spiky.points.every(
+      (p) => p.newPipelineCapped === (spiky.pipelineCap !== null && p.newPipeline > spiky.pipelineCap),
+    ),
   );
   // The whole point: won/lost live on their own axis, so the spike
   // cannot compress them. Their scale must stay in their own range.

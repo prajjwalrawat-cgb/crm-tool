@@ -151,6 +151,7 @@ export function DealHighlightsCard({
                   company={d.companyName}
                   meta={`${ownerOf(d.ownerId)} · won ${shortDate(d.closedAt)}`}
                   amount={formatCurrency(d.amountMinor, d.currency)}
+                  amountMinor={d.amountMinor}
                   badge={<StageBadge stage="won" />}
                 />
               ))}
@@ -171,6 +172,7 @@ export function DealHighlightsCard({
                   company={d.companyName}
                   meta={`${ownerOf(d.ownerId)} · moved ${shortDate(d.changedAt)}`}
                   amount={formatCurrency(d.amountMinor, d.currency)}
+                  amountMinor={d.amountMinor}
                   badge={
                     <span className="inline-flex shrink-0 items-center gap-1 text-[9.5px] font-medium uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
                       <StageBadge stage={d.fromStage} />
@@ -197,6 +199,7 @@ export function DealHighlightsCard({
                   company={d.companyName}
                   meta={`${ownerOf(d.ownerId)} · created ${shortDate(d.createdAt)}`}
                   amount={formatCurrency(d.amountMinor, d.currency)}
+                  amountMinor={d.amountMinor}
                   badge={<StageBadge stage={d.stage} />}
                 />
               ))}
@@ -220,6 +223,7 @@ export function DealHighlightsCard({
                   company={d.companyName}
                   meta={`${ownerOf(d.ownerId)} · silent ${d.daysSinceActivity}d`}
                   amount={formatCurrency(d.amountMinor, d.currency)}
+                  amountMinor={d.amountMinor}
                   badge={<StageBadge stage={d.stage} />}
                   tone="warn"
                 />
@@ -248,6 +252,7 @@ export function DealHighlightsCard({
                       : `closes in ${d.daysUntilClose}d`
                   }`}
                   amount={formatCurrency(d.amountMinor, d.currency)}
+                  amountMinor={d.amountMinor}
                   badge={<StageBadge stage={d.stage} />}
                 />
               ))}
@@ -279,6 +284,7 @@ function Row({
   company,
   meta,
   amount,
+  amountMinor,
   badge,
   tone = 'default',
 }: {
@@ -287,6 +293,8 @@ function Row({
   company: string | null;
   meta: string;
   amount: string;
+  /** Raw figure, so the row can tell unset apart from zero. */
+  amountMinor: number;
   badge: React.ReactNode;
   tone?: 'default' | 'warn';
 }) {
@@ -318,9 +326,22 @@ function Row({
             {meta}
           </span>
         </span>
-        <span className="shrink-0 font-mono text-[11.5px] tabular-nums text-slate-700 dark:text-[#A1A1AA]">
-          {amount}
-        </span>
+        {/* `deals.amount_minor` is NOT NULL DEFAULT 0, so a deal
+            nobody priced is indistinguishable from a free one. Say
+            "not set" rather than assert a value the user never
+            entered — the same rule the Executive queue follows. */}
+        {amountMinor > 0 ? (
+          <span className="shrink-0 font-mono text-[11.5px] tabular-nums text-slate-700 dark:text-[#A1A1AA]">
+            {amount}
+          </span>
+        ) : (
+          <span
+            title="No amount has been entered on this deal."
+            className="shrink-0 rounded-full border border-dashed border-slate-300 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-slate-400 dark:border-[#3F3F46] dark:text-[#71717A]"
+          >
+            Not set
+          </span>
+        )}
       </Link>
     </li>
   );
