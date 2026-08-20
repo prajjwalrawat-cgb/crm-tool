@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { after } from 'next/server';
+
 import { complete } from '@/lib/ai/complete';
 import { aiLive, aiModeLabel } from '@/lib/ai/config';
 import { hashContent } from '@/lib/ai/embed';
@@ -74,6 +76,38 @@ import {
 
 type ParsedInsight<T> = { state: InsightState; content: T | null; generatedAt: Date | null };
 
+/**
+ * Hand a regen to the runtime so it is allowed to finish AFTER the response
+ * is flushed, instead of being left as a bare floating promise.
+ *
+ * Why this matters on a serverless host: an un-awaited promise is invisible
+ * to the platform. Once the response is sent the instance may be frozen or
+ * reclaimed mid-flight, so the regen never reaches `writeInsight`. The cache
+ * row then stays stale, which means the NEXT render takes the same
+ * `state !== 'cached'` branch and fires another regen — a loop that re-pays
+ * the model call on every single page view and never converges. `after()`
+ * makes the work part of the request's lifecycle, so it actually completes,
+ * populates the cache, and stops re-firing.
+ *
+ * `after` must be called inside a request scope. Insight getters are also
+ * reachable from scripts, selftests and Inngest steps, where it throws — so
+ * fall back to the previous fire-and-forget behaviour there. Those contexts
+ * are long-lived processes that aren't frozen mid-promise, so the fallback
+ * is safe.
+ */
+function scheduleRegen(label: string, run: () => Promise<unknown>): void {
+  const guarded = () =>
+    run().catch((err) =>
+      // Swallow — `complete()` already captured the failure in the audit row.
+      console.error(`[intelligence] ${label} regen failed`, err),
+    );
+  try {
+    after(guarded);
+  } catch {
+    void guarded();
+  }
+}
+
 export async function getDailyExecInsight(
   tenantId: string,
   actorUserId: string | null,
@@ -86,13 +120,10 @@ export async function getDailyExecInsight(
     return parseCached<DailyExecSummary>(cache);
   }
 
-  // Fire-and-forget regen. We don't await it — the page gets stale-or-null
-  // and a realtime event will swap content when fresh data is ready.
-  void regenDailyExec({ tenantId, actorUserId, isoDate, source }).catch(
-    (err) => {
-      // Swallow — the audit row already captured the failure via complete().
-      console.error('[intelligence] daily-exec regen failed', err);
-    },
+  // Deferred regen. We don't await it — the page gets stale-or-null and a
+  // realtime event will swap content when fresh data is ready.
+  scheduleRegen('daily-exec', () =>
+    regenDailyExec({ tenantId, actorUserId, isoDate, source }),
   );
 
   return parseCached<DailyExecSummary>(cache);
@@ -110,8 +141,8 @@ export async function getDealSummaryInsight(
   const { source } = built;
   const cache = await readInsight(tenantId, 'deal-summary', dealId, source);
   if (cache.state === 'cached') return parseCached<DealAiSummary>(cache);
-  void regenDealSummary({ tenantId, actorUserId, dealId, source }).catch(
-    (err) => console.error('[intelligence] deal-summary regen failed', err),
+  scheduleRegen('deal-summary', () =>
+    regenDealSummary({ tenantId, actorUserId, dealId, source }),
   );
   return parseCached<DealAiSummary>(cache);
 }
@@ -133,8 +164,8 @@ export async function getThreadSummaryInsight(
   const { source } = built;
   const cache = await readInsight(tenantId, 'thread-summary', threadId, source);
   if (cache.state === 'cached') return parseCached<ThreadAiSummary>(cache);
-  void regenThreadSummary({ tenantId, actorUserId, threadId, source }).catch(
-    (err) => console.error('[intelligence] thread-summary regen failed', err),
+  scheduleRegen('thread-summary', () =>
+    regenThreadSummary({ tenantId, actorUserId, threadId, source }),
   );
   return parseCached<ThreadAiSummary>(cache);
 }
@@ -147,8 +178,8 @@ export async function getRiskFlagInsight(
   const cache = await readInsight(tenantId, 'risk-flag-set', 'global', source);
   if (cache.state === 'cached')
     return parseCached<{ flags: RiskFlag[] }>(cache);
-  void regenRiskFlags({ tenantId, actorUserId, candidates, source }).catch(
-    (err) => console.error('[intelligence] risk-flag regen failed', err),
+  scheduleRegen('risk-flag', () =>
+    regenRiskFlags({ tenantId, actorUserId, candidates, source }),
   );
   return parseCached<{ flags: RiskFlag[] }>(cache);
 }
@@ -166,9 +197,8 @@ export async function getRecommendationInsight(
   );
   if (cache.state === 'cached')
     return parseCached<{ recommendations: Recommendation[] }>(cache);
-  void regenRecommendations({ tenantId, actorUserId, candidates, source }).catch(
-    (err) =>
-      console.error('[intelligence] recommendation regen failed', err),
+  scheduleRegen('recommendation', () =>
+    regenRecommendations({ tenantId, actorUserId, candidates, source }),
   );
   return parseCached<{ recommendations: Recommendation[] }>(cache);
 }
@@ -186,8 +216,8 @@ export async function getPipelineSummaryInsight(
   );
   if (cache.state === 'cached')
     return parseCached<PipelineSummary>(cache);
-  void regenPipelineSummary({ tenantId, actorUserId, source }).catch((err) =>
-    console.error('[intelligence] pipeline-summary regen failed', err),
+  scheduleRegen('pipeline-summary', () =>
+    regenPipelineSummary({ tenantId, actorUserId, source }),
   );
   return parseCached<PipelineSummary>(cache);
 }

@@ -74,7 +74,9 @@ export async function trackPresence(
 export async function untrackPresence(
   tenantId: string,
   userId: string,
+  options: { notify?: boolean } = {},
 ): Promise<void> {
+  const { notify = true } = options;
   const tenantMap = presence.get(tenantId);
   if (!tenantMap) return;
   const entry = tenantMap.get(userId);
@@ -87,7 +89,13 @@ export async function untrackPresence(
   }
   if (tenantMap.size === 0) presence.delete(tenantId);
 
-  await broadcastPresence(tenantId);
+  // `notify: false` removes the user from the registry WITHOUT broadcasting
+  // a "left" snapshot. Used when the SSE stream is torn down by its own
+  // lifetime cap (not a real disconnect): the client's EventSource reconnects
+  // within seconds and re-tracks, so suppressing the broadcast avoids other
+  // members seeing the user flicker offline→online every cycle. The reconnect's
+  // trackPresence re-broadcasts an up-to-date snapshot.
+  if (notify) await broadcastPresence(tenantId);
 }
 
 /** Read-only snapshot for the initial SSE write so reconnecting clients get state immediately. */

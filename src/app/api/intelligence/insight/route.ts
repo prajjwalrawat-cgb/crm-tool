@@ -16,6 +16,9 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Ceiling so an abandoned insight request can't hold an instance open
+// indefinitely. Vercel-only directive — ignored by `next dev`.
+export const maxDuration = 60;
 
 /**
  * Tiny read endpoint for one insight by (type, id). The live-refresh

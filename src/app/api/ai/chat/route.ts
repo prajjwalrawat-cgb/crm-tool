@@ -26,6 +26,10 @@ import { requireTenant } from '@/lib/tenant';
 // modules and the stream shape we emit holds open a long-lived pipe.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Ceiling for a single streamed completion so an abandoned request can't
+// hold an instance open indefinitely (backstop; normal streams finish well
+// under this). Vercel-only directive — ignored by `next dev`.
+export const maxDuration = 60;
 
 const MAX_QUESTION_LENGTH = 2000;
 const MAX_HISTORY_TURNS = 12;
