@@ -200,6 +200,18 @@ export default async function ExecutiveDashboardPage({
     const topRep = activeReps.slice(0, 3);
     const dormantRepCount = reps.rows.length - activeReps.length;
 
+    // Stages an org never uses (Hold, most commonly) held a full KPI
+    // grid slot each just to display a 0. A tile is a claim that a
+    // number is worth reading; "Hold: 0" in a workspace that has
+    // never parked a deal is not. Occupied stages keep their tile,
+    // empty ones collapse to one footnote line — still stated, so
+    // nobody wonders whether the stage exists, just not at tile size.
+    const openStages = pipeline.rows.filter(
+      (r) => r.stage !== 'won' && r.stage !== 'lost',
+    );
+    const occupiedStages = openStages.filter((r) => r.count > 0);
+    const emptyStages = openStages.filter((r) => r.count === 0);
+
     const emailConfigured = email.extras?.hasEverSent ?? false;
     const closedInWindow = winLoss.extras?.totalClosed ?? 0;
     const forecastDeals = forecast.extras?.totalDeals ?? 0;
@@ -364,25 +376,32 @@ export default async function ExecutiveDashboardPage({
                 <MetricCard
                   label="Pipeline value"
                   value={money(totalPipelineMinor)}
-                  hint={`Across ${pipeline.rows
-                    .filter((r) => r.stage !== 'won' && r.stage !== 'lost')
-                    .reduce((s, r) => s + r.count, 0)} active deals`}
+                  hint={`Across ${openStages.reduce((s, r) => s + r.count, 0)} active deals`}
                   tone="info"
                 />
               </DashboardGridCell>
-              {pipeline.rows
-                .filter((r) => r.stage !== 'won' && r.stage !== 'lost')
-                .map((row) => (
-                  <DashboardGridCell key={row.stage} span={4}>
-                    <MetricCard
-                      label={row.stageLabel}
-                      value={formatNumber(row.count)}
-                      hint={`${money(row.totalAmountMinor)} in this stage`}
-                      tone="neutral"
-                    />
-                  </DashboardGridCell>
-                ))}
+              {occupiedStages.map((row) => (
+                <DashboardGridCell key={row.stage} span={4}>
+                  <MetricCard
+                    label={row.stageLabel}
+                    value={formatNumber(row.count)}
+                    hint={
+                      row.totalAmountMinor > 0
+                        ? `${money(row.totalAmountMinor)} in this stage`
+                        : `${row.count === 1 ? 'The deal here has' : 'None of these deals have'} an amount recorded`
+                    }
+                    tone="neutral"
+                  />
+                </DashboardGridCell>
+              ))}
             </DashboardGrid>
+            {emptyStages.length > 0 ? (
+              <p className="mt-2.5 text-[10.5px] text-slate-400 dark:text-[#71717A]">
+                No open deals in{' '}
+                {emptyStages.map((r) => r.stageLabel).join(', ')} — collapsed
+                from the grid rather than shown as empty tiles.
+              </p>
+            ) : null}
           </ExecutiveSection>
 
           <DashboardGrid>
@@ -551,9 +570,7 @@ export default async function ExecutiveDashboardPage({
                 <MetricCard
                   label="Active deals"
                   value={formatNumber(
-                    pipeline.rows
-                      .filter((r) => r.stage !== 'won' && r.stage !== 'lost')
-                      .reduce((s, r) => s + r.count, 0),
+                    openStages.reduce((s, r) => s + r.count, 0),
                   )}
                   hint="Currently in flight · live count"
                   tone="neutral"
