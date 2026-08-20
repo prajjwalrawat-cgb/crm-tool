@@ -5,6 +5,14 @@ import {
   formatTenantCurrency,
   type TenantCurrencyContext,
 } from '@/lib/currency/format';
+import {
+  computeDelta,
+  computePointsDelta,
+  deltaDirection,
+  describeDelta,
+  formatDelta,
+  type Delta,
+} from '@/lib/dashboard/delta';
 import type { DashboardKpis } from '@/lib/dashboard/kpis';
 import type { DashboardRange } from '@/lib/dashboard/range';
 import { fiscalYearLabel } from '@/lib/targets/fiscal';
@@ -22,6 +30,11 @@ import { cn } from '@/lib/utils';
  *   · `points`  — absolute percentage-point change, for rates. A win
  *                 rate moving 40% → 44% is "+4 pts", never "+10%".
  *
+ * Both go through `lib/dashboard/delta`, which also decides when a
+ * percentage is the WRONG answer: a zero prior window renders "New
+ * this period" and a near-zero one renders the absolute change, so
+ * no tile can produce another "+900%+". See that module for the rule.
+ *
  * Direction ≠ good. Avg sales cycle shrinking is a win, so tiles carry
  * an explicit `higherIsBetter` flag that drives the colour; the arrow
  * always follows the raw direction.
@@ -31,14 +44,18 @@ import { cn } from '@/lib/utils';
  * which is a different and wrong statement.
  */
 
-type DeltaKind = 'percent' | 'points' | 'none';
-
 type Tile = {
   key: string;
   label: string;
   value: string;
   sub: string;
-  delta: { kind: DeltaKind; raw: number };
+  delta: Delta;
+  /**
+   * Renders a raw change in this tile's own units, for the
+   * `absolute` delta kind. Receives a positive magnitude — the chip
+   * supplies the sign.
+   */
+  formatChange: (magnitude: number) => string;
   higherIsBetter: boolean;
   tint: 'indigo' | 'violet' | 'emerald' | 'amber' | 'sky' | 'slate';
   /** Full-precision figure for the title tooltip. */
@@ -51,6 +68,13 @@ type Tile = {
    */
   footnote?: string;
 };
+
+/**
+ * Hard ceiling on the quota attainment FIGURE itself (not its
+ * delta). A typo'd target of ₹1 would otherwise render a six-digit
+ * percentage; the exact value stays in the tooltip.
+ */
+const PCT_DISPLAY_CAP = 999;
 
 export function KpiStrip({
   kpis,
@@ -79,10 +103,11 @@ export function KpiStrip({
       label: 'Total pipeline',
       value: money(kpis.pipelineMinor.value),
       sub: `vs ${money(kpis.pipelineMinor.priorValue)} at period start`,
-      delta: {
-        kind: 'percent',
-        raw: pctChange(kpis.pipelineMinor.value, kpis.pipelineMinor.priorValue),
-      },
+      delta: computeDelta(
+        kpis.pipelineMinor.value,
+        kpis.pipelineMinor.priorValue,
+      ),
+      formatChange: money,
       higherIsBetter: true,
       tint: 'indigo',
       title: `Open deal value: ${exact(kpis.pipelineMinor.value)}`,
@@ -92,13 +117,11 @@ export function KpiStrip({
       label: 'Weighted pipeline',
       value: money(kpis.weightedPipelineMinor.value),
       sub: 'Σ amount × stage win probability',
-      delta: {
-        kind: 'percent',
-        raw: pctChange(
-          kpis.weightedPipelineMinor.value,
-          kpis.weightedPipelineMinor.priorValue,
-        ),
-      },
+      delta: computeDelta(
+        kpis.weightedPipelineMinor.value,
+        kpis.weightedPipelineMinor.priorValue,
+      ),
+      formatChange: money,
       higherIsBetter: true,
       tint: 'violet',
       title: `Weighted value: ${exact(kpis.weightedPipelineMinor.value)}`,
@@ -111,10 +134,8 @@ export function KpiStrip({
         closed === 0
           ? 'no deals closed in period'
           : `${kpis.wonCount.value} won · ${kpis.lostCount.value} lost`,
-      delta: {
-        kind: 'points',
-        raw: (kpis.winRate.value - kpis.winRate.priorValue) * 100,
-      },
+      delta: computePointsDelta(kpis.winRate.value, kpis.winRate.priorValue),
+      formatChange: (n) => `${n.toFixed(1)} pts`,
       higherIsBetter: true,
       tint: 'emerald',
       title: `${(kpis.winRate.value * 100).toFixed(1)}% of closed deals were won`,
@@ -124,13 +145,16 @@ export function KpiStrip({
       label: 'Avg deal size',
       value: kpis.wonCount.value === 0 ? '—' : money(kpis.avgWonDealMinor.value),
       sub: kpis.wonCount.value === 0 ? 'no wins in period' : 'won deals in period',
-      delta: {
-        kind: kpis.wonCount.value === 0 ? 'none' : 'percent',
-        raw: pctChange(
-          kpis.avgWonDealMinor.value,
-          kpis.avgWonDealMinor.priorValue,
-        ),
-      },
+      // No wins in the window means there IS no average — not an
+      // average of zero — so there is nothing to compare either.
+      delta:
+        kpis.wonCount.value === 0
+          ? { kind: 'none' }
+          : computeDelta(
+              kpis.avgWonDealMinor.value,
+              kpis.avgWonDealMinor.priorValue,
+            ),
+      formatChange: money,
       higherIsBetter: true,
       tint: 'sky',
       title:
@@ -143,10 +167,11 @@ export function KpiStrip({
       label: 'Avg sales cycle',
       value: kpis.avgCycleDays.value === 0 ? '—' : `${kpis.avgCycleDays.value}d`,
       sub: 'created → won',
-      delta: {
-        kind: kpis.avgCycleDays.value === 0 ? 'none' : 'percent',
-        raw: pctChange(kpis.avgCycleDays.value, kpis.avgCycleDays.priorValue),
-      },
+      delta:
+        kpis.avgCycleDays.value === 0
+          ? { kind: 'none' }
+          : computeDelta(kpis.avgCycleDays.value, kpis.avgCycleDays.priorValue),
+      formatChange: (n) => `${n.toFixed(1)}d`,
       // Faster is better — a negative delta is green here.
       higherIsBetter: false,
       tint: 'amber',
@@ -179,10 +204,8 @@ export function KpiStrip({
           ? `${PCT_DISPLAY_CAP}%+`
           : `${attainmentPct}%`,
       sub: `${money(kpis.quota.achievedMinor)} of ${money(kpis.quota.targetMinor)}`,
-      delta: {
-        kind: 'points',
-        raw: (attainment - priorAttainment) * 100,
-      },
+      delta: computePointsDelta(attainment, priorAttainment),
+      formatChange: (n) => `${n.toFixed(1)} pts`,
       higherIsBetter: true,
       tint: 'slate',
       title: [
@@ -241,6 +264,7 @@ function KpiTile({ tile, priorLabel }: { tile: Tile; priorLabel: string }) {
         </span>
         <DeltaChip
           delta={tile.delta}
+          formatChange={tile.formatChange}
           higherIsBetter={tile.higherIsBetter}
           priorLabel={priorLabel}
         />
@@ -257,23 +281,25 @@ function KpiTile({ tile, priorLabel }: { tile: Tile; priorLabel: string }) {
   );
 }
 
-/** Hard ceiling on any rendered percentage — see the trust checklist. */
-const PCT_DISPLAY_CAP = 999;
-
 function DeltaChip({
   delta,
+  formatChange,
   higherIsBetter,
   priorLabel,
 }: {
-  delta: { kind: DeltaKind; raw: number };
+  delta: Delta;
+  formatChange: (magnitude: number) => string;
   higherIsBetter: boolean;
   priorLabel: string;
 }) {
-  if (delta.kind === 'none' || !Number.isFinite(delta.raw)) {
+  const direction = deltaDirection(delta);
+  const title = describeDelta(delta, priorLabel, formatChange);
+
+  if (delta.kind === 'none') {
     return (
       <span
         className="inline-flex items-center gap-0.5 rounded px-1 py-px text-[10px] font-medium text-slate-400 dark:text-[#71717A]"
-        title="No comparable figure in the prior period."
+        title={title}
       >
         <Minus className="h-2.5 w-2.5" aria-hidden />
         n/a
@@ -281,29 +307,20 @@ function DeltaChip({
     );
   }
 
-  const rounded = Math.round(delta.raw * 10) / 10;
-  const flat = Math.abs(rounded) < 0.05;
-  const up = rounded > 0;
-  const good = flat ? null : up === higherIsBetter;
-
-  const magnitude = Math.abs(rounded);
-  const capped = magnitude > PCT_DISPLAY_CAP;
-  const shown = capped
-    ? `${PCT_DISPLAY_CAP}%+`
-    : delta.kind === 'points'
-      ? `${magnitude.toFixed(1)} pts`
-      : `${magnitude.toFixed(magnitude < 10 ? 1 : 0)}%`;
-
-  const exactText =
-    delta.kind === 'points'
-      ? `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)} percentage points vs the prior ${priorLabel.toLowerCase()}`
-      : `${rounded > 0 ? '+' : ''}${rounded.toLocaleString()}% vs the prior ${priorLabel.toLowerCase()}`;
+  // "New this period" carries no direction worth colouring good or bad
+  // — a metric appearing out of nothing is a fact, not a verdict. Same
+  // for flat.
+  const good =
+    delta.kind === 'new' || direction === null
+      ? null
+      : (direction === 'up') === higherIsBetter;
 
   return (
     <span
-      title={exactText}
+      title={title}
       className={cn(
         'inline-flex items-center gap-0.5 rounded px-1 py-px text-[10px] font-semibold tabular-nums',
+        delta.kind === 'new' && 'font-medium normal-case tracking-tight',
         good === null
           ? 'bg-slate-50 text-slate-500 dark:bg-[#181818] dark:text-[#A1A1AA]'
           : good
@@ -311,24 +328,14 @@ function DeltaChip({
             : 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
       )}
     >
-      {flat ? (
+      {direction === null ? (
         <Minus className="h-2.5 w-2.5" aria-hidden />
-      ) : up ? (
+      ) : direction === 'up' ? (
         <ArrowUp className="h-2.5 w-2.5" aria-hidden />
       ) : (
         <ArrowDown className="h-2.5 w-2.5" aria-hidden />
       )}
-      {flat ? 'flat' : shown}
+      {formatDelta(delta, formatChange)}
     </span>
   );
-}
-
-/**
- * Relative change. A zero base has no meaningful percentage — return
- * NaN so the chip renders "n/a" instead of the ∞% blowups that made
- * the old stage badge untrustworthy.
- */
-function pctChange(current: number, prior: number): number {
-  if (prior === 0) return current === 0 ? 0 : Number.NaN;
-  return ((current - prior) / Math.abs(prior)) * 100;
 }

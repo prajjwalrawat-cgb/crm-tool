@@ -29,6 +29,13 @@ async function main() {
   const { buildWeekly, isoWeekStart, quantile } = await import(
     '../src/lib/dashboard/trend-shaping'
   );
+  const {
+    computeDelta,
+    computePointsDelta,
+    deltaDirection,
+    formatDelta,
+    ABSURD_PCT_THRESHOLD,
+  } = await import('../src/lib/dashboard/delta');
 
   /* ---------------- shared range ---------------- */
 
@@ -123,6 +130,122 @@ async function main() {
     'custom round-trips back to the inclusive day the user picked',
     roundTrip.get('from') === '2026-05-01' && roundTrip.get('to') === '2026-05-10',
     roundTrip.toString(),
+  );
+
+  /* ---------------- delta formatting ---------------- */
+
+  // The money formatter the KPI strip would inject. Compact-ish, and
+  // deliberately unsigned — the chip owns the sign.
+  const money = (n: number) => `Rs${Math.round(n / 100).toLocaleString('en-IN')}`;
+
+  check(
+    'ordinary growth stays a percentage',
+    computeDelta(137, 100).kind === 'percent',
+    JSON.stringify(computeDelta(137, 100)),
+  );
+  check(
+    'ordinary growth rounds to one decimal under 10%',
+    formatDelta(computeDelta(105, 100), money) === '5.0%',
+    formatDelta(computeDelta(105, 100), money),
+  );
+  check(
+    'growth over 10% drops the decimal',
+    formatDelta(computeDelta(137, 100), money) === '37%',
+    formatDelta(computeDelta(137, 100), money),
+  );
+
+  // THE BUG: weighted pipeline read "+900%+" because the prior window
+  // was a rounding error, not because the business grew nine-fold.
+  const fromNothing = computeDelta(4_200_000_00, 0);
+  check(
+    'zero baseline never produces a percentage',
+    fromNothing.kind === 'new',
+    fromNothing.kind,
+  );
+  check(
+    'zero baseline reads as New this period',
+    formatDelta(fromNothing, money) === 'New this period',
+    formatDelta(fromNothing, money),
+  );
+  check(
+    'zero baseline still points up',
+    deltaDirection(fromNothing) === 'up',
+  );
+
+  const fromCrumbs = computeDelta(4_200_000_00, 1_000_00);
+  check(
+    'near-zero baseline falls back to the absolute change',
+    fromCrumbs.kind === 'absolute',
+    JSON.stringify(fromCrumbs),
+  );
+  check(
+    'absolute fallback renders a signed money figure, not a ratio',
+    formatDelta(fromCrumbs, money).startsWith('+Rs') &&
+      !formatDelta(fromCrumbs, money).includes('%'),
+    formatDelta(fromCrumbs, money),
+  );
+
+  // Nothing anywhere may render a percentage past the threshold.
+  const sweep: number[] = [];
+  for (let prior = 1; prior <= 2000; prior += 1) {
+    for (const current of [0, 1, 37, 999, 10_000, 5_000_000]) {
+      const d = computeDelta(current, prior);
+      if (d.kind === 'percent') sweep.push(Math.abs(d.pct));
+    }
+  }
+  check(
+    'no percentage delta anywhere exceeds the absurdity threshold',
+    sweep.every((v) => v <= ABSURD_PCT_THRESHOLD),
+    `max=${Math.max(...sweep).toFixed(1)}% over ${sweep.length} combinations`,
+  );
+  check(
+    'the threshold is well below the 900% that triggered this fix',
+    ABSURD_PCT_THRESHOLD < 900,
+    String(ABSURD_PCT_THRESHOLD),
+  );
+
+  check(
+    '0 → 0 is flat, not New',
+    computeDelta(0, 0).kind === 'flat',
+    computeDelta(0, 0).kind,
+  );
+  check(
+    'collapsing to zero is a legitimate -100%',
+    formatDelta(computeDelta(0, 500), money) === '100%' &&
+      deltaDirection(computeDelta(0, 500)) === 'down',
+    formatDelta(computeDelta(0, 500), money),
+  );
+  check(
+    'NaN input degrades to n/a rather than rendering',
+    computeDelta(Number.NaN, 100).kind === 'none' &&
+      computeDelta(100, Number.NaN).kind === 'none',
+  );
+  check(
+    'a sub-epsilon wobble reads flat',
+    computeDelta(100.01, 100).kind === 'flat',
+    JSON.stringify(computeDelta(100.01, 100)),
+  );
+
+  // Rates use points, which are bounded by construction and must never
+  // be routed through the percentage path.
+  check(
+    'win rate 40% → 44% is +4 points',
+    formatDelta(computePointsDelta(0.44, 0.4), money) === '4.0 pts',
+    formatDelta(computePointsDelta(0.44, 0.4), money),
+  );
+  check(
+    'a rate rising from zero is points, never New',
+    computePointsDelta(0.55, 0).kind === 'points',
+    computePointsDelta(0.55, 0).kind,
+  );
+  check(
+    'points are bounded to +/-100 across the whole rate domain',
+    [0, 0.01, 0.5, 0.99, 1].every((a) =>
+      [0, 0.01, 0.5, 0.99, 1].every((b) => {
+        const d = computePointsDelta(a, b);
+        return d.kind !== 'points' || Math.abs(d.points) <= 100;
+      }),
+    ),
   );
 
   /* ---------------- weekly bucketing ---------------- */
