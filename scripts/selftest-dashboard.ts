@@ -151,7 +151,7 @@ async function main() {
     flat.points[0]!.newPipeline === 140,
     String(flat.points[0]!.newPipeline),
   );
-  check('no outlier → no cap', flat.pipelineCap === null && flat.notices.length === 0);
+  check('no outlier → no cap', flat.pipelineCap === null && flat.devNotices.length === 0);
 
   // Cumulative mode must take the week's LAST value, not the sum.
   const cumulative = buildWeekly(
@@ -196,10 +196,20 @@ async function main() {
       cappedWeeks[0]!.newPipeline >= 9_500_000,
     `real=${cappedWeeks[0]!.newPipeline} plotted=${cappedWeeks[0]!.newPipelinePlot}`,
   );
+  // Capping is surfaced to the user IN the chart — the capped bar draws
+  // a torn top edge and its tooltip states the figures are real. The
+  // string below is a dev-console diagnostic only; A1 removed the amber
+  // banner that used to render it verbatim on the dashboard.
   check(
-    'user is told the axis was capped (no silent truncation)',
-    spiky.notices.length > 0,
-    spiky.notices.join(' '),
+    'axis capping is recorded as a dev diagnostic (never rendered)',
+    spiky.devNotices.length > 0,
+    spiky.devNotices.join(' '),
+  );
+  check(
+    'every capped week is individually flagged for its in-chart marker',
+    spiky.points.every(
+      (p) => p.newPipelineCapped === (spiky.pipelineCap !== null && p.newPipeline > spiky.pipelineCap),
+    ),
   );
   // The whole point: won/lost live on their own axis, so the spike
   // cannot compress them. Their scale must stay in their own range.

@@ -41,8 +41,19 @@ export type WeeklyData = {
   pipelineCap: number | null;
   /** Right-axis ceiling for the won/lost pair. */
   outcomeCap: number | null;
-  /** Human-readable warnings rendered above the chart. */
-  notices: string[];
+  /**
+   * DIAGNOSTIC ONLY — never render these. Axis capping is already
+   * communicated to the user where it actually matters: the capped
+   * bar draws a torn top edge (`CappedBar`) and the tooltip for that
+   * week states the figures shown are the real ones. A second,
+   * always-on banner above the chart said the same thing in
+   * console-note phrasing and read as leaked debug output.
+   *
+   * The chart logs these via `console.warn` in development so the
+   * capping decision stays observable while working on the shaping
+   * math. See `revenue-trend-chart.tsx`.
+   */
+  devNotices: string[];
 };
 
 /** Monday of the ISO week containing `iso`, in UTC. */
@@ -137,19 +148,19 @@ export function buildWeekly(
     };
   });
 
-  const notices: string[] = [];
+  const devNotices: string[] = [];
   if (cappedPipelineWeeks > 0) {
-    notices.push(
+    devNotices.push(
       `${cappedPipelineWeeks} week${cappedPipelineWeeks === 1 ? '' : 's'} exceed${cappedPipelineWeeks === 1 ? 's' : ''} the pipeline axis (capped at the 95th percentile so the rest stays readable).`,
     );
   }
   if (cappedOutcomeWeeks > 0) {
-    notices.push(
+    devNotices.push(
       `${cappedOutcomeWeeks} week${cappedOutcomeWeeks === 1 ? '' : 's'} exceed${cappedOutcomeWeeks === 1 ? 's' : ''} the won/lost axis.`,
     );
   }
 
-  return { points: shapedWeeks, pipelineCap, outcomeCap, notices };
+  return { points: shapedWeeks, pipelineCap, outcomeCap, devNotices };
 }
 
 /** Week-start label ("Jun 30"). UTC-pinned — SSR and client must agree. */
