@@ -36,6 +36,18 @@ export type ForecastRollup = {
   bestCase: { rawMinor: number; weightedMinor: number };
   /** Every deal in-period, categories + overdue — used to reconcile with the board. */
   grandTotal: ForecastCell;
+  /**
+   * How many in-period deals carry a MANUAL forecast category
+   * (`forecast_category_overridden`), i.e. how much of this rollup is
+   * human judgement rather than stage-derived default.
+   *
+   * Surfaced so a forecast view can say what it is looking at. Every
+   * cell below reads identically whether a manager committed the deal
+   * deliberately or the stage machinery filed it there — and a
+   * "submitted forecast" that is really 100% auto-derived is a
+   * materially different artefact from one a human stands behind.
+   */
+  overriddenCount: number;
 };
 
 function emptyCell(): ForecastCell {
@@ -83,8 +95,10 @@ export async function getForecastRollup(
   const teamTotal = emptyCell();
   const overdue = emptyCell();
   const grandTotal = emptyCell();
+  let overriddenCount = 0;
 
   for (const r of rows) {
+    overriddenCount += Number(r.nOverridden ?? 0);
     const cell: ForecastCell = {
       amountMinor: Number(r.amt ?? 0),
       weightedMinor: Number(r.weighted ?? 0),
@@ -126,6 +140,7 @@ export async function getForecastRollup(
       weightedMinor: sumCats(BEST_CASE_CATEGORIES, 'weightedMinor'),
     },
     grandTotal,
+    overriddenCount,
   };
 }
 
@@ -136,6 +151,7 @@ type RollupRow = {
   amt: string | number | null;
   weighted: string | number | null;
   n: string | number | null;
+  nOverridden: string | number | null;
 };
 
 async function queryRollup(
@@ -183,6 +199,7 @@ async function queryRollup(
       amt: sql<string>`coalesce(sum(${deals.amountMinor}), 0)::bigint`,
       weighted: sql<string>`coalesce(round(sum(${deals.amountMinor} * (${probCase}) / 100.0)), 0)::bigint`,
       n: sql<number>`count(*)::int`,
+      nOverridden: sql<number>`count(*) FILTER (WHERE ${deals.forecastCategoryOverridden})::int`,
     })
     .from(deals)
     .where(and(...conds))

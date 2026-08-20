@@ -16,6 +16,8 @@ import {
 } from '@/lib/chart-studio/queries';
 import { getInboxCounts } from '@/lib/communications/threads/queries';
 import { getDealHighlights } from '@/lib/dashboard/highlights';
+import { resolvePeriod } from '@/lib/deals/forecast/period';
+import { getForecastRollup } from '@/lib/deals/forecast/rollup';
 import { getDashboardKpis } from '@/lib/dashboard/kpis';
 import { getDashboardOverview, getRevenueTrend } from '@/lib/dashboard/queries';
 import { isoDay, type DashboardRange } from '@/lib/dashboard/range';
@@ -35,9 +37,11 @@ import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
 import type { DateRangePreset, OwnerScope } from '@/lib/reports/types';
 import { listTeammates } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
+import { isFeatureEnabled } from '@/lib/workspace-settings/queries';
 
 import { DashboardRangeFilter } from '../dashboard-range-filter';
 import { DealHighlightsCard } from '../deal-highlights';
+import { ForecastBreakdownCard } from '../forecast-breakdown';
 import { KpiStrip } from '../kpi-strip';
 import { buildOpsChecks, OpsStatusStrip } from '../ops-status-strip';
 import { RevenueTrendChart } from '../revenue-trend-chart';
@@ -55,6 +59,8 @@ import { RepFilter } from './rep-filter';
  *   2. KPI strip — headline numbers with vs-prior-period deltas
  *   3. Revenue trend — weekly pipeline bars + won/lost overlay
  *   4. Pipeline by stage (snapshot) + deal-count donut
+ *   4b. Forecast categories vs the system projection (Module 4
+ *       flag only — omitted entirely when forecasts are off)
  *   5. Key deal highlights — what actually moved
  *   6. Operations, collapsed to a one-line status strip
  *   7. AI signals + admin shortcuts
@@ -102,6 +108,17 @@ export async function AdminHome({
   const settings = await getOrgSettings(tenantId);
   const probabilities = resolveStageProbabilities(settings.stageProbabilities);
 
+  // Forecast is a Phase-2 module behind a workspace flag. Resolve the
+  // period unconditionally (pure date math, no IO) but only pay for the
+  // rollup query where the module is actually switched on.
+  const forecastsOn = await isFeatureEnabled(tenantId, 'forecastsEnabled');
+  const forecastPeriod = resolvePeriod(
+    'quarter',
+    null,
+    new Date(),
+    settings.fiscalYearStartMonth,
+  );
+
   const [
     user,
     overview,
@@ -119,6 +136,7 @@ export async function AdminHome({
     savedChartView,
     savedStageConversionView,
     savedStageDonutView,
+    forecastRollup,
   ] = await Promise.all([
     currentUser(),
     getDashboardOverview(tenantId),
@@ -152,6 +170,16 @@ export async function AdminHome({
     readRevenueTrendView({ tenantId, userId }),
     readStageConversionView({ tenantId, userId }),
     readStageDonutView({ tenantId, userId }),
+    forecastsOn
+      ? getForecastRollup({
+          tenantId,
+          startISO: forecastPeriod.startISO,
+          endISO: forecastPeriod.endISO,
+          probabilities,
+          // Same rep focus as every other deal-derived surface here.
+          ownerIds: ownerId ? [ownerId] : undefined,
+        })
+      : null,
   ]);
 
   const focusedRep =
@@ -252,6 +280,20 @@ export async function AdminHome({
           persona="admin"
         />
       </div>
+
+      {forecastRollup ? (
+        <div className="mt-4">
+          <ForecastBreakdownCard
+            rollup={forecastRollup}
+            currency={settings}
+            periodLabel={
+              scopeLabel
+                ? `${scopeLabel} · ${forecastPeriod.label}`
+                : forecastPeriod.label
+            }
+          />
+        </div>
+      ) : null}
 
       <div className="mt-4">
         <DealHighlightsCard
