@@ -3,6 +3,8 @@
 import { Users } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { viewScopeParam, type ViewScope } from '@/lib/dashboard/view-scope';
+
 /**
  * Team-vs-rep filter for the manager/admin dashboard. Changing it navigates to
  * `?view=team` or `?view=rep:<userId>` — the same URL contract the home pages
@@ -10,13 +12,20 @@ import { useRouter, useSearchParams } from 'next/navigation';
  *
  * Other params (notably `range`/`from`/`to`) are carried through, so
  * switching rep keeps the selected time window.
+ *
+ * `basePath` exists because the Executive dashboard mounts this same
+ * picker; hardcoding `/dashboard` would have navigated its users off
+ * the page they were filtering.
  */
 export function RepFilter({
   teammates,
   value,
+  basePath = '/dashboard',
 }: {
   teammates: Array<{ id: string; displayName: string }>;
-  value: { mode: 'team' } | { mode: 'rep'; userId: string };
+  value: ViewScope;
+  /** Route to navigate within. Must be the page rendering this. */
+  basePath?: string;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -31,8 +40,13 @@ export function RepFilter({
         onChange={(e) => {
           const v = e.target.value;
           const next = new URLSearchParams(params?.toString() ?? '');
-          next.set('view', v === 'team' ? 'team' : `rep:${v}`);
-          router.push(`/dashboard?${next.toString()}`);
+          next.set(
+            'view',
+            viewScopeParam(
+              v === 'team' ? { mode: 'team' } : { mode: 'rep', userId: v },
+            ),
+          );
+          router.push(`${basePath}?${next.toString()}`);
         }}
         className="cursor-pointer bg-transparent pr-1 text-[12px] font-semibold text-slate-800 focus:outline-none dark:text-[#FAFAFA]"
       >

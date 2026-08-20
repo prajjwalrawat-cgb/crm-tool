@@ -31,6 +31,16 @@ config();
  *      after it. A divergence here is a regression, not a rounding
  *      detail.
  *
+ *      Checked org-wide AND per-rep. Once the Executive dashboard grew
+ *      its own owner filter, the two views could agree at `owner:all`
+ *      and still disagree the moment someone picked a rep — which is
+ *      exactly the bug a filter rollout produces and the one an
+ *      org-wide-only assertion would sail straight past.
+ *
+ *   4. TENANT ISOLATION.  Every rep-scoped figure must also be
+ *      tenant-scoped: asking tenant A for tenant B's rep must return
+ *      an empty funnel, not B's numbers.
+ *
  * Tenants with no deals are skipped (nothing to compare); the run fails
  * if that leaves nothing tested, so a bad connection can't read as a
  * green suite.
@@ -145,6 +155,77 @@ async function main() {
         kpis.pipelineMinor.value === execTotalMinor,
         `dashboard ${inr(kpis.pipelineMinor.value)} vs executive ${inr(execTotalMinor)}`,
       );
+
+      /* ---------- 3b: the same, per rep ---------- */
+
+      // The owner filter is the new surface. Take the busiest few reps
+      // rather than every one — the query shape is identical per owner,
+      // so three is enough to catch a scoping mismatch.
+      const owners = (await db.execute(sql`
+        SELECT owner_id AS id, count(*)::int AS n
+        FROM deals
+        WHERE tenant_id = ${t.id}::uuid
+          AND deleted_at IS NULL
+          AND owner_id IS NOT NULL
+        GROUP BY owner_id
+        ORDER BY count(*) DESC
+        LIMIT 3
+      `)) as unknown as Array<{ id: string; n: number }>;
+
+      for (const owner of owners) {
+        const repKpis = await getDashboardKpis(t.id, {
+          range,
+          ownerId: owner.id,
+          probabilities,
+          fiscalYearStartMonth: settings.fiscalYearStartMonth,
+        });
+        const repPipeline = await pipelineByStageRunner(
+          t.id,
+          { range: 'last_90d', owner: { type: 'user', userId: owner.id } },
+          { currentUserId: 'selftest' },
+        );
+        const repExecMinor = repPipeline.rows
+          .filter((r) => r.stage !== 'won' && r.stage !== 'lost')
+          .reduce((s, r) => s + r.totalAmountMinor, 0);
+
+        check(
+          `[${t.name}] rep-scoped pipeline agrees across views (${owner.id.slice(0, 12)}…)`,
+          repKpis.pipelineMinor.value === repExecMinor,
+          `dashboard ${inr(repKpis.pipelineMinor.value)} vs executive ${inr(repExecMinor)} over ${owner.n} deals`,
+        );
+      }
+
+      /* ---------- 4: a rep from another tenant leaks nothing ---------- */
+
+      const foreignOwner = (await db.execute(sql`
+        SELECT owner_id AS id
+        FROM deals
+        WHERE tenant_id <> ${t.id}::uuid
+          AND deleted_at IS NULL
+          AND owner_id IS NOT NULL
+          AND owner_id NOT IN (
+            SELECT DISTINCT owner_id FROM deals
+            WHERE tenant_id = ${t.id}::uuid AND owner_id IS NOT NULL
+          )
+        LIMIT 1
+      `)) as unknown as Array<{ id: string }>;
+
+      if (foreignOwner[0]) {
+        const leaked = await pipelineByStageRunner(
+          t.id,
+          { range: 'last_90d', owner: { type: 'user', userId: foreignOwner[0].id } },
+          { currentUserId: 'selftest' },
+        );
+        const leakedMinor = leaked.rows.reduce(
+          (s, r) => s + r.totalAmountMinor,
+          0,
+        );
+        check(
+          `[${t.name}] another tenant's rep id returns nothing`,
+          leakedMinor === 0,
+          `${inr(leakedMinor)} for foreign owner ${foreignOwner[0].id.slice(0, 12)}…`,
+        );
+      }
     });
   }
 

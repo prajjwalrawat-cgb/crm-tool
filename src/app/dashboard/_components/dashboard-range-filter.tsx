@@ -21,8 +21,19 @@ import { cn } from '@/lib/utils';
  * Server is the source of truth: this only navigates. Every widget on
  * the page re-reads the same param, which is what keeps the KPI strip,
  * trend chart, stage bars and highlights in lockstep.
+ *
+ * `basePath` exists because the Executive dashboard mounts this same
+ * picker. It used to hardcode `/dashboard`, which would have bounced
+ * an Executive user back to the main dashboard on every click.
  */
-export function DashboardRangeFilter({ range }: { range: DashboardRange }) {
+export function DashboardRangeFilter({
+  range,
+  basePath = '/dashboard',
+}: {
+  range: DashboardRange;
+  /** Route to navigate within. Must be the page rendering this. */
+  basePath?: string;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const [pending, start] = useTransition();
@@ -33,7 +44,7 @@ export function DashboardRangeFilter({ range }: { range: DashboardRange }) {
 
   function push(next: URLSearchParams) {
     start(() => {
-      router.replace(`/dashboard?${next.toString()}`);
+      router.replace(`${basePath}?${next.toString()}`);
     });
   }
 

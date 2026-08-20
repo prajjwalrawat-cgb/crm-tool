@@ -10,6 +10,7 @@ import {
   resolveDashboardRange,
   type DashboardRange,
 } from '@/lib/dashboard/range';
+import { parseViewScope, scopeOwnerId } from '@/lib/dashboard/view-scope';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
@@ -24,12 +25,16 @@ import { repPerformanceRunner } from '@/lib/reports/queries/rep-performance';
 import { revenueForecastRunner } from '@/lib/reports/queries/revenue-forecast';
 import { staleDealsRunner } from '@/lib/reports/queries/stale-deals';
 import { winLossRateRunner } from '@/lib/reports/queries/win-loss-rate';
+import type { DateRangePreset, OwnerScope } from '@/lib/reports/types';
+import { listTeammates } from '@/lib/teammates/queries';
 
 import {
   LiveDailyExecCard,
   LiveRecommendationsCard,
 } from '../intelligence/_components/live-ai-card';
 
+import { DashboardRangeFilter } from '../_components/dashboard-range-filter';
+import { RepFilter } from '../_components/home/rep-filter';
 import { MetricCard } from '../_components/metric-card';
 import { RevenueTrendChart } from '../_components/revenue-trend-chart';
 import {
@@ -59,16 +64,33 @@ export const metadata = {
  * cache and debug. Parallel Promise.all keeps the wall time bounded
  * by the slowest runner.
  *
- * WINDOWS. The runners do not share one, and the page must not imply
- * they do. Each section states its own in its subtitle:
+ * FILTERS. One `?range=` + `?view=` pair drives the whole page, read
+ * through the same `resolveDashboardRange` / `parseViewScope` the
+ * main Dashboard uses. Every runner below is handed the resolved
+ * window and owner scope; none carries its own hardcoded range any
+ * more. A URL is portable between the two dashboards and means the
+ * same thing on both.
  *
- *   pipelineByStageRunner  live snapshot, ALL TIME (no date filter)
- *   winLossRateRunner      last 90 days, on close date
- *   repPerformanceRunner   last 90 days
- *   dealVelocityRunner     last 90 days
- *   revenueForecastRunner  next 180 days, on expected close date
- *   emailEngagementRunner  last 90 days
- *   staleDealsRunner       every open deal, any age
+ * WINDOWS. What the shared filter can and cannot move:
+ *
+ *   winLossRateRunner      follows ?range= (close date)
+ *   repPerformanceRunner   follows ?range=
+ *   dealVelocityRunner     follows ?range=
+ *   emailEngagementRunner  follows ?range=
+ *   revenue trend          follows ?range=
+ *   pipelineByStageRunner  owner-scoped, but ALWAYS all-time — it is
+ *                          a live snapshot and, crucially, the source
+ *                          of the Total Pipeline figure the Dashboard
+ *                          also shows. Date-filtering it would desync
+ *                          the two views.
+ *   revenueForecastRunner  always next 180 days — forward-looking by
+ *                          definition; a past window has no forecast.
+ *   staleDealsRunner       always every open deal, any age — a
+ *                          90-day cutoff would hide the most stalled
+ *                          deals, which is the opposite of the job.
+ *
+ * The three that cannot follow the picker say so in their subtitles
+ * rather than quietly ignoring it.
  *
  * "Won revenue" in particular comes off the ALL-TIME snapshot, not the
  * 90-day window — it used to be captioned "(90d)", which was simply
@@ -101,11 +123,24 @@ export default async function ExecutiveDashboardPage({
   await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant, userId }) => {
     const sp = await searchParams;
-    // Same resolver, same `?range=` contract, same default (90d) as
-    // the main Dashboard — so a window chosen there means the same
-    // thing if the URL is carried across.
+    // Same resolvers, same `?range=` / `?view=` contract, same default
+    // (90d, whole team) as the main Dashboard — so a window or rep
+    // chosen there means the same thing if the URL is carried across.
     const range: DashboardRange = resolveDashboardRange(sp);
-    const filter = { range: 'last_90d', owner: { type: 'all' } } as const;
+    const view = parseViewScope(sp.view);
+    const ownerId = scopeOwnerId(view);
+    const ownerScope: OwnerScope = ownerId
+      ? { type: 'user', userId: ownerId }
+      : { type: 'all' };
+    // The report runners take a preset, not an arbitrary window. A
+    // custom range has no preset to hand them, so they fall back to the
+    // 90-day default — matching what AdminHome does, and called out in
+    // the header so the page never silently disagrees with its picker.
+    const runnerRange: DateRangePreset = (
+      range.preset === 'custom' ? 'last_90d' : range.preset
+    ) as DateRangePreset;
+    const customRangeUnsupported = range.preset === 'custom';
+    const filter = { range: runnerRange, owner: ownerScope } as const;
     const ctx = { currentUserId: userId };
 
     const today = new Date().toISOString().slice(0, 10);
@@ -127,22 +162,26 @@ export default async function ExecutiveDashboardPage({
       recsInsight,
       revenueTrend,
       savedTrendView,
+      teammates,
     ] = await Promise.all([
       pipelineByStageRunner(tenant.id, filter, ctx),
       winLossRateRunner(tenant.id, filter, ctx),
       repPerformanceRunner(tenant.id, filter, ctx),
       dealVelocityRunner(tenant.id, filter, ctx),
+      // Forward-looking by definition — the picker's window cannot
+      // apply, but the owner scope must.
       revenueForecastRunner(
         tenant.id,
-        { range: 'next_180d' as unknown as 'last_90d', owner: { type: 'all' } },
+        { range: 'next_180d' as unknown as 'last_90d', owner: ownerScope },
         ctx,
       ),
       emailEngagementRunner(tenant.id, filter, ctx),
       staleDealsRunner(tenant.id, filter, ctx),
       getDailyExecInsight(tenant.id, userId, today),
       getRecommendationInsight(tenant.id, userId),
-      getRevenueTrend(tenant.id, { days: range.days, ownerId: null }),
+      getRevenueTrend(tenant.id, { days: range.days, ownerId }),
       readRevenueTrendView({ tenantId: tenant.id, userId }),
+      listTeammates(tenant.id, tenant.name),
     ]);
 
     const totalPipelineMinor = pipeline.rows
@@ -172,6 +211,15 @@ export default async function ExecutiveDashboardPage({
     );
     const attentionRows = staleByCriticality.slice(0, 6);
 
+    const focusedRep =
+      view.mode === 'rep'
+        ? (teammates.find((t) => t.id === view.userId) ?? null)
+        : null;
+    const scopeLabel =
+      view.mode === 'rep'
+        ? (focusedRep?.displayName ?? 'Selected rep')
+        : null;
+
     const generatedAt = new Date();
 
     return (
@@ -190,6 +238,24 @@ export default async function ExecutiveDashboardPage({
               one screen. Sections use different windows by nature; each one
               states its own beneath the heading.
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <RepFilter
+                teammates={teammates}
+                value={view}
+                basePath="/dashboard/executive"
+              />
+              <DashboardRangeFilter
+                range={range}
+                basePath="/dashboard/executive"
+              />
+            </div>
+            {customRangeUnsupported ? (
+              <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+                Custom ranges aren&apos;t supported by the report runners this
+                page composes — everything below is showing the last 90 days.
+                The trend chart alone honours your custom window.
+              </p>
+            ) : null}
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-right dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
@@ -207,7 +273,7 @@ export default async function ExecutiveDashboardPage({
         <div className="space-y-4">
           <ExecutiveSection
             title="Revenue"
-            subtitle="Won revenue all time · win rate last 90 days · forecast next 180 days"
+            subtitle={`Won revenue all time · win rate ${range.label.toLowerCase()} · forecast next 180 days`}
             action={<SectionLink href="/dashboard/reports/revenue-forecast" />}
           >
             <DashboardGrid>
@@ -256,11 +322,11 @@ export default async function ExecutiveDashboardPage({
                 <InsightCard
                   label="Win rate"
                   value={`${Math.round((winLoss.extras?.winRate ?? 0) * 100)}%`}
-                  hint={`${closedInWindow} deals closed in the last 90 days`}
+                  hint={`${closedInWindow} deals closed in ${range.label.toLowerCase()}`}
                   // Nothing closed means the rate is undefined, not 0%.
                   emptyState={
                     closedInWindow === 0
-                      ? 'No deals closed in the last 90 days, so there is no win rate to compute.'
+                      ? `No deals closed in ${range.label.toLowerCase()}, so there is no win rate to compute.`
                       : undefined
                   }
                   tone={
@@ -279,16 +345,16 @@ export default async function ExecutiveDashboardPage({
           <RevenueTrendChart
             data={revenueTrend}
             currency={settings}
-            title="Revenue trend"
-            subtitle={`${range.label} · weekly buckets · ${tenant.name}`}
+            title={scopeLabel ? `${scopeLabel} · revenue trend` : 'Revenue trend'}
+            subtitle={`${range.label} · weekly buckets · ${scopeLabel ?? tenant.name}`}
             initialConfig={savedTrendView?.config ?? null}
             initialTitleOverride={savedTrendView?.title ?? null}
             persona="admin"
           />
 
           <ExecutiveSection
-            title="Pipeline health"
-            subtitle="Every deal open right now, all time · not a 90-day view"
+            title={scopeLabel ? `Pipeline health — ${scopeLabel}` : 'Pipeline health'}
+            subtitle="Every deal open right now, all time · does not follow the date filter"
             action={<SectionLink href="/dashboard/reports/pipeline-by-stage" />}
           >
             <DashboardGrid>
@@ -323,12 +389,14 @@ export default async function ExecutiveDashboardPage({
                 title="Top performers"
                 subtitle={
                   dormantRepCount > 0
-                    ? `Deals closed in the last 90 days · ${dormantRepCount} rep${dormantRepCount === 1 ? '' : 's'} with no closed deals omitted`
-                    : 'Highest revenue contributors · deals closed in the last 90 days'
+                    ? `Deals closed in ${range.label.toLowerCase()} · ${dormantRepCount} rep${dormantRepCount === 1 ? '' : 's'} with no closed deals omitted`
+                    : `Highest revenue contributors · deals closed in ${range.label.toLowerCase()}`
                 }
                 action={<SectionLink href="/dashboard/reports/rep-performance" />}
               >
-                <AttentionList emptyMessage="No rep closed a deal in the last 90 days.">
+                <AttentionList
+                  emptyMessage={`No rep closed a deal in ${range.label.toLowerCase()}.`}
+                >
                   {topRep.length === 0
                     ? null
                     : topRep.map((rep, i) => (
@@ -360,7 +428,7 @@ export default async function ExecutiveDashboardPage({
             <DashboardGridCell span={6}>
               <ExecutiveSection
                 title="Velocity & bottlenecks"
-                subtitle="Where deals slow down between stages · last 90 days"
+                subtitle={`Where deals slow down between stages · ${range.label.toLowerCase()}`}
                 action={<SectionLink href="/dashboard/reports/deal-velocity" />}
               >
                 <DashboardGrid cols={6}>
@@ -422,7 +490,7 @@ export default async function ExecutiveDashboardPage({
 
           <ExecutiveSection
             title="Operational health"
-            subtitle="Email deliverability last 90 days · deal counts live, all time"
+            subtitle={`Email deliverability ${range.label.toLowerCase()} · deal counts live, all time`}
             action={<SectionLink href="/dashboard/reports/email-engagement" />}
           >
             <DashboardGrid>
@@ -463,7 +531,7 @@ export default async function ExecutiveDashboardPage({
                   emptyState={
                     emailConfigured
                       ? (email.extras?.totalAttempted ?? 0) === 0
-                        ? 'No mail attempted in the last 90 days.'
+                        ? `No mail attempted in ${range.label.toLowerCase()}.`
                         : undefined
                       : 'Connect email tracking to see deliverability.'
                   }

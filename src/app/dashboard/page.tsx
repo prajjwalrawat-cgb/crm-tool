@@ -1,5 +1,6 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { resolveDashboardRange } from '@/lib/dashboard/range';
+import { parseViewScope } from '@/lib/dashboard/view-scope';
 import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
 
@@ -47,13 +48,13 @@ export default async function DashboardPage({
         tenantId: tenant.id,
         tenantName: tenant.name,
         userId,
-        view: parseManagerView(sp.view),
+        view: parseViewScope(sp.view),
         range,
       });
     }
 
     if (persona === 'manager') {
-      const view = parseManagerView(sp.view);
+      const view = parseViewScope(sp.view);
       return await ManagerHome({
         tenantId: tenant.id,
         tenantName: tenant.name,
@@ -68,25 +69,4 @@ export default async function DashboardPage({
       userId,
     });
   });
-}
-
-/**
- * `?view=team` (default) or `?view=rep:<userId>`. Anything else falls
- * back to team. The userId is left as a raw string — server-side
- * queries scope by tenant + userId, so a bogus id just yields an
- * empty funnel rather than leaking any other tenant's data.
- */
-function parseManagerView(
-  raw: string | string[] | undefined,
-): { mode: 'team' } | { mode: 'rep'; userId: string } {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== 'string') return { mode: 'team' };
-  if (value === 'team') return { mode: 'team' };
-  if (value.startsWith('rep:')) {
-    const userId = value.slice(4).trim();
-    if (userId.length > 0 && userId.length <= 128) {
-      return { mode: 'rep', userId };
-    }
-  }
-  return { mode: 'team' };
 }
