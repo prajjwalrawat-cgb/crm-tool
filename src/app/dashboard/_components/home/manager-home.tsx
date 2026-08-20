@@ -270,7 +270,7 @@ export async function ManagerHome({
           data={revenueTrend}
           currency={settings}
           title={view.mode === 'rep' ? `${scopeLabel} · revenue trend` : 'Team revenue trend'}
-          subtitle={`Last 90 days · ${tenantName}`}
+          subtitle={`Last 90 days · weekly buckets · ${tenantName}`}
           initialConfig={savedChartView?.config ?? null}
           initialTitleOverride={savedChartView?.title ?? null}
           persona="manager"
@@ -282,8 +282,12 @@ export async function ManagerHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-2"
-          title={view.mode === 'rep' ? `${scopeLabel} pipeline by stage` : 'Team pipeline by stage'}
-          subtitle="Revenue-weighted bars · deals currently in stage"
+          title={
+            view.mode === 'rep'
+              ? `${scopeLabel} pipeline by stage — live snapshot`
+              : 'Team pipeline by stage — live snapshot'
+          }
+          subtitle="Every deal open right now, all time · not the 90-day window above"
           stageProbabilities={stageProbabilities}
           initialConfig={savedStageConversionView?.config ?? null}
           initialTitleOverride={savedStageConversionView?.title ?? null}
@@ -293,8 +297,12 @@ export async function ManagerHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-1"
-          title={view.mode === 'rep' ? `${scopeLabel} — deals` : 'Team — deals'}
-          subtitle="How many deals sit in each stage"
+          title={
+            view.mode === 'rep'
+              ? `${scopeLabel} — deal counts, all time`
+              : 'Team — deal counts, all time'
+          }
+          subtitle="Every deal on record by stage · not the 90-day window above"
           initialConfig={savedStageDonutView?.config ?? null}
           initialTitleOverride={savedStageDonutView?.title ?? null}
           persona="manager"

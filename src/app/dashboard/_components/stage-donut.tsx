@@ -94,7 +94,9 @@ export function StageDonut({
   currency,
   className,
   title: defaultTitle = 'Deal distribution',
-  subtitle = 'How many deals sit in each stage',
+  // Overridden by every caller; kept honest anyway so a future one
+  // that forgets does not inherit an unscoped subtitle.
+  subtitle = 'Every deal on record by stage, all time',
   initialConfig,
   initialTitleOverride,
   persona,

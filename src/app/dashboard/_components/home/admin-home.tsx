@@ -59,10 +59,26 @@ import { RepFilter } from './rep-filter';
  *   6. Operations, collapsed to a one-line status strip
  *   7. AI signals + admin shortcuts
  *
- * ONE time window drives 2, 3 and 5 (`?range=` via `DashboardRange`).
- * Item 4 is deliberately range-independent: `pipelineByStageRunner`
- * returns a current-state snapshot, which its subtitle now says
- * out loud instead of implying a funnel over the period.
+ * WHICH WIDGETS FOLLOW THE RANGE PICKER — the whole list, because
+ * "some of them" is what made this page argue with itself:
+ *
+ *   FOLLOWS `?range=`     2 (win rate, avg deal, avg cycle),
+ *                         3 (revenue trend), 5 (highlights)
+ *   ALWAYS LIVE / NOW     2 (total + weighted pipeline — a stock),
+ *                         4 (pipeline by stage, counts donut)
+ *   ALWAYS FISCAL YTD     2 (quota attainment, coverage ratio)
+ *   ALWAYS LAST 24h       6 (ops strip)
+ *
+ * Item 4 stays range-independent on purpose, and not only because
+ * `pipelineByStageRunner` is a current-state snapshot: the Executive
+ * dashboard sums the same runner for its Total Pipeline figure. Date-
+ * filtering it here would silently desync the two dashboards on the
+ * one number they are most often compared on.
+ *
+ * The consequence is that Win Rate (deals closed in the window) and
+ * the counts donut (every deal ever, by stage) legitimately disagree.
+ * Every tile and chart header therefore states its own window, so the
+ * disagreement reads as two questions rather than one broken answer.
  */
 export async function AdminHome({
   tenantId,
@@ -194,7 +210,7 @@ export async function AdminHome({
           title={
             scopeLabel ? `${scopeLabel} · revenue trend` : 'Organization revenue trend'
           }
-          subtitle={`${range.label} · ${tenantName}`}
+          subtitle={`${range.label} · weekly buckets · ${tenantName}`}
           initialConfig={savedChartView?.config ?? null}
           initialTitleOverride={savedChartView?.title ?? null}
           persona="admin"
@@ -208,10 +224,10 @@ export async function AdminHome({
           className="lg:col-span-2"
           title={
             scopeLabel
-              ? `${scopeLabel} pipeline by stage`
-              : 'Organization pipeline by stage'
+              ? `${scopeLabel} pipeline by stage — live snapshot`
+              : 'Organization pipeline by stage — live snapshot'
           }
-          subtitle="Revenue-weighted bars · deals currently in stage (live snapshot, not the selected period)"
+          subtitle="Every deal open right now, all time · does not follow the date filter above"
           stageProbabilities={probabilities}
           initialConfig={savedStageConversionView?.config ?? null}
           initialTitleOverride={savedStageConversionView?.title ?? null}
@@ -221,11 +237,15 @@ export async function AdminHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-1"
-          title={scopeLabel ? `${scopeLabel} — deals` : 'Organization-wide'}
+          title={
+            scopeLabel
+              ? `${scopeLabel} — deal counts, all time`
+              : 'Organization-wide — deal counts, all time'
+          }
           subtitle={
             scopeLabel
-              ? 'Deal-count distribution'
-              : 'Deal-count distribution across all owners'
+              ? 'Every deal on record by stage · does not follow the date filter'
+              : 'Every deal on record by stage, all owners · does not follow the date filter'
           }
           initialConfig={savedStageDonutView?.config ?? null}
           initialTitleOverride={savedStageDonutView?.title ?? null}

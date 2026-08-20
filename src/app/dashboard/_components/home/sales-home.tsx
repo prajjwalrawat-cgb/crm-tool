@@ -131,7 +131,7 @@ export async function SalesHome({
         data={trend}
         currency={settings}
         title="My revenue trend"
-        subtitle={`Last 90 days · ${tenantName}`}
+        subtitle={`Last 90 days · weekly buckets · ${tenantName}`}
         initialConfig={savedChartView?.config ?? null}
         initialTitleOverride={savedChartView?.title ?? null}
         persona="sales"
@@ -142,8 +142,8 @@ export async function SalesHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-2"
-          title="My pipeline by stage"
-          subtitle="Revenue-weighted bars · deals currently in stage"
+          title="My pipeline by stage — live snapshot"
+          subtitle="Every deal I have open right now, all time · not the 90-day window above"
           stageProbabilities={resolveStageProbabilities(
             settings.stageProbabilities,
           )}
@@ -159,8 +159,8 @@ export async function SalesHome({
           rows={pipeline.rows}
           currency={settings}
           className="lg:col-span-1"
-          title="My deal distribution"
-          subtitle="How many deals sit in each stage"
+          title="My deal counts — all time"
+          subtitle="Every deal on record by stage · not the 90-day window above"
           initialConfig={savedStageDonutView?.config ?? null}
           initialTitleOverride={savedStageDonutView?.title ?? null}
           persona="sales"

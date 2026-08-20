@@ -42,6 +42,22 @@ import { cn } from '@/lib/utils';
  * Quota attainment is omitted entirely (not zeroed) when the org has
  * no target for the fiscal year — an empty tile reads as "we missed",
  * which is a different and wrong statement.
+ *
+ * EVERY TILE STATES ITS OWN WINDOW. `scope` is a required field, not
+ * an optional one, because this strip does not have a single window
+ * and pretending otherwise is what made it untrustworthy:
+ *
+ *   · pipeline / weighted → a STOCK, as it stands today. There is no
+ *     such thing as "pipeline during May"; only the delta looks back.
+ *   · win rate / avg deal / avg cycle → FLOWS over the selected
+ *     range, on close date.
+ *   · quota attainment → the FISCAL YEAR to date, which is what a
+ *     quota is set against. It does not follow the range picker and
+ *     never should: a 7-day view of an annual target is meaningless.
+ *
+ * A reader comparing "55% win rate" against a 24-won stage table is
+ * not looking at a bug; they are looking at 90 days beside all time.
+ * The scope line is how they find that out without asking.
  */
 
 type Tile = {
@@ -56,6 +72,12 @@ type Tile = {
    * supplies the sign.
    */
   formatChange: (magnitude: number) => string;
+  /**
+   * The window this tile actually measures, in the user's words.
+   * Required — a tile with no stated scope is the defect this field
+   * exists to prevent.
+   */
+  scope: string;
   higherIsBetter: boolean;
   tint: 'indigo' | 'violet' | 'emerald' | 'amber' | 'sky' | 'slate';
   /** Full-precision figure for the title tooltip. */
@@ -96,6 +118,11 @@ export function KpiStrip({
   const exact = (m: number) => formatTenantCurrency(m, currency);
 
   const closed = kpis.wonCount.value + kpis.lostCount.value;
+  // "Last 90 days" → "last 90 days", so it reads inside a sentence.
+  const rangeLower = range.label.toLowerCase();
+  const fyLabel = kpis.quota
+    ? fiscalYearLabel(fiscalYearStartMonth, kpis.quota.fiscalYear)
+    : '';
 
   const tiles: Tile[] = [
     {
@@ -108,9 +135,10 @@ export function KpiStrip({
         kpis.pipelineMinor.priorValue,
       ),
       formatChange: money,
+      scope: 'Open deals, as of today',
       higherIsBetter: true,
       tint: 'indigo',
-      title: `Open deal value: ${exact(kpis.pipelineMinor.value)}`,
+      title: `Open deal value right now: ${exact(kpis.pipelineMinor.value)}. A live snapshot — the delta compares it against the pipeline as it stood at the start of ${rangeLower}.`,
     },
     {
       key: 'weighted',
@@ -122,9 +150,10 @@ export function KpiStrip({
         kpis.weightedPipelineMinor.priorValue,
       ),
       formatChange: money,
+      scope: 'Open deals, as of today',
       higherIsBetter: true,
       tint: 'violet',
-      title: `Weighted value: ${exact(kpis.weightedPipelineMinor.value)}`,
+      title: `Weighted value right now: ${exact(kpis.weightedPipelineMinor.value)}. A live snapshot — the delta compares it against the weighted pipeline as it stood at the start of ${rangeLower}.`,
     },
     {
       key: 'winRate',
@@ -136,9 +165,10 @@ export function KpiStrip({
           : `${kpis.wonCount.value} won · ${kpis.lostCount.value} lost`,
       delta: computePointsDelta(kpis.winRate.value, kpis.winRate.priorValue),
       formatChange: (n) => `${n.toFixed(1)} pts`,
+      scope: `Deals closed in ${rangeLower}`,
       higherIsBetter: true,
       tint: 'emerald',
-      title: `${(kpis.winRate.value * 100).toFixed(1)}% of closed deals were won`,
+      title: `${(kpis.winRate.value * 100).toFixed(1)}% of the ${closed} deals that CLOSED in ${rangeLower} were won. Counts only deals with a close date in the window — not every won deal the workspace has ever recorded, which is what the stage chart below shows.`,
     },
     {
       key: 'avgDeal',
@@ -155,6 +185,7 @@ export function KpiStrip({
               kpis.avgWonDealMinor.priorValue,
             ),
       formatChange: money,
+      scope: `Deals won in ${rangeLower}`,
       higherIsBetter: true,
       tint: 'sky',
       title:
@@ -172,9 +203,11 @@ export function KpiStrip({
           ? { kind: 'none' }
           : computeDelta(kpis.avgCycleDays.value, kpis.avgCycleDays.priorValue),
       formatChange: (n) => `${n.toFixed(1)}d`,
+      scope: `Deals won in ${rangeLower}`,
       // Faster is better — a negative delta is green here.
       higherIsBetter: false,
       tint: 'amber',
+      title: `Mean days from deal creation to close, across the ${kpis.wonCount.value} deals won in ${rangeLower}.`,
     },
   ];
 
@@ -195,7 +228,7 @@ export function KpiStrip({
     );
     tiles.push({
       key: 'quota',
-      label: `Quota attainment · ${fiscalYearLabel(fiscalYearStartMonth, kpis.quota.fiscalYear)}`,
+      label: `Quota attainment · ${fyLabel}`,
       // A tiny target (or a typo'd one) would otherwise render a
       // five-digit percentage. Cap the display, keep the real figure
       // in the tooltip.
@@ -206,6 +239,9 @@ export function KpiStrip({
       sub: `${money(kpis.quota.achievedMinor)} of ${money(kpis.quota.targetMinor)}`,
       delta: computePointsDelta(attainment, priorAttainment),
       formatChange: (n) => `${n.toFixed(1)} pts`,
+      // Deliberately NOT the range picker's window. A quota is an
+      // annual commitment; showing 7 days of it would be noise.
+      scope: `Fiscal year to date · ${fyLabel}`,
       higherIsBetter: true,
       tint: 'slate',
       title: [
@@ -271,6 +307,11 @@ function KpiTile({ tile, priorLabel }: { tile: Tile; priorLabel: string }) {
       </div>
       <div className="mt-1 truncate text-[10.5px] text-slate-500 dark:text-[#A1A1AA]">
         {tile.sub}
+      </div>
+      {/* The window this specific tile measures. Not every tile on
+          this strip shares one, so each says its own out loud. */}
+      <div className="mt-1.5 truncate border-t border-slate-100 pt-1 text-[9.5px] uppercase tracking-[0.06em] text-slate-400 dark:border-[#1F1F1F] dark:text-[#71717A]">
+        {tile.scope}
       </div>
       {tile.footnote ? (
         <div className="mt-1 text-[10px] leading-snug text-amber-700 dark:text-amber-300">

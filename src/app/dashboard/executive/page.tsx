@@ -51,9 +51,21 @@ export const metadata = {
  * cache and debug. Parallel Promise.all keeps the wall time bounded
  * by the slowest runner.
  *
- * The "AI Intelligence" feed is placeholder content for v1 — the CP#15
- * scope is the layout + data plumbing; the actual insight generation
- * lands in a follow-up alongside the AI mode work.
+ * WINDOWS. The runners do not share one, and the page must not imply
+ * they do. Each section states its own in its subtitle:
+ *
+ *   pipelineByStageRunner  live snapshot, ALL TIME (no date filter)
+ *   winLossRateRunner      last 90 days, on close date
+ *   repPerformanceRunner   last 90 days
+ *   dealVelocityRunner     last 90 days
+ *   revenueForecastRunner  next 180 days, on expected close date
+ *   emailEngagementRunner  last 90 days
+ *   staleDealsRunner       every open deal, any age
+ *
+ * "Won revenue" in particular comes off the ALL-TIME snapshot, not the
+ * 90-day window — it used to be captioned "(90d)", which was simply
+ * false. Left as all-time deliberately: it is the same figure the
+ * Dashboard's stage chart shows, so the two views agree.
  */
 export default async function ExecutiveDashboardPage() {
   await requirePersonas(['manager', 'admin']);
@@ -122,8 +134,8 @@ export default async function ExecutiveDashboardPage() {
             </h1>
             <p className="mt-1 max-w-2xl text-[13px] text-slate-500 dark:text-[#A1A1AA]">
               Pipeline, performance, velocity, and forecast — all rolled up into
-              one screen. Window: last 90 days for actuals · next 180 days for
-              forecast.
+              one screen. Sections use different windows by nature; each one
+              states its own beneath the heading.
             </p>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-right dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
@@ -142,7 +154,7 @@ export default async function ExecutiveDashboardPage() {
         <div className="space-y-4">
           <ExecutiveSection
             title="Revenue"
-            subtitle="Closed deals + forecasted pipeline"
+            subtitle="Won revenue all time · win rate last 90 days · forecast next 180 days"
             action={<SectionLink href="/dashboard/reports/revenue-forecast" />}
           >
             <DashboardGrid>
@@ -150,7 +162,7 @@ export default async function ExecutiveDashboardPage() {
                 <InsightCard
                   label="Won revenue"
                   value={money(wonRevenueMinor)}
-                  hint={`From ${pipeline.rows.find((r) => r.stage === 'won')?.count ?? 0} closed deals (90d)`}
+                  hint={`${pipeline.rows.find((r) => r.stage === 'won')?.count ?? 0} won deals · all time`}
                   tone="success"
                   href="/dashboard/reports/win-loss-rate"
                 />
@@ -176,7 +188,7 @@ export default async function ExecutiveDashboardPage() {
                 <InsightCard
                   label="Win rate"
                   value={`${Math.round((winLoss.extras?.winRate ?? 0) * 100)}%`}
-                  hint={`${winLoss.extras?.totalClosed ?? 0} closed in window`}
+                  hint={`${winLoss.extras?.totalClosed ?? 0} deals closed in the last 90 days`}
                   tone={
                     (winLoss.extras?.winRate ?? 0) >= 0.5
                       ? 'success'
@@ -192,7 +204,7 @@ export default async function ExecutiveDashboardPage() {
 
           <ExecutiveSection
             title="Pipeline health"
-            subtitle="Active deal stages and total value in motion"
+            subtitle="Every deal open right now, all time · not a 90-day view"
             action={<SectionLink href="/dashboard/reports/pipeline-by-stage" />}
           >
             <DashboardGrid>
@@ -225,7 +237,7 @@ export default async function ExecutiveDashboardPage() {
             <DashboardGridCell span={6}>
               <ExecutiveSection
                 title="Top performers"
-                subtitle="Highest revenue contributors in the last 90 days"
+                subtitle="Highest revenue contributors · deals closed in the last 90 days"
                 action={<SectionLink href="/dashboard/reports/rep-performance" />}
               >
                 <AttentionList emptyMessage="No closed deals in this window yet.">
@@ -254,7 +266,7 @@ export default async function ExecutiveDashboardPage() {
             <DashboardGridCell span={6}>
               <ExecutiveSection
                 title="Velocity & bottlenecks"
-                subtitle="Where deals slow down between stages"
+                subtitle="Where deals slow down between stages · last 90 days"
                 action={<SectionLink href="/dashboard/reports/deal-velocity" />}
               >
                 <DashboardGrid cols={6}>
@@ -301,7 +313,7 @@ export default async function ExecutiveDashboardPage() {
 
           <ExecutiveSection
             title="Operational health"
-            subtitle="Email deliverability and workflow signals"
+            subtitle="Email deliverability last 90 days · deal counts live, all time"
             action={<SectionLink href="/dashboard/reports/email-engagement" />}
           >
             <DashboardGrid>
@@ -337,7 +349,7 @@ export default async function ExecutiveDashboardPage() {
                 <MetricCard
                   label="Stalled deals"
                   value={formatNumber(stale.rows.filter((r) => r.severity === 'critical' || r.severity === 'stale').length)}
-                  hint="Need re-engagement"
+                  hint="Need re-engagement · any age"
                   tone="warning"
                 />
               </DashboardGridCell>
@@ -349,7 +361,7 @@ export default async function ExecutiveDashboardPage() {
                       .filter((r) => r.stage !== 'won' && r.stage !== 'lost')
                       .reduce((s, r) => s + r.count, 0),
                   )}
-                  hint="Currently in flight"
+                  hint="Currently in flight · live count"
                   tone="neutral"
                 />
               </DashboardGridCell>
@@ -358,7 +370,7 @@ export default async function ExecutiveDashboardPage() {
 
           <ExecutiveSection
             title="Attention queue"
-            subtitle="Stalled deals sorted by signal severity"
+            subtitle="Every open deal showing stall signals, any age · not limited to 90 days"
             action={<SectionLink href="/dashboard/reports/stale-deals" />}
           >
             <AttentionList emptyMessage="Nothing stalled. Pipeline is healthy.">
