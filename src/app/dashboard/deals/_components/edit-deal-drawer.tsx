@@ -271,6 +271,7 @@ export function EditDealDrawer({
         </Select>
 
         <DealAmountFields
+          stage={stageValue}
           unitPricingEnabled={unitPricingEnabled || dealHasUnitPricing}
           defaultCurrency={deal?.currency ?? 'INR'}
           defaultAmount={initialAmount}

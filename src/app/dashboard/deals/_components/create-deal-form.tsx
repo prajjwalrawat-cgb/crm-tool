@@ -169,6 +169,7 @@ export function CreateDealForm({
       </SelectField>
 
       <DealAmountFields
+        stage={stageValue}
         unitPricingEnabled={unitPricingEnabled}
         defaultCurrency="INR"
         defaultAmount="0"
