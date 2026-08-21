@@ -226,7 +226,15 @@ export function DealsView({
       const ok = results.filter((r) => r.ok).length;
       if (ok) toast.success(`${ok} deal${ok > 1 ? 's' : ''} → ${DEAL_STAGE_LABELS[stage]}`);
       const failed = results.length - ok;
-      if (failed) toast.error(`${failed} couldn't be moved`);
+      if (failed) {
+        // Surface WHY the first one refused (a stage gate, a missing margin) —
+        // a bare count leaves the rep guessing.
+        const firstFailure = results.find((r) => !r.ok);
+        const reason = firstFailure && !firstFailure.ok ? firstFailure.message : null;
+        toast.error(
+          `${failed} couldn't be moved${reason ? ` — ${reason}` : ''}`,
+        );
+      }
     });
   }
 

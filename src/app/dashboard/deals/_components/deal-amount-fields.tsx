@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import { KNOWN_CURRENCIES } from '@/lib/deals/currency';
+import { marginRequiredForStage } from '@/lib/deals/validation';
 import { cn } from '@/lib/utils';
 
 /**
@@ -10,12 +11,17 @@ import { cn } from '@/lib/utils';
  * it shows Per Unit Price + Quantity and computes a read-only Amount
  * (= price x qty); otherwise a normal Amount input. Native `name=` inputs
  * submit straight through the form's FormData; the server re-derives Amount.
+ *
+ * Margin follows the stage: optional in Lead (the rep doesn't know it yet),
+ * mandatory from Qualified onwards — so it re-labels itself as the caller's
+ * stage select changes.
  */
 const labelCls = 'text-xs font-medium text-slate-700';
 const inputCls =
   'rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm shadow-sm transition placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20';
 
 export function DealAmountFields({
+  stage,
   unitPricingEnabled,
   defaultCurrency,
   defaultAmount,
@@ -24,6 +30,8 @@ export function DealAmountFields({
   defaultMarginPct,
   errors,
 }: {
+  /** The form's live stage selection — drives whether Margin is mandatory. */
+  stage: string;
   unitPricingEnabled: boolean;
   defaultCurrency: string;
   defaultAmount?: string;
@@ -47,11 +55,18 @@ export function DealAmountFields({
     </div>
   );
 
-  // Optional gross margin percentage — shown in both pricing modes.
+  // Gross margin percentage — shown in both pricing modes, required from
+  // Qualified onwards.
+  const marginRequired = marginRequiredForStage(stage);
   const margin = (
     <div className="flex flex-col gap-1.5">
       <label htmlFor="marginPct" className={labelCls}>
-        Margin % <span className="text-red-500">*</span>
+        Margin %{' '}
+        {marginRequired ? (
+          <span className="text-red-500">*</span>
+        ) : (
+          <span className="font-normal text-slate-400">(optional)</span>
+        )}
       </label>
       <div className="relative">
         <input
@@ -61,7 +76,7 @@ export function DealAmountFields({
           step="0.01"
           min="0"
           max="100"
-          required
+          required={marginRequired}
           defaultValue={defaultMarginPct ?? ''}
           placeholder="e.g. 30"
           className={cn(inputCls, 'w-full pr-7', errors.marginPct?.length && 'border-red-300')}
@@ -70,7 +85,13 @@ export function DealAmountFields({
           %
         </span>
       </div>
-      {errors.marginPct?.length ? <p className="text-xs text-red-600">{errors.marginPct.join(' ')}</p> : null}
+      {errors.marginPct?.length ? (
+        <p className="text-xs text-red-600">{errors.marginPct.join(' ')}</p>
+      ) : marginRequired ? null : (
+        <p className="text-xs text-slate-500">
+          Leave blank until you know it — required from Qualified onwards.
+        </p>
+      )}
     </div>
   );
 

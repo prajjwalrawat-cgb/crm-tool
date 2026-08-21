@@ -161,6 +161,9 @@ function FormatHelp() {
         (lead, qualified, proposal, negotiation, hold, won, lost),{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">amount</code>,{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">currency</code>,{' '}
+        <code className="rounded bg-white px-1 py-0.5 text-[10px]">marginPct</code>{' '}
+        (0–100, required unless the stage is{' '}
+        <code className="rounded bg-white px-1 py-0.5 text-[10px]">lead</code>),{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">expectedCloseDate</code>{' '}
         (YYYY-MM-DD),{' '}
         <code className="rounded bg-white px-1 py-0.5 text-[10px]">companyName</code>,{' '}
@@ -221,6 +224,7 @@ const TEMPLATE_HEADERS = [
   'stage',
   'amount',
   'currency',
+  'marginPct',
   'expectedCloseDate',
   'companyName',
   'lostReason',
@@ -231,6 +235,7 @@ const TEMPLATE_SAMPLE_ROW = [
   'proposal',
   '50000',
   'USD',
+  '30',
   '2026-08-15',
   'Acme Inc',
   '',

@@ -61,6 +61,8 @@ import {
 import { HOLD_REASONS } from '@/lib/deals/hold';
 import {
   LEAD_CLOSE_DATE_MESSAGE,
+  MARGIN_REQUIRED_MESSAGE,
+  marginRequiredForStage,
   violatesLeadCloseDate,
 } from '@/lib/deals/validation';
 import { personaOf } from '@/lib/personas';
@@ -321,7 +323,12 @@ export async function createDealAction(
       } else {
         amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       }
-      const marginBps = marginPctToBps(parsed.data.marginPct);
+      // Absent only when the deal is in a stage that doesn't require a margin
+      // (Lead/Hold/Lost — the schema enforces that); NULL means "not known yet".
+      const marginBps =
+        parsed.data.marginPct === undefined
+          ? null
+          : marginPctToBps(parsed.data.marginPct);
       const lostReason =
         parsed.data.stage === 'lost'
           ? String(formData.get('lostReason') ?? '').trim().slice(0, 1000) || null
@@ -542,7 +549,12 @@ export async function updateDealAction(
       } else {
         amountMinor = toMinorUnits(parsed.data.amount, parsed.data.currency);
       }
-      const marginBps = marginPctToBps(parsed.data.marginPct);
+      // Absent only when the deal is in a stage that doesn't require a margin
+      // (Lead/Hold/Lost — the schema enforces that); NULL means "not known yet".
+      const marginBps =
+        parsed.data.marginPct === undefined
+          ? null
+          : marginPctToBps(parsed.data.marginPct);
       const isClosedStage =
         parsed.data.stage === 'won' || parsed.data.stage === 'lost';
       // Lost reason from the edit form; only kept while the deal is 'lost'.
@@ -887,6 +899,7 @@ export async function updateDealStageAction(
             stage: deals.stage,
             name: deals.name,
             closedAt: deals.closedAt,
+            marginBps: deals.marginBps,
             forecastCategoryOverridden: deals.forecastCategoryOverridden,
           })
           .from(deals)
@@ -913,6 +926,37 @@ export async function updateDealStageAction(
             changed: false,
             previousStage: previous.stage,
             blocked: null,
+          };
+        }
+
+        // Business rule: every stage from Qualified onwards carries a margin.
+        // A pure stage move can't supply one, so the move is refused — reported
+        // in the gate-failure shape so the board renders its checklist
+        // slide-over (with a link to the deal) instead of a bare toast.
+        if (
+          marginRequiredForStage(parsed.data.stage) &&
+          previous.marginBps == null
+        ) {
+          return {
+            row: null,
+            changed: false,
+            previousStage: previous.stage,
+            blocked: {
+              message: MARGIN_REQUIRED_MESSAGE,
+              failures: [
+                {
+                  rule_type: 'field_required' as const,
+                  severity: 'block' as const,
+                  message: MARGIN_REQUIRED_MESSAGE,
+                  cta: {
+                    label: 'Set margin',
+                    kind: 'field' as const,
+                    field: 'marginPct',
+                  },
+                },
+              ],
+              toStage: parsed.data.stage,
+            },
           };
         }
 
@@ -2148,6 +2192,28 @@ export async function bulkUploadDealsAction(
           continue;
         }
 
+        // Margin follows the same rule as the form: mandatory from Qualified
+        // onwards, blank in Lead (the rep doesn't know it yet).
+        const marginRaw = cell('marginPct');
+        let marginBps: number | null = null;
+        if (marginRaw) {
+          const marginPct = Number(marginRaw.replace(/%$/, '').trim());
+          if (!Number.isFinite(marginPct) || marginPct <= 0 || marginPct > 100) {
+            errors.push({
+              row: i + 1,
+              message: `Invalid marginPct "${marginRaw}". Use a number between 0 and 100.`,
+            });
+            continue;
+          }
+          marginBps = marginPctToBps(marginPct);
+        } else if (marginRequiredForStage(stage)) {
+          errors.push({
+            row: i + 1,
+            message: `Missing "marginPct" — ${MARGIN_REQUIRED_MESSAGE}`,
+          });
+          continue;
+        }
+
         const closeRaw = cell('expectedCloseDate');
         let expectedCloseDate: string | null = null;
         if (closeRaw) {
@@ -2196,6 +2262,7 @@ export async function bulkUploadDealsAction(
           stage,
           amountMinor: toMinorUnits(amount, currency),
           currency,
+          marginBps,
           expectedCloseDate,
           closedAt: isClosedStage ? new Date() : null,
           lostReason,

@@ -97,6 +97,7 @@ export const BULK_UPLOAD_HEADERS = [
   'stage',
   'amount',
   'currency',
+  'marginPct',
   'expectedCloseDate',
   'companyName',
   'lostReason',
@@ -126,6 +127,12 @@ export function normalizeHeader(raw: string): BulkUploadHeader | null {
       return 'amount';
     case 'currency':
       return 'currency';
+    case 'marginpct':
+    case 'margin':
+    case 'margin%':
+    case 'marginpercent':
+    case 'grossmargin':
+      return 'marginPct';
     case 'expectedclosedate':
     case 'closedate':
     case 'expectedclose':

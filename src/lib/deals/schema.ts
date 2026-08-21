@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { KNOWN_CURRENCIES } from './currency';
+import { MARGIN_REQUIRED_MESSAGE, violatesMissingMargin } from './validation';
 
 export const DEAL_STAGES = [
   'lead',
@@ -34,7 +35,7 @@ export const DEAL_TYPE_LABELS: Record<DealType, string> = {
   upsell: 'Upsell',
 };
 
-export const createDealSchema = z.object({
+const dealFormSchema = z.object({
   name: z
     .string()
     .trim()
@@ -73,15 +74,17 @@ export const createDealSchema = z.object({
       .max(1_000_000)
       .optional(),
   ),
-  // Required gross margin percentage (must be > 0 — a deal with revenue always
-  // carries some margin). 0–100, up to 2 decimals. Stored as basis points
-  // server-side; margin value = amount × margin%.
+  // Gross margin percentage — 0–100, up to 2 decimals, stored as basis points
+  // server-side (margin value = amount × margin%). Optional at the SHAPE level
+  // and made mandatory per-stage by `checkMarginForStage` below: a Lead is
+  // saved without one because the rep doesn't know it yet.
   marginPct: z.preprocess(
     (v) => (v == null || v === '' ? undefined : v),
     z.coerce
-      .number({ message: 'Margin is required' })
+      .number({ message: 'Enter a valid margin' })
       .gt(0, 'Margin must be greater than 0')
-      .max(100, 'Margin cannot exceed 100%'),
+      .max(100, 'Margin cannot exceed 100%')
+      .optional(),
   ),
   currency: z.enum(KNOWN_CURRENCIES, { message: 'Pick a supported currency' }),
   // Optional deal classification. Empty string from the form → null.
@@ -103,11 +106,31 @@ export const createDealSchema = z.object({
     .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
+/**
+ * Margin is mandatory from Qualified onwards and optional in Lead — the rule
+ * spans two fields, so it's a whole-object check rather than a field rule. The
+ * issue is filed against `marginPct` so the form highlights the input.
+ */
+function checkMarginForStage(
+  data: { stage: string; marginPct?: number },
+  ctx: z.RefinementCtx,
+): void {
+  if (violatesMissingMargin(data.stage, data.marginPct)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['marginPct'],
+      message: MARGIN_REQUIRED_MESSAGE,
+    });
+  }
+}
+
+export const createDealSchema = dealFormSchema.superRefine(checkMarginForStage);
+
 export type CreateDealInput = z.infer<typeof createDealSchema>;
 
-export const updateDealSchema = createDealSchema.extend({
-  id: z.uuid({ message: 'Invalid deal id' }),
-});
+export const updateDealSchema = dealFormSchema
+  .extend({ id: z.uuid({ message: 'Invalid deal id' }) })
+  .superRefine(checkMarginForStage);
 
 export type UpdateDealInput = z.infer<typeof updateDealSchema>;
 
