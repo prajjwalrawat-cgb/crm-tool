@@ -2,6 +2,7 @@ import { auth, clerkClient } from '@/lib/auth/server';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { db } from '@/db';
+import { realtimeEnabled } from '@/lib/realtime/enabled';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 import { getCurrentTenant } from '@/lib/tenant';
 
@@ -43,6 +44,12 @@ const ALLOWED_KINDS = new Set([
 ]);
 
 export async function POST(request: NextRequest): Promise<Response> {
+  // Kill switch. With no SSE listeners these publishes reach nobody, so
+  // skip the session check, the users-table read and the pg_notify.
+  if (!realtimeEnabled()) {
+    return new NextResponse(null, { status: 204 });
+  }
+
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 });

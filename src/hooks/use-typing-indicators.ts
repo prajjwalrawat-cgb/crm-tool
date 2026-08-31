@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { realtimeEnabled } from '@/lib/realtime/enabled';
+
 import { useRealtimeEvents } from './use-realtime-events';
 
 /**
@@ -43,6 +45,8 @@ export function useTypingIndicators(args: {
 
   const publish = useCallback(
     async (kind: 'typing.started' | 'typing.stopped') => {
+      // Kill switch — nobody is listening, so don't spend an invocation.
+      if (!realtimeEnabled()) return;
       try {
         await fetch('/api/realtime/publish', {
           method: 'POST',

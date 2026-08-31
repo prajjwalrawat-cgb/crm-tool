@@ -22,6 +22,11 @@
 // collide with the other selftest scripts in the same tsconfig include.
 export {};
 
+import { readFileSync as readFileSyncRaw } from 'node:fs';
+import { join as joinEarly } from 'node:path';
+
+const readFileSyncEarly = (p: string) => readFileSyncRaw(p, 'utf8');
+
 /* ------------------------- stubbed browser env ------------------------- */
 
 let created = 0;
@@ -46,6 +51,10 @@ class FakeEventSource {
     if (i >= 0) openSources.splice(i, 1);
   }
 }
+
+// The connection tests below exercise the enabled path, so turn the kill
+// switch on before importing the module under test.
+process.env.NEXT_PUBLIC_REALTIME_ENABLED = 'true';
 
 const g = globalThis as unknown as Record<string, unknown>;
 g.EventSource = FakeEventSource;
@@ -187,15 +196,57 @@ async function main(): Promise<void> {
   again();
   await sleep(3_400);
 
-  /* 10. Deploy-time constraints on the SSE route ---------------------- */
+  /* 10. The kill switch actually prevents connections ----------------- */
+  // The client is what has to decline: EventSource retries a refused
+  // connection on its own, so a server-only guard would trade one long
+  // invocation for a stream of short ones. Assert the flag is read at call
+  // time and that the hook's guard sits before any connection is opened.
+  const { realtimeEnabled } = await import('../src/lib/realtime/enabled');
+
+  process.env.NEXT_PUBLIC_REALTIME_ENABLED = 'false';
+  check('flag off  -> realtimeEnabled() is false', realtimeEnabled() === false);
+  process.env.NEXT_PUBLIC_REALTIME_ENABLED = '';
+  check('flag unset-> realtimeEnabled() is false (defaults to OFF)', realtimeEnabled() === false);
+  delete process.env.NEXT_PUBLIC_REALTIME_ENABLED;
+  check('flag absent -> realtimeEnabled() is false', realtimeEnabled() === false);
+  process.env.NEXT_PUBLIC_REALTIME_ENABLED = 'true';
+  check('flag on   -> realtimeEnabled() is true', realtimeEnabled() === true);
+
+  const hookSrc = readFileSyncEarly(
+    joinEarly(process.cwd(), 'src', 'hooks', 'use-realtime-events.ts'),
+  );
+  // Scope the search to the hook body: `subscribeToRealtimeChannel` (the
+  // exported test seam) also calls subscribe, and it appears EARLIER in the
+  // file, so an unscoped indexOf compares against the wrong call site.
+  const hookAt = hookSrc.indexOf('export function useRealtimeEvents');
+  const body = hookSrc.slice(hookAt);
+  const guardAt = body.indexOf('if (!realtimeEnabled()) return;');
+  const subscribeAt = body.indexOf('return subscribe(tenantId, handler);');
+  check(
+    'the hook checks the kill switch BEFORE subscribing',
+    hookAt > 0 && guardAt > 0 && subscribeAt > 0 && guardAt < subscribeAt,
+    `guard@${guardAt} subscribe@${subscribeAt} (relative to hook)`,
+  );
+
+  // Both endpoints refuse fast. 204 matters: per the HTML spec a non-200
+  // makes EventSource fail permanently rather than reconnect.
+  for (const route of [
+    ['events', ['src', 'app', 'api', 'realtime', 'events', 'route.ts']],
+    ['publish', ['src', 'app', 'api', 'realtime', 'publish', 'route.ts']],
+  ] as const) {
+    const src = readFileSyncEarly(joinEarly(process.cwd(), ...route[1]));
+    check(
+      `/api/realtime/${route[0]} refuses with 204 when disabled`,
+      /if \(!realtimeEnabled\(\)\)/.test(src) && src.includes('status: 204'),
+    );
+  }
+
+  /* 11. Deploy-time constraints on the SSE route ---------------------- */
   // These only fail on Vercel's builder, which rejects the ENTIRE deployment
   // for an out-of-range maxDuration — a green local build tells you nothing.
   // Cheaper to assert here than to discover it in a failed production deploy.
-  const { readFileSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const routeSrc = readFileSync(
-    join(process.cwd(), 'src', 'app', 'api', 'realtime', 'events', 'route.ts'),
-    'utf8',
+  const routeSrc = readFileSyncEarly(
+    joinEarly(process.cwd(), 'src', 'app', 'api', 'realtime', 'events', 'route.ts'),
   );
 
   const declared = Number(

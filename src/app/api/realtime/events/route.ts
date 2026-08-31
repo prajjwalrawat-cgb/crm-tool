@@ -10,6 +10,7 @@ import {
   observe,
   runWithTrace,
 } from '@/lib/observability';
+import { realtimeEnabled } from '@/lib/realtime/enabled';
 import {
   type RealtimeEnvelope,
   tenantChannel,
@@ -77,6 +78,19 @@ export async function GET(request: NextRequest): Promise<Response> {
 }
 
 async function handleSseConnection(request: NextRequest): Promise<Response> {
+  // Kill switch — see src/lib/realtime/enabled.ts. Return before any auth,
+  // LISTEN or stream setup so the invocation ends immediately instead of
+  // provisioning an instance for the life of a tab.
+  //
+  // 204 rather than an empty event-stream: per the HTML spec a non-200
+  // status (or a non-`text/event-stream` content type) makes EventSource
+  // FAIL the connection permanently instead of reconnecting. That matters —
+  // a client that ignored the flag would otherwise reconnect forever.
+  if (!realtimeEnabled()) {
+    incr('sse.disabled');
+    return new NextResponse(null, { status: 204 });
+  }
+
   const { userId } = await auth();
   if (!userId) {
     incr('sse.unauthenticated');

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { realtimeEnabled } from '@/lib/realtime/enabled';
+
 import { useRealtimeEvents } from './use-realtime-events';
 
 /**
@@ -49,6 +51,9 @@ export function useEntityViewers(args: {
 
   // Publish own presence + heartbeat for the lifetime of this component.
   useEffect(() => {
+    // Kill switch — with no SSE listeners these reach nobody, and the
+    // heartbeat is a billed invocation every cycle per open page.
+    if (!realtimeEnabled()) return;
     const payload = {
       kind: 'viewing.started',
       entity: { type: args.entityType, id: args.entityId },

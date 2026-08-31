@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 
+import { realtimeEnabled } from '@/lib/realtime/enabled';
 import type { RealtimeEnvelope, RealtimeEvent } from '@/lib/realtime/events';
 
 const SEEN_CAP = 1000;
@@ -225,6 +226,10 @@ export function useRealtimeEvents(
 
   useEffect(() => {
     if (!tenantId) return;
+    // Kill switch. The CLIENT has to be the one that declines: EventSource
+    // retries a refused connection on its own, so a server-only guard would
+    // swap one long invocation for a stream of short ones.
+    if (!realtimeEnabled()) return;
     // Stable indirection so the Set entry never changes identity across
     // renders — the registry keys unsubscribe off this exact reference.
     const handler: Handler = (event) => onEventRef.current(event);
