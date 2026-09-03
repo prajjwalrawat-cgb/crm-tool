@@ -7,6 +7,10 @@ import { toast } from 'sonner';
 
 import { patchDealAction } from '@/app/dashboard/deals/actions';
 import { formatSlipDate, slipTooltip } from '@/lib/deals/slip';
+import {
+  CLOSE_DATE_CLEAR_BLOCKED_MESSAGE,
+  closeDateRequiredForStage,
+} from '@/lib/deals/stage-governance';
 import { cn } from '@/lib/utils';
 
 /**
@@ -92,6 +96,13 @@ export function DealCloseDateCard({
   // A Lead may not carry a close date at all, so there's nothing to edit until
   // the deal is qualified (same rule the server enforces).
   const editable = canEdit && stage !== 'lead';
+  // R1/R3 — from Proposal on, the date is mandatory and an existing one can't
+  // be blanked. Enforced in the UI (Save disabled, field marked required)
+  // rather than only in the action, so the rep is stopped at the input instead
+  // of after a failed round-trip. The server and the DB still refuse it — this
+  // is the friendly layer over both.
+  const dateRequired = closeDateRequiredForStage(stage);
+  const clearingBlocked = dateRequired && value.trim() === '';
 
   const cancel = useCallback(() => {
     setValue(expectedCloseDate ?? '');
@@ -131,6 +142,9 @@ export function DealCloseDateCard({
       setMode('idle');
       return;
     }
+    // R3 — stay in edit mode with the field flagged rather than firing a
+    // request the server will refuse.
+    if (dateRequired && next === null) return;
     // Only a forward move gets the "why?" prompt. Clearing the date, setting a
     // first one, or pulling it in are not pushbacks and shouldn't interrogate
     // the rep.
@@ -184,8 +198,10 @@ export function DealCloseDateCard({
               <button
                 type="button"
                 onClick={save}
+                // R1/R3 — "disable Save until populated", per the spec.
+                disabled={clearingBlocked}
                 aria-label="Save expected close date"
-                className="rounded p-0.5 text-emerald-600 hover:bg-emerald-50"
+                className="rounded p-0.5 text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
               >
                 <Check className="h-3.5 w-3.5" aria-hidden />
               </button>
@@ -233,9 +249,19 @@ export function DealCloseDateCard({
             ref={dateInputRef}
             type="date"
             value={value}
+            required={dateRequired}
+            aria-invalid={clearingBlocked || undefined}
             onChange={(e) => setValue(e.target.value)}
-            className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[13px]"
+            className={cn(
+              'w-full rounded-md border bg-white px-2 py-1 text-[13px]',
+              clearingBlocked ? 'border-red-300' : 'border-slate-200',
+            )}
           />
+          {clearingBlocked ? (
+            <p className="mt-1 text-[11px] text-red-600">
+              {CLOSE_DATE_CLEAR_BLOCKED_MESSAGE}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div

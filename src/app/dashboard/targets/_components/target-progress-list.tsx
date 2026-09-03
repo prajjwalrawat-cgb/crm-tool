@@ -2,6 +2,7 @@ import {
   formatTenantCurrency,
   type TenantCurrencyContext,
 } from '@/lib/currency/format';
+import { deweightedNote } from '@/lib/targets/quota-credit';
 import type { TargetProgressRow } from '@/lib/targets/queries';
 import { cn } from '@/lib/utils';
 
@@ -80,7 +81,13 @@ export function TargetProgressList({
   }
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      {rows.map((r) => (
+      {rows.map((r) => {
+        const deweightNote = deweightedNote(
+          r.deweightedLossMinor,
+          r.deweightedCount,
+          (minor) => formatTenantCurrency(minor, ctx),
+        );
+        return (
         <div
           key={r.userId}
           className="rounded-lg border border-slate-200 bg-white p-4 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]"
@@ -113,9 +120,20 @@ export function TargetProgressList({
               targetMinor={r.marginTargetMinor}
               ctx={ctx}
             />
+            {/* R6/R7 — name the pushback haircut rather than letting the
+                revenue bar quietly come up short. Only rendered when it
+                actually applies; a rep who hasn't pushed anything sees
+                nothing new. Margin is unweighted, so the note sits under
+                both bars but refers only to Revenue. */}
+            {deweightNote ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                {deweightNote}
+              </p>
+            ) : null}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

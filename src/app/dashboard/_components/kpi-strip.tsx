@@ -22,7 +22,10 @@ import {
 import type { DashboardKpis } from '@/lib/dashboard/kpis';
 import type { DashboardRange } from '@/lib/dashboard/range';
 import { fiscalYearLabel } from '@/lib/targets/fiscal';
-import { pendingApprovalNote } from '@/lib/targets/quota-credit';
+import {
+  deweightedNote,
+  pendingApprovalNote,
+} from '@/lib/targets/quota-credit';
 import { cn } from '@/lib/utils';
 
 /**
@@ -241,6 +244,17 @@ export function KpiStrip({
       kpis.quota.pendingApprovalCount,
       money,
     );
+    // R6/R7 — revenue the pushback haircut removed from the achieved figure.
+    // Disclosed for the same reason `withheld` is: `achieved + deweighted` is
+    // the face value of the credited deals, so a reader can reconcile this
+    // tile against the won totals instead of assuming the math is broken.
+    // A silent haircut also teaches nobody to stop pushing dates, which is
+    // the behaviour the rule exists to change.
+    const deweighted = deweightedNote(
+      kpis.quota.deweightedLossMinor,
+      kpis.quota.deweightedCount,
+      money,
+    );
     tiles.push({
       key: 'quota',
       label: `Quota attainment · ${fyLabel}`,
@@ -265,10 +279,15 @@ export function KpiStrip({
         withheld
           ? `A further ${exact(kpis.quota.pendingApprovalMinor)} is won but awaiting manager approval, so it is excluded until approved.`
           : null,
+        deweighted
+          ? `${exact(kpis.quota.deweightedLossMinor)} was removed because ${kpis.quota.deweightedCount} won ${kpis.quota.deweightedCount === 1 ? 'deal' : 'deals'} had the close date pushed more than three times, and count at 50%.`
+          : null,
       ]
         .filter(Boolean)
         .join(' '),
-      footnote: withheld ?? undefined,
+      // Both notes can apply at once; join them rather than letting one
+      // hide the other, since they explain different parts of the same gap.
+      footnote: [withheld, deweighted].filter(Boolean).join(' · ') || undefined,
     });
   }
 

@@ -514,6 +514,12 @@ async function main() {
 
       // Expected close date: forward-looking for active deals, with some
       // overdue ones to surface stale-deal alerts.
+      //
+      // A CLOSED deal takes the date it actually closed on, rather than null.
+      // Won requires a close date (R1, migration 0060), and "the date it
+      // closed" is both the truthful value and what makes the seeded data
+      // usable for close-date reporting. Lost is exempt from R1 but gets the
+      // same treatment so the two aren't gratuitously different.
       const expectedDaysOut = isClosed
         ? null
         : Math.random() < 0.15
@@ -525,7 +531,9 @@ async function main() {
           ? new Date(Date.now() + expectedDaysOut * 24 * 60 * 60_000)
               .toISOString()
               .slice(0, 10)
-          : null;
+          : closedAt
+            ? closedAt.toISOString().slice(0, 10)
+            : null;
 
       const currency = pickCurrency();
       // Amount realistic per currency.

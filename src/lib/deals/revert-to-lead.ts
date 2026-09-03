@@ -10,6 +10,11 @@ import { deriveForecastCategory } from '@/lib/deals/forecast/categories';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 import { checkGateAndLogWarnings } from '@/lib/stage-gates/enforce';
+import {
+  clearStageChangeReason,
+  setStageChangeReason,
+} from '@/lib/deals/stage-change-reason';
+import { SYSTEM_ROLLBACK_REASONS } from '@/lib/deals/stage-governance';
 
 /**
  * TEMPORARY (Lead close-date rollout). Send one Qualified deal back to Lead,
@@ -85,6 +90,17 @@ export async function revertDealToLead(
   });
   if (!gate.allowed) return { blocked: previous.name };
 
+  // R2 — Qualified -> Lead is a backward move through the funnel, so the
+  // governance trigger (0060) requires a reason code. This revert has exactly
+  // one reason, recorded under a system code so the audit trail shows WHY the
+  // deal went back rather than leaving an unexplained rollback behind. Cleared
+  // straight after the write: the caller loops over many deals in one
+  // transaction, and a standing reason would authorise the next iteration.
+  await setStageChangeReason(tx, {
+    code: SYSTEM_ROLLBACK_REASONS.leadCloseDateCleanup,
+    note: 'Bulk revert to Lead — expected close date cleared',
+  });
+
   const [updated] = await tx
     .update(deals)
     .set({
@@ -105,6 +121,7 @@ export async function revertDealToLead(
       ),
     )
     .returning();
+  await clearStageChangeReason(tx);
   if (!updated) return 'skipped';
 
   await recordActivity(tx, {

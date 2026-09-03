@@ -10,8 +10,30 @@ import {
   MARGIN_REQUIRED_MESSAGE,
   marginRequiredForStage,
 } from '@/lib/deals/validation';
+import {
+  CLOSE_DATE_CLEAR_BLOCKED_MESSAGE,
+  closeDateRequiredMessage,
+  ROLLBACK_REASON_REQUIRED_MESSAGE,
+  isRollbackTransition,
+  violatesCloseDateClear,
+  violatesMissingCloseDate,
+} from '@/lib/deals/stage-governance';
 
-export function validateDealForm(fd: FormData): Record<string, string[]> {
+/**
+ * `previous` describes the deal being EDITED, and is omitted on create. The
+ * rules that compare against a stored value (R2's backward move, R3's date
+ * clear) can only run when it's supplied; the create form simply has nothing
+ * to move backward from or blank.
+ */
+export type PreviousDealState = {
+  stage: string;
+  expectedCloseDate: string | null;
+};
+
+export function validateDealForm(
+  fd: FormData,
+  previous?: PreviousDealState | null,
+): Record<string, string[]> {
   const errs: Record<string, string[]> = {};
 
   const name = String(fd.get('name') ?? '').trim();
@@ -36,6 +58,39 @@ export function validateDealForm(fd: FormData): Record<string, string[]> {
   if (stage === 'lost') {
     if (!String(fd.get('lostReason') ?? '').trim()) {
       errs.lostReason = ['A reason is required when marking a deal Lost'];
+    }
+  }
+
+  // R1 — Proposal / Negotiation / Won can't be saved without a close date.
+  // The field is hidden entirely in Lead (a Lead may not carry one), so this
+  // reads whatever the form actually submitted rather than assuming presence.
+  const closeDate = String(fd.get('expectedCloseDate') ?? '').trim();
+  if (violatesMissingCloseDate(stage, closeDate)) {
+    errs.expectedCloseDate = [closeDateRequiredMessage(stage)];
+  }
+
+  if (previous) {
+    // R3 — an existing date can't be blanked while the deal stays in a
+    // date-required stage. Checked against the stage being SAVED, so an edit
+    // that rolls the deal back and drops the date in one submit is allowed.
+    if (
+      violatesCloseDateClear({
+        nextStage: stage,
+        previousCloseDate: previous.expectedCloseDate,
+        nextCloseDate: closeDate,
+      })
+    ) {
+      errs.expectedCloseDate = [CLOSE_DATE_CLEAR_BLOCKED_MESSAGE];
+    }
+
+    // R2 — a backward stage move needs a reason code. The drawer collects one
+    // into a hidden input once the user confirms the move; if it's still
+    // missing at submit time, stop here rather than spending a round-trip.
+    if (
+      isRollbackTransition(previous.stage, stage) &&
+      !String(fd.get('rollbackReason') ?? '').trim()
+    ) {
+      errs.rollbackReason = [ROLLBACK_REASON_REQUIRED_MESSAGE];
     }
   }
 

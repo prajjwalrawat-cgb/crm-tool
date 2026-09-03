@@ -148,7 +148,9 @@ async function main() {
     // 4. Multi-open-deal: add a 2nd open deal on the same contact → new message
     //    attaches to the most recent + needs_review.
     dealBId = await txAs(tenantId, async (tx) => {
-      const [d] = await tx.insert(deals).values({ tenantId, name: 'Sync Selftest Deal B', stage: 'proposal', contactId, amountMinor: 2000, currency: 'INR' }).returning({ id: deals.id });
+      // expectedCloseDate is required from Proposal on (R1, migration 0060).
+      // Incidental to what this test checks — it just needs a valid deal.
+      const [d] = await tx.insert(deals).values({ tenantId, name: 'Sync Selftest Deal B', stage: 'proposal', contactId, amountMinor: 2000, currency: 'INR', expectedCloseDate: '2027-01-31' }).returning({ id: deals.id });
       return d!.id;
     });
     const ext4 = `gmail-selftest-${Date.now()}-4`;

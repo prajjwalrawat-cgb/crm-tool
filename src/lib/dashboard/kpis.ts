@@ -8,7 +8,10 @@ import { timeQuery } from '@/lib/pagination/timing';
 import { currentFiscalYear, fiscalYearRange } from '@/lib/targets/fiscal';
 import { listTargets } from '@/lib/targets/queries';
 import {
+  DEWEIGHTED_LOSS_SQL,
+  DEWEIGHTED_SQL,
   QUOTA_CREDIT_SQL,
+  WEIGHTED_AMOUNT_SQL,
   QUOTA_WITHHELD_SQL,
 } from '@/lib/targets/quota-credit';
 
@@ -75,6 +78,15 @@ export type DashboardKpis = {
      */
     pendingApprovalMinor: number;
     pendingApprovalCount: number;
+    /**
+     * Revenue the pushback haircut removed from `achievedMinor` (R6/R7),
+     * and how many won deals carry one. Reported for the same reason the
+     * pending figures are: `achievedMinor + deweightedLossMinor` is the
+     * face value of the credited deals, so the tile can name the gap
+     * rather than silently showing a smaller number than the won total.
+     */
+    deweightedLossMinor: number;
+    deweightedCount: number;
     fiscalYear: number;
     /** FY window actually measured — drives the tile's scope label. */
     fromISO: string;
@@ -213,6 +225,16 @@ async function closedWindow(
  * The withheld figure comes back in the same scan so the tile can name
  * the gap instead of leaving the reader to wonder why attainment
  * disagrees with the won total elsewhere on the page.
+ *
+ * R7: the credited figures are amount x quota_weight, not the raw
+ * amount — a deal pushed more than three times counts at 50% (see
+ * migration 0060). The weighting fragments are imported from
+ * `lib/targets/quota-credit` rather than spelled out here, for
+ * exactly the reason the credit rule above is: this query and
+ * `targetAchievement` answer the same question on two screens, and
+ * the last time each wrote its own version of a rule they disagreed
+ * for months. The revenue the weighting removed comes back alongside,
+ * so the tile can disclose the haircut instead of quietly shrinking.
  */
 async function quotaAchievement(
   tenantId: string,
@@ -225,14 +247,16 @@ async function quotaAchievement(
   priorAchievedMinor: number;
   pendingApprovalMinor: number;
   pendingApprovalCount: number;
+  deweightedLossMinor: number;
+  deweightedCount: number;
 }> {
   const rows = (await tenantTransaction(async (tx) =>
     tx.execute(sql`
       SELECT
-        COALESCE(SUM(amount_minor) FILTER (WHERE ${sql.raw(QUOTA_CREDIT_SQL)}), 0)::bigint
+        COALESCE(SUM(${sql.raw(WEIGHTED_AMOUNT_SQL)}) FILTER (WHERE ${sql.raw(QUOTA_CREDIT_SQL)}), 0)::bigint
           AS achieved,
         COALESCE(
-          SUM(amount_minor) FILTER (
+          SUM(${sql.raw(WEIGHTED_AMOUNT_SQL)}) FILTER (
             WHERE ${sql.raw(QUOTA_CREDIT_SQL)}
               AND closed_at < ${splitAt.toISOString()}::timestamptz
           ),
@@ -241,7 +265,12 @@ async function quotaAchievement(
         COALESCE(SUM(amount_minor) FILTER (WHERE ${sql.raw(QUOTA_WITHHELD_SQL)}), 0)::bigint
           AS pending_amount,
         COUNT(*) FILTER (WHERE ${sql.raw(QUOTA_WITHHELD_SQL)})::int
-          AS pending_count
+          AS pending_count,
+        COALESCE(SUM(${sql.raw(DEWEIGHTED_LOSS_SQL)}) FILTER (WHERE ${sql.raw(QUOTA_CREDIT_SQL)}), 0)::bigint
+          AS deweighted_loss,
+        COUNT(*) FILTER (
+          WHERE ${sql.raw(QUOTA_CREDIT_SQL)} AND ${sql.raw(DEWEIGHTED_SQL)}
+        )::int AS deweighted_count
       FROM deals
       WHERE tenant_id = ${tenantId}::uuid
         AND deleted_at IS NULL
@@ -256,18 +285,24 @@ async function quotaAchievement(
     prior_achieved: string | number;
     pending_amount: string | number;
     pending_count: string | number;
+    deweighted_loss: string | number;
+    deweighted_count: string | number;
   }>;
   const r = rows[0] ?? {
     achieved: 0,
     prior_achieved: 0,
     pending_amount: 0,
     pending_count: 0,
+    deweighted_loss: 0,
+    deweighted_count: 0,
   };
   return {
     achievedMinor: Number(r.achieved) || 0,
     priorAchievedMinor: Number(r.prior_achieved) || 0,
     pendingApprovalMinor: Number(r.pending_amount) || 0,
     pendingApprovalCount: Number(r.pending_count) || 0,
+    deweightedLossMinor: Number(r.deweighted_loss) || 0,
+    deweightedCount: Number(r.deweighted_count) || 0,
   };
 }
 
@@ -346,6 +381,8 @@ export async function getDashboardKpis(
               priorAchievedMinor: achievement.priorAchievedMinor,
               pendingApprovalMinor: achievement.pendingApprovalMinor,
               pendingApprovalCount: achievement.pendingApprovalCount,
+              deweightedLossMinor: achievement.deweightedLossMinor,
+              deweightedCount: achievement.deweightedCount,
               fiscalYear,
               fromISO: fyStart.toISOString(),
               toISO: now.toISOString(),

@@ -96,6 +96,11 @@ export async function loadSerializedDeal(
       pushCount: deals.pushCount,
       lastPushedAt: deals.lastPushedAt,
       totalSlipDays: deals.totalSlipDays,
+      // Governance cache (0060) — same reasoning: without these a realtime
+      // reconcile would drop a card's rollback badge until the next reload.
+      rollbackCount: deals.rollbackCount,
+      quotaWeight: deals.quotaWeight,
+      lastStageChangedAt: deals.lastStageChangedAt,
       closedAt: deals.closedAt,
       ownerId: deals.ownerId,
       probability: deals.probability,

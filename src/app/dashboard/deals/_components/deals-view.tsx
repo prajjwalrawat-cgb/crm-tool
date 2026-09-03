@@ -53,6 +53,12 @@ import { DealFilterBar } from './deal-filter-bar';
 import { EditDealDrawer } from './edit-deal-drawer';
 import { LostReasonModal } from './lost-reason-modal';
 import { ClearCloseDateModal } from './clear-close-date-modal';
+import { RollbackReasonModal } from './rollback-reason-modal';
+import {
+  CLOSE_DATE_CLEAR_BLOCKED_MESSAGE,
+  isRollbackTransition,
+  violatesCloseDateClear,
+} from '@/lib/deals/stage-governance';
 import { EmptyState } from './empty-state';
 import { InlineEditCell } from '../../_components/inline-edit-cell';
 import { InlineSelectCell } from '../../_components/inline-select-cell';
@@ -181,6 +187,14 @@ export function DealsView({
   const [lostPrompt, setLostPrompt] = useState<DealRow | null>(null);
   // Dated deal awaiting confirmation that moving to Lead drops its close date.
   const [clearDatePrompt, setClearDatePrompt] = useState<DealRow | null>(null);
+  // R2 — a backward stage pick, held until a reason is given. `clearCloseDate`
+  // rides along so a dated deal going back to Lead (both a date clear AND a
+  // rollback) doesn't bounce between the two prompts.
+  const [rollbackPrompt, setRollbackPrompt] = useState<{
+    deal: DealRow;
+    toStage: DealStage;
+    clearCloseDate?: boolean;
+  } | null>(null);
 
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -394,6 +408,11 @@ export function DealsView({
       pushCount: base?.pushCount ?? 0,
       lastPushedAt: base?.lastPushedAt ?? null,
       totalSlipDays: base?.totalSlipDays ?? 0,
+      // Governance counters (0060) are trigger-maintained too — same rule:
+      // carry the known values, let the authoritative ones arrive.
+      rollbackCount: base?.rollbackCount ?? 0,
+      quotaWeight: base?.quotaWeight ?? '1.00',
+      lastStageChangedAt: base?.lastStageChangedAt ?? null,
       closedAt,
       ownerId,
       probability: base?.probability ?? null,
@@ -523,6 +542,21 @@ export function DealsView({
   function commitField(deal: DealItem, field: EditableField, raw: string) {
     const prev = fieldRaw(deal, field);
     if (raw === prev) return;
+    // R3 — an inline cell is the classic way a committed close date gets
+    // quietly deleted: there is no stage change here to justify it, so the
+    // edit is refused outright. Reported before the round-trip (the action
+    // and the DB both refuse it too) so the cell doesn't flash empty first.
+    if (
+      field === 'expectedCloseDate' &&
+      violatesCloseDateClear({
+        nextStage: deal.stage,
+        previousCloseDate: deal.expectedCloseDate,
+        nextCloseDate: raw,
+      })
+    ) {
+      toast.error(CLOSE_DATE_CLEAR_BLOCKED_MESSAGE);
+      return;
+    }
     const forward = buildFieldPatch(deal, field, raw);
     const reverse = buildFieldPatch(deal, field, prev);
     runPatch(deal.id, forward, () => runPatch(deal.id, reverse));
@@ -599,7 +633,12 @@ export function DealsView({
   function handleStageChange(
     deal: DealRow,
     nextStage: DealStage,
-    opts?: { undo?: boolean; reason?: string; clearCloseDate?: boolean },
+    opts?: {
+      undo?: boolean;
+      reason?: string;
+      clearCloseDate?: boolean;
+      rollback?: { reason: string; note: string };
+    },
   ) {
     if (deal.stage === nextStage) return;
     const prevStage = deal.stage;
@@ -625,6 +664,8 @@ export function DealsView({
         stage: nextStage,
         reason: opts?.reason,
         clearCloseDate: opts?.clearCloseDate,
+        rollbackReason: opts?.rollback?.reason,
+        rollbackNote: opts?.rollback?.note,
       });
       if (!result.ok) {
         // Refused only because the deal is dated — ask instead of erroring.
@@ -632,6 +673,16 @@ export function DealsView({
         // The optimistic move unwinds on its own as the transition ends.
         if (result.needsCloseDateClear) {
           setClearDatePrompt(deal);
+          return;
+        }
+        // R2 — same deal: the server saw a backward move against the current
+        // row, which ours may be stale about. Ask rather than erroring.
+        if (result.needsRollbackReason) {
+          setRollbackPrompt({
+            deal,
+            toStage: nextStage,
+            clearCloseDate: opts?.clearCloseDate,
+          });
           return;
         }
         toast.error(`Couldn't change stage: ${result.message}`);
@@ -662,6 +713,12 @@ export function DealsView({
     // that misses this still gets caught by the server's needsCloseDateClear.
     if (next === 'lead' && deal.expectedCloseDate) {
       setClearDatePrompt(deal);
+      return;
+    }
+    // R2 — a backward move needs a reason before it commits, exactly as on
+    // the board. Blocked here rather than sent and bounced.
+    if (isRollbackTransition(deal.stage, next)) {
+      setRollbackPrompt({ deal, toStage: next });
       return;
     }
     handleStageChange(deal, next);
@@ -840,6 +897,23 @@ export function DealsView({
         fieldErrors={editFieldErrors}
         canDelete={canDelete}
       />
+
+      {rollbackPrompt ? (
+        <RollbackReasonModal
+          dealName={rollbackPrompt.deal.name}
+          fromStage={rollbackPrompt.deal.stage}
+          toStage={rollbackPrompt.toStage}
+          pending={stagePending}
+          onCancel={() => setRollbackPrompt(null)}
+          onConfirm={(reason, note) => {
+            handleStageChange(rollbackPrompt.deal, rollbackPrompt.toStage, {
+              rollback: { reason, note },
+              clearCloseDate: rollbackPrompt.clearCloseDate,
+            });
+            setRollbackPrompt(null);
+          }}
+        />
+      ) : null}
 
       {lostPrompt ? (
         <LostReasonModal

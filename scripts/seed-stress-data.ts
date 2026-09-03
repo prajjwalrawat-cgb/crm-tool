@@ -163,6 +163,16 @@ async function main() {
     const owner = insertedCompanies[i % insertedCompanies.length]!;
     const contactRow = insertedContacts[i % insertedContacts.length] ?? null;
     const stage = pick(STAGES);
+    const closedAt = stage === 'won' || stage === 'lost' ? new Date() : null;
+    // Proposal / Negotiation / Won require a close date (R1, migration 0060).
+    // Lead must NOT carry one (violatesLeadCloseDate). Give every other stage
+    // a date so the generator satisfies both rules whatever `pick` returns.
+    const expectedCloseDate =
+      stage === 'lead'
+        ? null
+        : (closedAt ?? new Date(Date.now() + randomInt(7, 90) * 86_400_000))
+            .toISOString()
+            .slice(0, 10);
     return {
       tenantId,
       companyId: owner.id,
@@ -171,7 +181,8 @@ async function main() {
       stage,
       amountMinor: randomInt(50_000, 5_000_000),
       currency: pick(CURRENCIES),
-      closedAt: stage === 'won' || stage === 'lost' ? new Date() : null,
+      expectedCloseDate,
+      closedAt,
     };
   });
   const insertedDeals: Array<{ id: string; stage: typeof STAGES[number] }> = [];

@@ -71,6 +71,57 @@ export const QUOTA_WITHHELD_SQL = `approval_status IN (${QUOTA_WITHHELD_APPROVAL
   (s) => `'${s}'`,
 ).join(', ')})`;
 
+/* ---------------------------------------------------------------
+ * DE-WEIGHTING (R6/R7) — the second thing that moves attainment
+ * ---------------------------------------------------------------
+ * A deal whose close date has been pushed more than three times
+ * counts at half value (`deals.quota_weight` = 0.50, maintained by
+ * the governance trigger in 0060). Approval decides WHETHER a deal
+ * counts; the weight decides HOW MUCH.
+ *
+ * These fragments exist for the same reason the credit rule above
+ * does: `targetAchievement` and the dashboard's `quotaAchievement`
+ * are two independently-written queries answering the same question,
+ * and the last time they each spelled out a rule by hand they
+ * disagreed for months. Multiplying by `quota_weight` in one place
+ * that both import is the only version of this that stays true.
+ *
+ * ROUND, not truncate: minor units are integers, and floor() on
+ * every deal would drift attainment down by up to a unit per deal.
+ * ::bigint after the round keeps the column type the callers expect.
+ */
+
+/** `amount_minor` weighted by the deal's quota weight, as bigint minor units. */
+export const WEIGHTED_AMOUNT_SQL = 'ROUND(amount_minor * quota_weight)::bigint';
+
+/**
+ * The revenue a de-weighting has REMOVED — face value minus weighted value.
+ * Surfaced next to attainment so a rep can see the haircut instead of
+ * wondering why their number is short: the same disclosure discipline as
+ * `pendingApprovalNote`, and the reason R6 changes behaviour at all.
+ */
+export const DEWEIGHTED_LOSS_SQL =
+  '(amount_minor - ROUND(amount_minor * quota_weight))::bigint';
+
+/** Matches only the deals actually carrying a haircut. */
+export const DEWEIGHTED_SQL = 'quota_weight < 1.00';
+
+/**
+ * The one-line disclosure a tile renders when pushed deals have cost
+ * the rep credit. Null when nothing is de-weighted — the common case,
+ * where the tile should stay quiet rather than explain a rule nobody hit.
+ */
+export function deweightedNote(
+  lostMinor: number,
+  dealCount: number,
+  formatMoney: (minor: number) => string,
+): string | null {
+  if (dealCount <= 0 || lostMinor <= 0) return null;
+  return `${formatMoney(lostMinor)} not counted from ${dealCount} ${
+    dealCount === 1 ? 'deal' : 'deals'
+  } pushed 4+ times — counted at 50%`;
+}
+
 /** Same rule, for rows already loaded into app memory. */
 export function earnsQuotaCredit(approvalStatus: string | null): boolean {
   return (QUOTA_CREDIT_APPROVAL_STATUSES as readonly string[]).includes(

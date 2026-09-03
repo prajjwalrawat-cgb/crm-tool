@@ -366,6 +366,7 @@ export type DeserializedDeal = Omit<
   | 'deletedAt'
   | 'approvedAt'
   | 'lastPushedAt'
+  | 'lastStageChangedAt'
 > & {
   createdAt: Date;
   updatedAt: Date;
@@ -373,6 +374,7 @@ export type DeserializedDeal = Omit<
   deletedAt: Date | null;
   approvedAt: Date | null;
   lastPushedAt: Date | null;
+  lastStageChangedAt: Date | null;
 };
 
 export function deserializeDeal(d: SerializedDeal): DeserializedDeal {
@@ -384,5 +386,8 @@ export function deserializeDeal(d: SerializedDeal): DeserializedDeal {
     deletedAt: d.deletedAt ? new Date(d.deletedAt) : null,
     approvedAt: d.approvedAt ? new Date(d.approvedAt) : null,
     lastPushedAt: d.lastPushedAt ? new Date(d.lastPushedAt) : null,
+    lastStageChangedAt: d.lastStageChangedAt
+      ? new Date(d.lastStageChangedAt)
+      : null,
   };
 }
