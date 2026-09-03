@@ -12,8 +12,11 @@ import {
   type DealStage,
 } from '@/lib/deals/schema';
 
+import { isRollbackTransition } from '@/lib/deals/stage-governance';
+
 import { ClearCloseDateModal } from '../../_components/clear-close-date-modal';
 import { LostReasonModal } from '../../_components/lost-reason-modal';
+import { RollbackReasonModal } from '../../_components/rollback-reason-modal';
 
 /**
  * Stage as an editable Deal Info card. Stage isn't a plain field patch — it
@@ -39,6 +42,9 @@ export function DealStageCard({
   const [pending, startTransition] = useTransition();
   const [lostPrompt, setLostPrompt] = useState(false);
   const [clearDatePrompt, setClearDatePrompt] = useState(false);
+  // R2 — a backward stage pick, held until a reason is given. Stores the
+  // target stage so the confirm path doesn't depend on `draft` surviving.
+  const [rollbackPrompt, setRollbackPrompt] = useState<DealStage | null>(null);
 
   // Adopt the server's stage on a fresh render while idle.
   const [syncedStage, setSyncedStage] = useState(stage);
@@ -47,7 +53,14 @@ export function DealStageCard({
     setDraft(stage);
   }
 
-  function commit(next: DealStage, opts?: { reason?: string; clearCloseDate?: boolean }) {
+  function commit(
+    next: DealStage,
+    opts?: {
+      reason?: string;
+      clearCloseDate?: boolean;
+      rollback?: { reason: string; note: string };
+    },
+  ) {
     setEditing(false);
     startTransition(async () => {
       const result = await updateDealStageAction({
@@ -55,11 +68,19 @@ export function DealStageCard({
         stage: next,
         reason: opts?.reason,
         clearCloseDate: opts?.clearCloseDate,
+        rollbackReason: opts?.rollback?.reason,
+        rollbackNote: opts?.rollback?.note,
       });
       if (!result.ok) {
         // Dated deal going back to Lead — offer the trade instead of an error.
         if (result.needsCloseDateClear) {
           setClearDatePrompt(true);
+          return;
+        }
+        // R2 — the server saw a backward move we didn't (our `stage` prop can
+        // be stale). Ask rather than erroring out.
+        if (result.needsRollbackReason) {
+          setRollbackPrompt(next);
           return;
         }
         toast.error(result.message);
@@ -82,6 +103,12 @@ export function DealStageCard({
     if (draft === 'lead' && expectedCloseDate) {
       setEditing(false);
       setClearDatePrompt(true);
+      return;
+    }
+    // R2 — collect the reason before firing, same as the board's drag does.
+    if (isRollbackTransition(stage, draft)) {
+      setEditing(false);
+      setRollbackPrompt(draft);
       return;
     }
     commit(draft);
@@ -176,6 +203,31 @@ export function DealStageCard({
           onConfirm={(reason) => {
             setLostPrompt(false);
             commit('lost', { reason });
+          }}
+        />
+      ) : null}
+
+      {rollbackPrompt ? (
+        <RollbackReasonModal
+          dealName={dealName}
+          fromStage={stage}
+          toStage={rollbackPrompt}
+          pending={pending}
+          onCancel={() => {
+            setRollbackPrompt(null);
+            setDraft(stage);
+          }}
+          onConfirm={(reason, note) => {
+            const next = rollbackPrompt;
+            setRollbackPrompt(null);
+            // A dated deal going back to Lead answered the date question
+            // first, so carry that acceptance through with the reason.
+            commit(next, {
+              rollback: { reason, note },
+              ...(next === 'lead' && expectedCloseDate
+                ? { clearCloseDate: true }
+                : {}),
+            });
           }}
         />
       ) : null}

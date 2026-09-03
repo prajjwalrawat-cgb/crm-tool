@@ -2,7 +2,7 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Flag, Loader2 } from 'lucide-react';
+import { Flag, Loader2, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import { memo } from 'react';
 
@@ -14,6 +14,11 @@ import {
   slipSeverity,
   slipTooltip,
 } from '@/lib/deals/slip';
+import {
+  deweightTooltip,
+  isDeweighted,
+  rollbackChipLabel,
+} from '@/lib/deals/stage-governance';
 import { cn } from '@/lib/utils';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -47,6 +52,25 @@ function slipChipClass(severity: 'watch' | 'severe'): string {
     ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
     : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300';
 }
+
+/**
+ * The de-weighted Pushed chip (R6): an outlined variant of the severe chip,
+ * not a fourth color. Severity already earns rose at 3 pushes; the outline is
+ * what says "and now it costs you something". A new hue here would read as a
+ * different KIND of problem rather than a worse degree of the same one.
+ */
+const DEWEIGHTED_CHIP_CLASS =
+  'bg-rose-100 text-rose-800 ring-1 ring-inset ring-rose-500 ' +
+  'dark:bg-rose-500/20 dark:text-rose-200 dark:ring-rose-400';
+
+/**
+ * The Rollback chip. Deliberately violet — a stage regression and a date slip
+ * are different failures, and the spec is explicit that the two must not be
+ * conflated. Sharing the amber/rose scale would imply they're the same signal
+ * at different strengths.
+ */
+const ROLLBACK_CHIP_CLASS =
+  'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300';
 
 /** Left-spine color derived from the Module 2 health band. */
 function bandBorder(band: string | null): string {
@@ -101,7 +125,19 @@ export const DealCard = memo(function DealCard({
   // Timeline pushback (migration 0058). 'none' for a deal that has never been
   // pushed, so a healthy board looks exactly as it did before.
   const slip = slipSeverity(deal);
-  const slipTitle = slip === 'none' ? undefined : slipTooltip(deal);
+  // R6 — pushed past the de-weight threshold, so this deal is now worth half
+  // toward quota. Escalates the chip's style and REPLACES its tooltip: the
+  // consequence is the more important half of the message once it applies.
+  const deweighted = isDeweighted(Number(deal.quotaWeight));
+  const slipTitle =
+    slip === 'none'
+      ? undefined
+      : deweighted
+        ? `${slipTooltip(deal)} — ${deweightTooltip(deal.pushCount)}`
+        : slipTooltip(deal);
+  // Rollbacks are shown independently of pushes: a deal can be dragged
+  // backward without its date ever moving, and vice versa.
+  const rolledBack = (deal.rollbackCount ?? 0) > 0;
 
   return (
     <article
@@ -248,13 +284,29 @@ export const DealCard = memo(function DealCard({
               title={slipTitle}
               className={cn(
                 'inline-flex h-4 items-center gap-0.5 rounded-full px-1.5 text-[10px] font-semibold tabular-nums',
-                slipChipClass(slip),
+                deweighted ? DEWEIGHTED_CHIP_CLASS : slipChipClass(slip),
               )}
             >
               {slip === 'severe' ? (
                 <Flag className="h-2.5 w-2.5" aria-hidden />
               ) : null}
               {slipChipLabel(deal.pushCount)}
+              {/* Says the cost out loud on the card itself. A haircut nobody
+                  can see teaches nobody anything — which is the entire point
+                  of R6 as a behavioural rule rather than just a math change. */}
+              {deweighted ? <span className="font-bold">· 50%</span> : null}
+            </span>
+          ) : null}
+          {rolledBack ? (
+            <span
+              title={`Moved backward through the funnel ${deal.rollbackCount}×. Open the deal's Audit tab for the reasons.`}
+              className={cn(
+                'inline-flex h-4 items-center gap-0.5 rounded-full px-1.5 text-[10px] font-semibold tabular-nums',
+                ROLLBACK_CHIP_CLASS,
+              )}
+            >
+              <Undo2 className="h-2.5 w-2.5" aria-hidden />
+              {rollbackChipLabel(deal.rollbackCount)}
             </span>
           ) : null}
         </span>

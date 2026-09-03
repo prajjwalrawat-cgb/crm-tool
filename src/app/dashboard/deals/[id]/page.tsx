@@ -59,6 +59,7 @@ import { DealValueSplitCard } from './_components/deal-value-split-card';
 import { EditableDetailCard } from './_components/editable-detail-card';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { StageHistoryCard } from './_components/stage-history-card';
+import { DealAuditCard } from './_components/deal-audit-card';
 import { SummaryCard } from './_components/summary-card';
 import { DealPathBar } from './_components/deal-path-bar';
 import { DealScoreCard } from './_components/deal-score-card';
@@ -421,6 +422,11 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                     : null
                 }
               />
+              {/* R5 — the unified who-changed-what for stage, close date and
+                  amount. Collapsed and fetched on expand; sits next to Stage
+                  history, which answers the different question of how long
+                  the deal spent in each stage. */}
+              <DealAuditCard dealId={deal.id} />
               {deal.stage === 'lost' && deal.lostReason ? (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
                   <div className="text-[11px] font-medium uppercase tracking-wide text-rose-700 dark:text-rose-300">

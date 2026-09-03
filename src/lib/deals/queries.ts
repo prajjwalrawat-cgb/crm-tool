@@ -113,6 +113,10 @@ type RawJoinedRow = {
   pushCount: number;
   lastPushedAt: Date | null;
   totalSlipDays: number;
+  rollbackCount: number;
+  /** numeric(3,2) — arrives from postgres as a string, e.g. '0.50'. */
+  quotaWeight: string;
+  lastStageChangedAt: Date | null;
   closedAt: Date | null;
   ownerId: string | null;
   probability: number | null;
@@ -167,6 +171,11 @@ const DEALS_PROJECTION = {
   pushCount: deals.pushCount,
   lastPushedAt: deals.lastPushedAt,
   totalSlipDays: deals.totalSlipDays,
+  // Governance cache (0060) — the Rolled-back badge and the "counts 50%"
+  // escalation on the Pushed badge read these per card, same as above.
+  rollbackCount: deals.rollbackCount,
+  quotaWeight: deals.quotaWeight,
+  lastStageChangedAt: deals.lastStageChangedAt,
   closedAt: deals.closedAt,
   ownerId: deals.ownerId,
   probability: deals.probability,

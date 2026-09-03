@@ -58,6 +58,22 @@ import {
   clearCloseDateReason,
   setCloseDateReason,
 } from '@/lib/deals/close-date-reason';
+import {
+  clearStageChangeReason,
+  isCloseDateRequiredError,
+  isRollbackReasonRequiredError,
+  setStageChangeReason,
+} from '@/lib/deals/stage-change-reason';
+import {
+  CLOSE_DATE_CLEAR_BLOCKED_MESSAGE,
+  closeDateRequiredMessage,
+  isRollbackTransition,
+  ROLLBACK_REASON_REQUIRED_MESSAGE,
+  ROLLBACK_REASONS,
+  SYSTEM_ROLLBACK_REASONS,
+  violatesCloseDateClear,
+  violatesMissingCloseDate,
+} from '@/lib/deals/stage-governance';
 import { HOLD_REASONS } from '@/lib/deals/hold';
 import {
   LEAD_CLOSE_DATE_MESSAGE,
@@ -100,6 +116,24 @@ export type SimpleResult =
 
 /** Thrown when the edit form tries to enter Hold (Module 6) — needs the board. */
 class HoldEditError extends Error {}
+
+/**
+ * R3 — thrown inside the update transaction when a save would blank an
+ * existing close date on a deal staying in Proposal/Negotiation/Won. Thrown
+ * rather than returned so the write rolls back atomically, matching how
+ * `HoldEditError` and `GateBlockedError` already work here.
+ */
+class CloseDateClearError extends Error {}
+
+/** R2 — thrown when a backward stage move arrives with no reason code. */
+class RollbackReasonError extends Error {
+  readonly fromStage: string;
+  constructor(fromStage: string) {
+    super(ROLLBACK_REASON_REQUIRED_MESSAGE);
+    this.name = 'RollbackReasonError';
+    this.fromStage = fromStage;
+  }
+}
 
 /**
  * Read custom-field values out of FormData (inputs are named `cf_<key>`) and
@@ -260,6 +294,20 @@ export async function createDealAction(
           ok: false,
           message: LEAD_CLOSE_DATE_MESSAGE,
           fieldErrors: { stage: [LEAD_CLOSE_DATE_MESSAGE] },
+        };
+      }
+
+      // R1 — a deal can't be born straight into Proposal/Negotiation/Won
+      // without a close date either. Checked here as well as by the DB
+      // constraint so the user gets a field error, not a failed insert.
+      if (
+        violatesMissingCloseDate(parsed.data.stage, parsed.data.expectedCloseDate)
+      ) {
+        const message = closeDateRequiredMessage(parsed.data.stage);
+        return {
+          ok: false,
+          message,
+          fieldErrors: { expectedCloseDate: [message] },
         };
       }
 
@@ -513,6 +561,20 @@ export async function updateDealAction(
         };
       }
 
+      // R1 — and its bookend: Proposal / Negotiation / Won must carry a date.
+      // Filed against `expectedCloseDate` so the form highlights the input the
+      // user has to fill, not the stage they just chose.
+      if (
+        violatesMissingCloseDate(parsed.data.stage, parsed.data.expectedCloseDate)
+      ) {
+        const message = closeDateRequiredMessage(parsed.data.stage);
+        return {
+          ok: false,
+          message,
+          fieldErrors: { expectedCloseDate: [message] },
+        };
+      }
+
       const customDefs = await listCustomFieldDefs(tenant.id, 'deal');
       const customResult = parseCustomFields(formData, customDefs);
       if (!customResult.ok) {
@@ -563,6 +625,19 @@ export async function updateDealAction(
           ? String(formData.get('lostReason') ?? '').trim().slice(0, 1000) || null
           : null;
 
+      // R2 — rollback reason posted alongside the fields. Read here (rather
+      // than via the schema) for the same reason `lostReason` is: whether it's
+      // required depends on the deal's CURRENT stage, which isn't known until
+      // the row is read inside the transaction.
+      const rollbackReasonRaw = String(formData.get('rollbackReason') ?? '').trim();
+      const rollbackReason = (ROLLBACK_REASONS as readonly string[]).includes(
+        rollbackReasonRaw,
+      )
+        ? rollbackReasonRaw
+        : null;
+      const rollbackNote =
+        String(formData.get('rollbackNote') ?? '').trim().slice(0, 1000) || null;
+
       // Assignment: only owner/manager may change the owner, and a manager may
       // not assign to an owner. For anyone else, leave the owner untouched
       // (their edit form doesn't post an ownerId).
@@ -593,6 +668,7 @@ export async function updateDealAction(
             stage: deals.stage,
             name: deals.name,
             closedAt: deals.closedAt,
+            expectedCloseDate: deals.expectedCloseDate,
             forecastCategoryOverridden: deals.forecastCategoryOverridden,
           })
           .from(deals)
@@ -610,6 +686,37 @@ export async function updateDealAction(
         // form doesn't collect — send the user to the board for that move.
         if (parsed.data.stage === 'hold' && previous.stage !== 'hold') {
           throw new HoldEditError();
+        }
+
+        // R3 — an existing close date can't be blanked while the deal stays in
+        // a date-required stage. Replacing it with a later one is a pushback
+        // (R4, logged and counted) and is allowed; emptying the field is not.
+        // Evaluated against the stage being SAVED, so an edit that rolls the
+        // deal back to Lead/Qualified and drops the date in one submit is a
+        // legitimate rollback rather than a silent deletion.
+        if (
+          violatesCloseDateClear({
+            nextStage: parsed.data.stage,
+            previousCloseDate: previous.expectedCloseDate,
+            nextCloseDate: parsed.data.expectedCloseDate,
+          })
+        ) {
+          throw new CloseDateClearError();
+        }
+
+        // R2 — a backward stage move from the edit form needs a reason code,
+        // exactly as a backward drag on the board does. The form posts one
+        // alongside the fields (see the rollback prompt in deal-form).
+        const rollingBack = isRollbackTransition(
+          previous.stage,
+          parsed.data.stage,
+        );
+        if (rollingBack) {
+          if (!rollbackReason) throw new RollbackReasonError(previous.stage);
+          await setStageChangeReason(tx, {
+            code: rollbackReason,
+            note: rollbackNote,
+          });
         }
 
         // Stage-gate enforcement when the edit changes the stage. The gate is
@@ -699,6 +806,9 @@ export async function updateDealAction(
             ),
           )
           .returning();
+        // Reset immediately after the write so nothing later in this
+        // transaction (or a retry of it) inherits the rollback reason.
+        if (rollingBack) await clearStageChangeReason(tx);
         if (!updated) return null;
 
         const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
@@ -715,6 +825,11 @@ export async function updateDealAction(
               from: previous.stage,
               to: updated.stage,
               ...(lostReason && { reason: lostReason }),
+              ...(rollingBack && {
+                rollback: true,
+                rollbackReason,
+                ...(rollbackNote && { rollbackNote }),
+              }),
             },
           });
           if (serialized) {
@@ -763,6 +878,36 @@ export async function updateDealAction(
               'Put a deal on Hold from the pipeline board — it needs a reason and a revisit date.',
           };
         }
+        // R3 — filed against the date input the user emptied.
+        if (err instanceof CloseDateClearError) {
+          return {
+            ok: false,
+            message: CLOSE_DATE_CLEAR_BLOCKED_MESSAGE,
+            fieldErrors: { expectedCloseDate: [CLOSE_DATE_CLEAR_BLOCKED_MESSAGE] },
+          };
+        }
+        // R2 — the form re-submits with a reason once the user picks one.
+        if (err instanceof RollbackReasonError) {
+          return {
+            ok: false,
+            message: ROLLBACK_REASON_REQUIRED_MESSAGE,
+            fieldErrors: { rollbackReason: [ROLLBACK_REASON_REQUIRED_MESSAGE] },
+          };
+        }
+        // The DB backstops both rules (0060). Reaching here means a path
+        // slipped past the checks above, or the deal predates the NOT VALID
+        // constraint — either way, an actionable message beats a raw error.
+        if (isRollbackReasonRequiredError(err)) {
+          return { ok: false, message: ROLLBACK_REASON_REQUIRED_MESSAGE };
+        }
+        if (isCloseDateRequiredError(err)) {
+          const message = closeDateRequiredMessage(parsed.data.stage);
+          return {
+            ok: false,
+            message,
+            fieldErrors: { expectedCloseDate: [message] },
+          };
+        }
         throw err;
       }
 
@@ -807,6 +952,11 @@ const updateStageSchema = z.object({
   // Set when the user has been told, and accepted, that moving back to Lead
   // drops the deal's close date. Without it a dated deal is refused.
   clearCloseDate: z.boolean().optional(),
+  // R2 — mandatory when the move is backward through the ranked funnel. The
+  // code is a closed vocabulary so rollbacks are countable; the note is the
+  // optional free-text elaboration.
+  rollbackReason: z.enum(ROLLBACK_REASONS).optional(),
+  rollbackNote: z.string().max(1000).optional(),
 });
 
 export type UpdateDealStageInput = {
@@ -818,6 +968,8 @@ export type UpdateDealStageInput = {
   holdRevisitOn?: string;
   holdNote?: string;
   clearCloseDate?: boolean;
+  rollbackReason?: string;
+  rollbackNote?: string;
 };
 
 export type UpdateDealStageResult =
@@ -832,6 +984,15 @@ export type UpdateDealStageResult =
       // Move to Lead refused only because the deal is dated. The caller should
       // confirm with the user and retry with `clearCloseDate: true`.
       needsCloseDateClear?: true;
+      // R2 — the move is backward and no reason code was supplied. The caller
+      // should prompt for one and retry with `rollbackReason`. Carries the
+      // stages so the modal can name the move it's asking about.
+      needsRollbackReason?: true;
+      fromStage?: string;
+      // R1 — the target stage requires a close date the deal doesn't have.
+      // The caller should send the user to the deal to set one; a bare stage
+      // move has no field to put it in.
+      needsCloseDate?: true;
     };
 
 export async function updateDealStageAction(
@@ -892,7 +1053,23 @@ export async function updateDealStageAction(
         }
       }
 
-      const result = await tenantTransaction(async (tx) => {
+      // One shape for every branch of the transaction below, so a governance
+      // rejection and a gate rejection stay comparable at the call site
+      // instead of forming an awkward inferred union.
+      type StageTxResult = {
+        row: Deal | null;
+        changed: boolean;
+        previousStage: Deal['stage'] | null;
+        blocked: {
+          message: string;
+          failures: GateFailure[];
+          toStage: Deal['stage'];
+        } | null;
+        needsRollbackReason?: true;
+        needsCloseDate?: true;
+      };
+
+      const result: StageTxResult = await tenantTransaction(async (tx) => {
         const [previous] = await tx
           .select({
             id: deals.id,
@@ -900,6 +1077,7 @@ export async function updateDealStageAction(
             name: deals.name,
             closedAt: deals.closedAt,
             marginBps: deals.marginBps,
+            expectedCloseDate: deals.expectedCloseDate,
             forecastCategoryOverridden: deals.forecastCategoryOverridden,
           })
           .from(deals)
@@ -926,6 +1104,42 @@ export async function updateDealStageAction(
             changed: false,
             previousStage: previous.stage,
             blocked: null,
+          };
+        }
+
+        // R2 — a backward move through the funnel needs a reason code before
+        // anything is written. Checked here (not only in the trigger) so the
+        // board can open its reason modal and retry, rather than surfacing a
+        // database error. Parking in Hold and closing as Lost are not
+        // rollbacks: they carry their own reason fields already.
+        const rollingBack = isRollbackTransition(
+          previous.stage,
+          parsed.data.stage,
+        );
+        if (rollingBack && !parsed.data.rollbackReason) {
+          return {
+            row: null,
+            changed: false,
+            previousStage: previous.stage,
+            blocked: null,
+            needsRollbackReason: true as const,
+          };
+        }
+
+        // R1 — Proposal / Negotiation / Won require a close date. A pure stage
+        // move carries no date field, so a dateless deal can't advance here;
+        // reported so the caller can send the user to the deal to set one.
+        // Deliberately evaluated against the date the deal will END UP with:
+        // a move to Lead clears it, and Lead doesn't require one anyway.
+        const closeDateAfterMove =
+          parsed.data.stage === 'lead' ? null : previous.expectedCloseDate;
+        if (violatesMissingCloseDate(parsed.data.stage, closeDateAfterMove)) {
+          return {
+            row: null,
+            changed: false,
+            previousStage: previous.stage,
+            blocked: null,
+            needsCloseDate: true as const,
           };
         }
 
@@ -1007,6 +1221,18 @@ export async function updateDealStageAction(
               : null
             : null;
 
+        // R2 — hand the reason to the governance trigger, which writes it onto
+        // the `deal_audit_log` row for this UPDATE and REJECTS the write if it
+        // is missing. Set immediately before the UPDATE and cleared right
+        // after, so it can never excuse an unrelated write later in this
+        // transaction (same discipline as the close-date note).
+        if (rollingBack && parsed.data.rollbackReason) {
+          await setStageChangeReason(tx, {
+            code: parsed.data.rollbackReason,
+            note: parsed.data.rollbackNote,
+          });
+        }
+
         const [updated] = await tx
           .update(deals)
           .set({
@@ -1046,6 +1272,9 @@ export async function updateDealStageAction(
             ),
           )
           .returning();
+        // Reset immediately after the write so nothing later in this
+        // transaction (or a retry of it) inherits the rollback reason.
+        if (rollingBack) await clearStageChangeReason(tx);
         if (!updated) {
           return { row: null, changed: false, previousStage: previous.stage, blocked: null };
         }
@@ -1061,6 +1290,15 @@ export async function updateDealStageAction(
             from: previous.stage,
             to: updated.stage,
             ...(lostReason && { reason: lostReason }),
+            // R2 — the timeline says "moved backward, because X" rather than
+            // just "moved", which is the whole point of capturing it.
+            ...(rollingBack && {
+              rollback: true,
+              rollbackReason: parsed.data.rollbackReason,
+              ...(parsed.data.rollbackNote?.trim() && {
+                rollbackNote: parsed.data.rollbackNote.trim().slice(0, 1000),
+              }),
+            }),
           },
         });
 
@@ -1113,6 +1351,28 @@ export async function updateDealStageAction(
           blocked: null,
         };
       });
+
+      // R2 — backward move with no reason. The board prompts and retries; a
+      // caller that ignores the flag still gets a sensible message.
+      if (result.needsRollbackReason) {
+        return {
+          ok: false,
+          message: ROLLBACK_REASON_REQUIRED_MESSAGE,
+          needsRollbackReason: true,
+          fromStage: result.previousStage ?? undefined,
+          toStage: parsed.data.stage,
+        };
+      }
+
+      // R1 — target stage requires a close date this deal doesn't have.
+      if (result.needsCloseDate) {
+        return {
+          ok: false,
+          message: closeDateRequiredMessage(parsed.data.stage),
+          needsCloseDate: true,
+          toStage: parsed.data.stage,
+        };
+      }
 
       // A stage gate rejected the move (nothing was written).
       if (result.blocked) {
@@ -1312,6 +1572,16 @@ export async function rejectDealAction(input: {
           return false;
         }
 
+        // R2 — Won → Negotiation is a backward move through the funnel, so the
+        // governance trigger demands a reason like any other. The manager has
+        // already given one (their rejection); this records it under a system
+        // code so the audit trail has no unexplained rollbacks, rather than
+        // carving out an exemption that would be a bypass by another name.
+        await setStageChangeReason(tx, {
+          code: SYSTEM_ROLLBACK_REASONS.approvalRejected,
+          note: reason,
+        });
+
         const [updated] = await tx
           .update(deals)
           .set({
@@ -1324,6 +1594,7 @@ export async function rejectDealAction(input: {
           })
           .where(and(eq(deals.id, previous.id), eq(deals.tenantId, tenant.id)))
           .returning();
+        await clearStageChangeReason(tx);
         if (!updated) return false;
 
         await recordActivity(tx, {
@@ -1500,6 +1771,14 @@ export async function bulkRejectDealsAction(input: {
           ) {
             continue;
           }
+          // R2, as in the single-deal reject. Set inside the loop and cleared
+          // after each write: one transaction covers the whole batch, and a
+          // reason left standing would silently authorise the next iteration's
+          // rollback — or worse, a later write that isn't one of these.
+          await setStageChangeReason(tx, {
+            code: SYSTEM_ROLLBACK_REASONS.approvalRejected,
+            note: reason,
+          });
           const [updated] = await tx
             .update(deals)
             .set({
@@ -1512,6 +1791,7 @@ export async function bulkRejectDealsAction(input: {
             })
             .where(and(eq(deals.id, id), eq(deals.tenantId, tenant.id)))
             .returning();
+          await clearStageChangeReason(tx);
           if (!updated) continue;
           await recordActivity(tx, {
             tenantId: tenant.id,
@@ -1793,6 +2073,10 @@ export async function patchDealAction(
       }
 
       let updated: typeof deals.$inferSelect | null;
+      // The deal's stage at read time, captured for the error messages below —
+      // the rejections are thrown from inside the transaction, where the row is
+      // in scope, but reported outside it, where it is not.
+      let previousStage = '';
       try {
         updated = await tenantTransaction(async (tx) => {
         const [previous] = await tx
@@ -1807,6 +2091,8 @@ export async function patchDealAction(
           )
           .limit(1);
         if (!previous) return null;
+
+        previousStage = previous.stage;
 
         if (
           d.amount !== undefined &&
@@ -1824,6 +2110,28 @@ export async function patchDealAction(
             : previous.expectedCloseDate;
         if (violatesLeadCloseDate(previous.stage, effectiveCloseDate)) {
           throw new Error('LEAD_CLOSE_DATE');
+        }
+
+        // R3 — THE silent-deletion path this rule exists for. An inline cell
+        // edit is exactly how a rep clears a committed date with no trace: the
+        // patch action can't change the stage, so there is no rollback here to
+        // excuse it. Blanking is refused outright; setting a different date is
+        // a pushback (R4) and passes.
+        if (
+          violatesCloseDateClear({
+            nextStage: previous.stage,
+            previousCloseDate: previous.expectedCloseDate,
+            nextCloseDate: effectiveCloseDate,
+          })
+        ) {
+          throw new Error('CLOSE_DATE_CLEAR');
+        }
+
+        // R1 — an inline edit must not leave a deal in a date-required stage
+        // with no date. Catches the case the clear-check above misses: a deal
+        // that never had one (legacy row, added NOT VALID) being edited now.
+        if (violatesMissingCloseDate(previous.stage, effectiveCloseDate)) {
+          throw new Error('CLOSE_DATE_REQUIRED');
         }
 
         // Only the fields present in the input become columns — see
@@ -1895,6 +2203,17 @@ export async function patchDealAction(
         }
         if (err instanceof Error && err.message === 'LEAD_CLOSE_DATE') {
           return { ok: false, message: LEAD_CLOSE_DATE_MESSAGE };
+        }
+        if (err instanceof Error && err.message === 'CLOSE_DATE_CLEAR') {
+          return { ok: false, message: CLOSE_DATE_CLEAR_BLOCKED_MESSAGE };
+        }
+        // DB backstop (0060) for a legacy row that predates the NOT VALID
+        // constraint and so still sits dateless in a date-required stage.
+        if (
+          (err instanceof Error && err.message === 'CLOSE_DATE_REQUIRED') ||
+          isCloseDateRequiredError(err)
+        ) {
+          return { ok: false, message: closeDateRequiredMessage(previousStage) };
         }
         if (err instanceof UnitPricingIncompleteError) {
           return { ok: false, message: err.message };
@@ -2230,6 +2549,19 @@ export async function bulkUploadDealsAction(
         // Business rule: a dated deal can't be imported at the Lead stage.
         if (violatesLeadCloseDate(stage, expectedCloseDate)) {
           errors.push({ row: i + 1, message: LEAD_CLOSE_DATE_MESSAGE });
+          continue;
+        }
+
+        // R1 — and the reverse: a row can't be imported into Proposal /
+        // Negotiation / Won without a close date. CSV import is the classic
+        // way undated deals get into the funnel in bulk, so it is validated
+        // with the same rule the form uses rather than a looser one. Reported
+        // per row (the partial-success contract) instead of failing the file.
+        if (violatesMissingCloseDate(stage, expectedCloseDate)) {
+          errors.push({
+            row: i + 1,
+            message: `Missing "expectedCloseDate" — ${closeDateRequiredMessage(stage)}`,
+          });
           continue;
         }
 

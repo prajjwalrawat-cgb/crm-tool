@@ -31,12 +31,23 @@ export async function listTargets(
 
 export type TargetAchievement = {
   userId: string;
+  /** Quota-credited revenue: face value x deals.quota_weight (R7). */
   revenueAchievedMinor: number;
   marginAchievedMinor: number;
   wonCount: number;
   /** Won revenue in-window held back by the approval gate. */
   pendingApprovalMinor: number;
   pendingApprovalCount: number;
+  /**
+   * Revenue removed by the pushback haircut (face value - weighted value),
+   * and how many deals carry one. Reported rather than silently absorbed so a
+   * rep can see WHY their attainment is short of the won total on the same
+   * screen — the same contract `pendingApprovalMinor` has:
+   *
+   *     revenueAchieved + deweightedLoss === face value of credited won deals
+   */
+  deweightedLossMinor: number;
+  deweightedCount: number;
 };
 
 /**
@@ -45,9 +56,19 @@ export type TargetAchievement = {
  * `./quota-credit` for the rule and why `= 'approved'` was wrong.
  * Margin value is amount × margin% (basis points), in minor units.
  *
- * Deals withheld by the gate are counted separately rather than
- * dropped, so a rep looking at "₹0 achieved" can tell the difference
- * between "you closed nothing" and "your manager hasn't clicked yet".
+ * TWO haircuts apply, and they are deliberately different in kind:
+ *   * APPROVAL decides whether a won deal counts at all. Withheld deals are
+ *     counted separately rather than dropped, so a rep looking at "₹0
+ *     achieved" can tell "you closed nothing" from "your manager hasn't
+ *     clicked yet".
+ *   * QUOTA WEIGHT (R6/R7) decides how much a counted deal is worth. A deal
+ *     pushed more than three times counts at 50%. Both the credited figure
+ *     and the amount the weighting removed come back, for the same reason.
+ *
+ * Revenue is weighted; MARGIN IS NOT. Margin attainment measures the quality
+ * of what was sold, and halving it would conflate "this deal was low-margin"
+ * with "this deal was late" — two different conversations. The de-weight is a
+ * revenue-credit penalty, which is what the comp plan reads.
  */
 export async function targetAchievement(
   tenantId: string,
@@ -68,11 +89,18 @@ export async function targetAchievement(
     tx
       .select({
         userId: deals.ownerId,
-        revenueAchievedMinor: sql<string>`COALESCE(SUM(${deals.amountMinor}) FILTER (WHERE ${credits}), 0)`,
+        // R7 — credited revenue is amount x quota_weight, never the raw
+        // amount. quota_weight is 1.00 for every deal that hasn't been
+        // chronically pushed, so this is identity for a healthy pipeline.
+        revenueAchievedMinor: sql<string>`COALESCE(SUM(ROUND(${deals.amountMinor} * ${deals.quotaWeight})) FILTER (WHERE ${credits}), 0)`,
         marginAchievedMinor: sql<string>`COALESCE(ROUND(SUM(${deals.amountMinor}::numeric * COALESCE(${deals.marginBps}, 0) / 10000) FILTER (WHERE ${credits})), 0)`,
         wonCount: sql<string>`COUNT(*) FILTER (WHERE ${credits})`,
         pendingApprovalMinor: sql<string>`COALESCE(SUM(${deals.amountMinor}) FILTER (WHERE ${withheld}), 0)`,
         pendingApprovalCount: sql<string>`COUNT(*) FILTER (WHERE ${withheld})`,
+        // The gap the weighting opened, over the SAME credited set — so
+        // credited + loss reconciles to face value, not to some other cohort.
+        deweightedLossMinor: sql<string>`COALESCE(SUM(${deals.amountMinor} - ROUND(${deals.amountMinor} * ${deals.quotaWeight})) FILTER (WHERE ${credits}), 0)`,
+        deweightedCount: sql<string>`COUNT(*) FILTER (WHERE ${credits} AND ${deals.quotaWeight} < 1.00)`,
       })
       .from(deals)
       .where(
@@ -97,6 +125,8 @@ export async function targetAchievement(
       wonCount: Number(r.wonCount) || 0,
       pendingApprovalMinor: Number(r.pendingApprovalMinor) || 0,
       pendingApprovalCount: Number(r.pendingApprovalCount) || 0,
+      deweightedLossMinor: Number(r.deweightedLossMinor) || 0,
+      deweightedCount: Number(r.deweightedCount) || 0,
     }));
 }
 
@@ -112,6 +142,9 @@ export type TargetProgressRow = {
   /** Won revenue held back by the approval gate — shown as a footnote. */
   pendingApprovalMinor: number;
   pendingApprovalCount: number;
+  /** Revenue removed by the pushback haircut — shown as a second footnote. */
+  deweightedLossMinor: number;
+  deweightedCount: number;
 };
 
 /**
@@ -162,6 +195,8 @@ export async function getTargetProgress(
         wonCount: ach?.wonCount ?? 0,
         pendingApprovalMinor: ach?.pendingApprovalMinor ?? 0,
         pendingApprovalCount: ach?.pendingApprovalCount ?? 0,
+        deweightedLossMinor: ach?.deweightedLossMinor ?? 0,
+        deweightedCount: ach?.deweightedCount ?? 0,
       };
     });
 

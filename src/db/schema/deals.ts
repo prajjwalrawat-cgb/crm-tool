@@ -6,6 +6,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   smallint,
   text,
@@ -121,6 +122,28 @@ export const deals = pgTable(
     pushCount: integer('push_count').notNull().default(0),
     lastPushedAt: timestamp('last_pushed_at', { withTimezone: true }),
     totalSlipDays: integer('total_slip_days').notNull().default(0),
+    /**
+     * Stage governance (migration 0060). Like the pushback columns above,
+     * these are maintained by a trigger (`deal_governance_sync`) and must NOT
+     * be written by the app — `deal_audit_log` is the source of truth and
+     * these are the cache the board and the quota queries read.
+     *
+     * `rollbackCount` counts backward moves through the ranked funnel only
+     * (lead → qualified → proposal → negotiation → won); parking in Hold or
+     * reopening from Lost is neither progress nor regression and doesn't
+     * count. It never overlaps with `pushCount`, which counts close-date
+     * moves — a stage rollback and a date push are different failures.
+     *
+     * `quotaWeight` is 1.00, or 0.50 once `pushCount` exceeds 3 (R6).
+     * Postgres numeric arrives as a string over the wire, hence the mode.
+     */
+    rollbackCount: integer('rollback_count').notNull().default(0),
+    quotaWeight: numeric('quota_weight', { precision: 3, scale: 2 })
+      .notNull()
+      .default('1.00'),
+    lastStageChangedAt: timestamp('last_stage_changed_at', {
+      withTimezone: true,
+    }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
     ownerId: text('owner_id'),
     /**
@@ -169,6 +192,10 @@ export const deals = pgTable(
     // Board's "slipped only" filter. Partial (push_count > 0) in 0058 — the
     // slipping cohort is a small minority of a healthy pipeline.
     index('deals_tenant_pushed_idx').on(t.tenantId, t.pushCount),
+    // Governance badges + quota reconciliation. Both partial in 0060 — a
+    // healthy pipeline has almost no rolled-back or de-weighted deals.
+    index('deals_tenant_rolled_back_idx').on(t.tenantId, t.rollbackCount),
+    index('deals_tenant_deweighted_idx').on(t.tenantId, t.quotaWeight),
     index('deals_tenant_deleted_idx').on(t.tenantId, t.deletedAt),
   ],
 );

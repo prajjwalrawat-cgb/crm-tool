@@ -174,11 +174,19 @@ async function main() {
       );
       // Deliberately does NOT touch expected_close_date, so the pushback
       // trigger doesn't fire and the counters can be reset to a clean baseline.
+      //
+      // quota_weight has to be reset BY HAND here for exactly that reason: the
+      // governance trigger (0060) recomputes it, but only fires on UPDATE OF
+      // stage / expected_close_date / amount_minor — none of which this
+      // statement touches. Without this line a reset deal keeps its 50%
+      // haircut while showing push_count = 0, i.e. it quietly halves the
+      // owner's quota credit with nothing on screen to explain why.
       await tx.execute(sql`
         UPDATE deals
            SET push_count = 0,
                total_slip_days = 0,
                last_pushed_at = NULL,
+               quota_weight = 1.00,
                original_close_date = expected_close_date
          WHERE id = ${deal.id}::uuid AND tenant_id = ${tenant.id}::uuid
       `);

@@ -9,6 +9,10 @@ import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef, CustomValues } from '@/lib/custom-fields/types';
 import { marginBpsToPct } from '@/lib/deals/approval';
 import { validateDealForm } from '@/lib/deals/client-validate';
+import {
+  closeDateRequiredForStage,
+  isRollbackTransition,
+} from '@/lib/deals/stage-governance';
 import { fromMinorUnits } from '@/lib/deals/currency';
 import type { DealRow } from '@/lib/deals/queries';
 import {
@@ -25,6 +29,7 @@ import { Drawer } from '../../_components/drawer';
 import { OwnerFormField } from '../../_components/owner-form-field';
 import { DealAmountFields } from './deal-amount-fields';
 import { DealCompanyContactFields } from './deal-company-contact-fields';
+import { RollbackReasonModal } from './rollback-reason-modal';
 
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
   return Object.fromEntries(
@@ -98,11 +103,27 @@ export function EditDealDrawer({
   const setStageValue = (value: string) =>
     setStageState({ key: dealKey, value });
   const errs = { ...fieldErrors, ...clientErrors };
+  // The stored values the governance rules compare against (R2/R3). Null on a
+  // closed drawer, where there is no deal to move backward or blank.
+  const previousState = deal
+    ? { stage: deal.stage, expectedCloseDate: deal.expectedCloseDate }
+    : null;
+  const closeDateRequired = closeDateRequiredForStage(stageValue);
+  // A backward save, held until the reason modal is answered. Holds the
+  // submitted FormData so the confirm path doesn't have to re-read the form.
+  const [rollbackPrompt, setRollbackPrompt] = useState<{
+    fd: FormData;
+    fromStage: string;
+  } | null>(null);
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const found = validateDealForm(fd);
+  function submitWith(fd: FormData, rollback?: { reason: string; note: string }) {
+    // R2 — the confirmed reason rides along as form fields, matching how the
+    // action reads it. Set before validation so the rollback check passes.
+    if (rollback) {
+      fd.set('rollbackReason', rollback.reason);
+      if (rollback.note) fd.set('rollbackNote', rollback.note);
+    }
+    const found = validateDealForm(fd, previousState);
     if (Object.keys(found).length > 0) {
       setClientErrors(found);
       setClientMsg('Please fix the highlighted fields.');
@@ -111,6 +132,24 @@ export function EditDealDrawer({
     setClientErrors({});
     setClientMsg(null);
     onSubmit(fd);
+  }
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+
+    // R2 — a save that moves the deal backward is held until a reason is
+    // picked, rather than submitted and bounced. The FormData is captured
+    // here because the form resets once its action runs.
+    if (
+      previousState &&
+      isRollbackTransition(previousState.stage, String(fd.get('stage') ?? ''))
+    ) {
+      setRollbackPrompt({ fd, fromStage: previousState.stage });
+      return;
+    }
+
+    submitWith(fd);
   }
 
   // Only owner + manager can reassign a deal; a manager may not assign to an
@@ -298,6 +337,10 @@ export function EditDealDrawer({
             label="Expected close date"
             type="date"
             defaultValue={initialDate}
+            // R1 — mandatory from Proposal on: a deal being quoted with no
+            // committed date is unforecastable. `required` also lets the
+            // browser block the submit before validateDealForm even runs.
+            required={closeDateRequired}
             errors={errs.expectedCloseDate}
           />
         )}
@@ -336,6 +379,23 @@ export function EditDealDrawer({
           </p>
         ) : null}
       </form>
+
+      {rollbackPrompt ? (
+        <RollbackReasonModal
+          dealName={deal?.name ?? 'this deal'}
+          fromStage={rollbackPrompt.fromStage}
+          toStage={String(rollbackPrompt.fd.get('stage') ?? '')}
+          pending={pending}
+          // Cancel abandons the save entirely. The form keeps what the user
+          // typed (it hasn't been submitted), so they can pick a different
+          // stage or try again — nothing is lost.
+          onCancel={() => setRollbackPrompt(null)}
+          onConfirm={(reason, note) => {
+            submitWith(rollbackPrompt.fd, { reason, note });
+            setRollbackPrompt(null);
+          }}
+        />
+      ) : null}
     </Drawer>
   );
 }

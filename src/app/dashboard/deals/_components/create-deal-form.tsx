@@ -9,6 +9,7 @@ import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { validateDealForm } from '@/lib/deals/client-validate';
+import { closeDateRequiredForStage } from '@/lib/deals/stage-governance';
 import {
   DEAL_STAGE_LABELS,
   DEAL_STAGES,
@@ -188,6 +189,9 @@ export function CreateDealForm({
           name="expectedCloseDate"
           label="Expected close date"
           type="date"
+          // R1 — a deal can't be created straight into Proposal / Negotiation
+          // / Won without a committed close date.
+          required={closeDateRequiredForStage(stageValue)}
           errors={errs.expectedCloseDate}
         />
       )}

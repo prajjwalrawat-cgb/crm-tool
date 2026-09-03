@@ -43,6 +43,7 @@ import {
   revertQualifiedDealsToLeadAction,
 } from '../actions';
 import { LostReasonModal } from '../../_components/lost-reason-modal';
+import { RollbackReasonModal } from '../../_components/rollback-reason-modal';
 import { HoldReasonModal } from '../../_components/hold-reason-modal';
 import { ClearCloseDateModal } from '../../_components/clear-close-date-modal';
 import { type BoardCard, DealCard } from './deal-card';
@@ -51,6 +52,7 @@ import { GateBlockPanel } from './gate-block-panel';
 import { CollapsedHoldColumn } from './collapsed-hold-column';
 import { SlippedOnlyToggle } from './slipped-only-toggle';
 import type { GateFailure } from '@/lib/stage-gates/types';
+import { isRollbackTransition } from '@/lib/deals/stage-governance';
 
 type LocalBoard = Record<DealStage, BoardCard[]>;
 
@@ -297,6 +299,24 @@ export function BoardView({
     next: LocalBoard;
     dealName: string;
   } | null>(null);
+  // A backward drag through the funnel, held until a reason code is picked
+  // (R2). The move is BLOCKED here rather than committed-then-rejected — see
+  // RollbackReasonModal for why.
+  const [rollbackPrompt, setRollbackPrompt] = useState<{
+    dealId: string;
+    snapshot: LocalBoard;
+    next: LocalBoard;
+    dealName: string;
+    fromStage: DealStage;
+    toStage: DealStage;
+    /**
+     * Carried through from the attempt that triggered this prompt. A dated
+     * deal dragged back to Lead is BOTH a date clear and a rollback, so the
+     * user answers two questions and the retry has to send both answers —
+     * dropping this would bounce them straight back to the date prompt.
+     */
+    clearCloseDate?: boolean;
+  } | null>(null);
   // A drag back onto Lead by a dated deal, held until the user accepts that
   // the close date goes away.
   const [clearDatePrompt, setClearDatePrompt] = useState<{
@@ -488,6 +508,7 @@ export function BoardView({
       reason?: string,
       hold?: { holdReason: string; holdRevisitOn: string; holdNote: string },
       clearCloseDate?: boolean,
+      rollback?: { reason: string; note: string },
     ) => {
       const seq = ++dragSeqRef.current;
       setError(null);
@@ -500,6 +521,8 @@ export function BoardView({
           holdRevisitOn: hold?.holdRevisitOn,
           holdNote: hold?.holdNote,
           clearCloseDate,
+          rollbackReason: rollback?.reason,
+          rollbackNote: rollback?.note,
         });
         // If the user has issued a newer drag in the meantime, ignore this
         // outcome — the newer drag's transition owns the state now.
@@ -511,6 +534,32 @@ export function BoardView({
           // Refused only because the deal is dated — the card we hold may be
           // stale (loaded before someone set a date), so honour the server's
           // signal and ask rather than erroring out.
+          // R2 — the card we hold may be stale about the deal's current
+          // stage (someone else moved it), so honour the server's signal and
+          // ask for a reason rather than erroring out.
+          if (result.needsRollbackReason) {
+            const dealName =
+              next[toStage].find((d) => d.id === dealId)?.name ?? 'this deal';
+            setRollbackPrompt({
+              dealId,
+              snapshot,
+              next,
+              dealName,
+              fromStage: (result.fromStage as DealStage) ?? toStage,
+              toStage,
+              clearCloseDate,
+            });
+            return;
+          }
+          // R1 — the target stage needs a close date the deal doesn't have,
+          // and a drag has no field to type one into. Say so plainly and point
+          // at the deal, rather than showing a bare validation string.
+          if (result.needsCloseDate) {
+            setError(
+              `${result.message} Open the deal to set one, then move it again.`,
+            );
+            return;
+          }
           if (result.needsCloseDateClear) {
             setClearDatePrompt({
               dealId,
@@ -604,6 +653,23 @@ export function BoardView({
           next,
           dealName: dragged.name,
           closeDate: dragged.expectedCloseDate,
+        });
+        return;
+      }
+
+      // R2 — any other backward move through the funnel needs a reason first.
+      // Checked here, before the request, so the transition is blocked in the
+      // UI rather than committed and then rejected. Ordered AFTER the Lead
+      // prompt above so a dated deal going back to Lead asks about the date
+      // first and collects the reason in the same follow-up commit.
+      if (isRollbackTransition(fromStage, toStage)) {
+        setRollbackPrompt({
+          dealId,
+          snapshot,
+          next,
+          dealName: dragged?.name ?? 'this deal',
+          fromStage,
+          toStage,
         });
         return;
       }
@@ -916,6 +982,33 @@ export function BoardView({
             );
             setHoldExpanded(true);
             setHoldPrompt(null);
+          }}
+        />
+      ) : null}
+
+      {rollbackPrompt ? (
+        <RollbackReasonModal
+          dealName={rollbackPrompt.dealName}
+          fromStage={rollbackPrompt.fromStage}
+          toStage={rollbackPrompt.toStage}
+          onCancel={() => {
+            // Roll the card back to the column it came from.
+            setBoard(rollbackPrompt.snapshot);
+            lastKnownGoodRef.current = rollbackPrompt.snapshot;
+            setRollbackPrompt(null);
+          }}
+          onConfirm={(reason, note) => {
+            commitStage(
+              rollbackPrompt.dealId,
+              rollbackPrompt.toStage,
+              rollbackPrompt.snapshot,
+              rollbackPrompt.next,
+              undefined,
+              undefined,
+              rollbackPrompt.clearCloseDate,
+              { reason, note },
+            );
+            setRollbackPrompt(null);
           }}
         />
       ) : null}
