@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 import { withTenantSession } from '@/lib/auth-guard';
 import { requireMembership } from '@/lib/membership';
 import { getOrgSettings } from '@/lib/org-settings/queries';
@@ -66,13 +68,27 @@ export default async function TargetsPage({
               manager approval.
             </p>
           </div>
-          <FiscalYearSelect
-            value={fiscalYear}
-            choices={choices.map((y) => ({
-              value: y,
-              label: fiscalYearLabel(startMonth, y),
-            }))}
-          />
+          <div className="flex items-center gap-3">
+            {/* This page answers "how much has each rep closed". The
+                scorecard answers everything that sits behind that number —
+                which quarter it landed in, what has slipped, who has gone
+                quiet. Managers reading one almost always want the other. */}
+            {persona !== 'sales' ? (
+              <Link
+                href="/dashboard/team-performance"
+                className="text-[12px] font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-300"
+              >
+                Team performance →
+              </Link>
+            ) : null}
+            <FiscalYearSelect
+              value={fiscalYear}
+              choices={choices.map((y) => ({
+                value: y,
+                label: fiscalYearLabel(startMonth, y),
+              }))}
+            />
+          </div>
         </div>
 
         <div className="mt-5">
