@@ -84,6 +84,11 @@ const ADMIN_NAV: readonly NavGroup[] = [
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
       { href: '/dashboard/deals/approvals', label: 'Approvals', icon: BadgeCheck },
       { href: '/dashboard/targets', label: 'Targets', icon: Target },
+      {
+        href: '/dashboard/team-performance',
+        label: 'Team Performance',
+        icon: LineChart,
+      },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
       { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
     ],
@@ -123,8 +128,12 @@ const MANAGER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/dashboard/executive/forecast', label: 'Forecast', icon: LineChart },
+      // The scorecard, not the leaderboard report: pushbacks, quarterly
+      // progression, engagement and data completeness per rep. The
+      // rep-performance report it used to point at is still one click
+      // away under Reports.
       {
-        href: '/dashboard/reports/rep-performance',
+        href: '/dashboard/team-performance',
         label: 'Team Performance',
         icon: LineChart,
       },
