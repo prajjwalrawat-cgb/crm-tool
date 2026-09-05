@@ -48,6 +48,7 @@ export default async function TargetsPage({
       currencyLocale: settings.currencyLocale,
       compactNumbers: settings.compactNumbers,
     };
+    const fiscalLabel = fiscalYearLabel(startMonth, fiscalYear);
 
     return (
       <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-5 lg:px-6">
@@ -56,9 +57,13 @@ export default async function TargetsPage({
             <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">
               Sales targets
             </h1>
-            <p className="mt-0.5 text-[13px] text-slate-500 dark:text-[#A1A1AA]">
-              Achievement counts Won deals after manager approval ·{' '}
-              {fiscalYearLabel(startMonth, fiscalYear)}
+            {/* Names both metrics up front. The card shows TCV won and the
+                fiscal-year slice of it side by side, and a manager reading
+                one as the other is the exact confusion this page had. */}
+            <p className="mt-0.5 max-w-xl text-[13px] text-slate-500 dark:text-[#A1A1AA]">
+              Achievement is the share of each won contract that falls inside{' '}
+              {fiscalLabel}, not its total value. Counts Won deals after
+              manager approval.
             </p>
           </div>
           <FiscalYearSelect
@@ -71,7 +76,7 @@ export default async function TargetsPage({
         </div>
 
         <div className="mt-5">
-          <TargetProgressList rows={rows} ctx={ctx} />
+          <TargetProgressList rows={rows} ctx={ctx} fiscalLabel={fiscalLabel} />
         </div>
       </main>
     );
