@@ -33,6 +33,10 @@ import {
   type PageSize,
 } from '@/lib/pagination/cursor';
 import { timeQuery } from '@/lib/pagination/timing';
+import {
+  DEAL_FIELD_SPECS,
+  fieldMissingSql,
+} from '@/lib/deals/completeness';
 import { type DealFilters } from '@/lib/deals/filters';
 import { type DealStage } from '@/lib/deals/schema';
 
@@ -345,6 +349,14 @@ export async function listDeals(
   if (f.slipped) {
     conditions.push(gte(deals.pushCount, 1));
   }
+  // `missing=<field>` — owes the field at its current stage and hasn't
+  // filled it. The predicate is generated from the completeness spec, so a
+  // heatmap cell and this list can never disagree about what "missing"
+  // means. `deals` is drizzle's alias for the table in both builders.
+  if (f.missingField) {
+    const spec = DEAL_FIELD_SPECS.find((s) => s.key === f.missingField);
+    if (spec) conditions.push(sql.raw(fieldMissingSql(spec, 'deals')));
+  }
   // Hard scope: members see only their deals + unassigned. URL params
   // cannot widen this — they're additive within the allowed set.
   if (options.restrictToOwnerOrUnassigned) {
@@ -629,6 +641,14 @@ function boardSharedConditions(
   // "Show slipped deals only" — the whole pushed cohort across every column.
   if (f.slipped) {
     conds.push(gte(deals.pushCount, 1));
+  }
+  // `missing=<field>` — owes the field at its current stage and hasn't
+  // filled it. The predicate is generated from the completeness spec, so a
+  // heatmap cell and this list can never disagree about what "missing"
+  // means. `deals` is drizzle's alias for the table in both builders.
+  if (f.missingField) {
+    const spec = DEAL_FIELD_SPECS.find((s) => s.key === f.missingField);
+    if (spec) conds.push(sql.raw(fieldMissingSql(spec, 'deals')));
   }
   if (options.restrictToOwnerOrUnassigned) {
     const me = options.restrictToOwnerOrUnassigned;

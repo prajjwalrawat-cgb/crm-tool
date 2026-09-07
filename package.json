@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "tsx scripts/apply-0024.ts && tsx scripts/apply-0025.ts && tsx scripts/apply-0026.ts && tsx scripts/apply-0027.ts && tsx scripts/apply-0028.ts && tsx scripts/apply-0029.ts && tsx scripts/apply-0030.ts && tsx scripts/apply-0031.ts && tsx scripts/apply-0032.ts && tsx scripts/apply-0033.ts && tsx scripts/apply-0034.ts && tsx scripts/apply-0035.ts && tsx scripts/apply-0036.ts && tsx scripts/apply-0037.ts && tsx scripts/apply-0038.ts && tsx scripts/apply-0039.ts && tsx scripts/apply-0040.ts && tsx scripts/apply-0041.ts && tsx scripts/apply-0042.ts && tsx scripts/apply-0043.ts && tsx scripts/apply-0044.ts && tsx scripts/apply-0045.ts && tsx scripts/apply-0046.ts && tsx scripts/apply-0047.ts && tsx scripts/apply-0048.ts && tsx scripts/apply-0049.ts && tsx scripts/apply-0050.ts && tsx scripts/apply-0051.ts && tsx scripts/apply-0052.ts && tsx scripts/apply-0053.ts && tsx scripts/apply-0054.ts && tsx scripts/apply-0055.ts && tsx scripts/apply-0056.ts && tsx scripts/apply-0057.ts && tsx scripts/apply-0058.ts && tsx scripts/apply-0059.ts && tsx scripts/apply-0060.ts && next build",
+    "build": "tsx scripts/apply-0024.ts && tsx scripts/apply-0025.ts && tsx scripts/apply-0026.ts && tsx scripts/apply-0027.ts && tsx scripts/apply-0028.ts && tsx scripts/apply-0029.ts && tsx scripts/apply-0030.ts && tsx scripts/apply-0031.ts && tsx scripts/apply-0032.ts && tsx scripts/apply-0033.ts && tsx scripts/apply-0034.ts && tsx scripts/apply-0035.ts && tsx scripts/apply-0036.ts && tsx scripts/apply-0037.ts && tsx scripts/apply-0038.ts && tsx scripts/apply-0039.ts && tsx scripts/apply-0040.ts && tsx scripts/apply-0041.ts && tsx scripts/apply-0042.ts && tsx scripts/apply-0043.ts && tsx scripts/apply-0044.ts && tsx scripts/apply-0045.ts && tsx scripts/apply-0046.ts && tsx scripts/apply-0047.ts && tsx scripts/apply-0048.ts && tsx scripts/apply-0049.ts && tsx scripts/apply-0050.ts && tsx scripts/apply-0051.ts && tsx scripts/apply-0052.ts && tsx scripts/apply-0053.ts && tsx scripts/apply-0054.ts && tsx scripts/apply-0055.ts && tsx scripts/apply-0056.ts && tsx scripts/apply-0057.ts && tsx scripts/apply-0058.ts && tsx scripts/apply-0059.ts && tsx scripts/apply-0060.ts && tsx scripts/apply-0061.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "inngest:dev": "npx inngest-cli@latest dev -u http://localhost:3001/api/inngest --no-discovery",
@@ -15,6 +15,7 @@
     "reset:link": "tsx --require ./scripts/_shim-server-only.cjs scripts/reset-link.ts",
     "dev:push-date": "tsx scripts/dev-push-close-date.ts",
     "seed:stage-gates": "tsx scripts/seed-stage-gates.ts",
+    "snapshot:team-metrics": "tsx --require ./scripts/_shim-server-only.cjs scripts/snapshot-team-metrics.ts",
     "backfill:deal-scores": "tsx --require ./scripts/_shim-server-only.cjs scripts/backfill-deal-scores.ts",
     "gmail:sync-now": "tsx --require ./scripts/_shim-server-only.cjs scripts/sync-gmail-now.ts",
     "seed:stress": "tsx scripts/seed-stress-data.ts",

@@ -1,5 +1,14 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { ArrowDown, ArrowUp, Minus } from 'lucide-react';
 
+import {
+  deltaDirection,
+  describeDelta,
+  formatDelta,
+  type Delta,
+} from '@/lib/dashboard/delta';
+import { periodLabel, type ScorecardDelta } from '@/lib/team-analytics/deltas';
 import { cn } from '@/lib/utils';
 
 /**
@@ -136,22 +145,84 @@ export function Td({
 /**
  * The rep's name cell, with their role underneath. Sticky so a name stays
  * readable while the numbers scroll.
+ *
+ * `href` turns the name into a drill-through to that rep's deals, scoped to
+ * whatever cohort the table counts (see `./drill-links`). Without one it
+ * renders as plain text — a link that went somewhere unfiltered would be
+ * worse than none.
  */
 export function RepCell({
   name,
   role,
+  href,
+  className,
 }: {
   name: string;
   role: string | null;
+  href?: string;
+  className?: string;
 }) {
-  return (
-    <Td sticky align="left">
+  const body = (
+    <>
       <span className="block leading-tight">{name}</span>
       {role ? (
         <span className="block text-[10px] font-normal capitalize text-slate-400 dark:text-[#71717A]">
           {role}
         </span>
       ) : null}
+    </>
+  );
+  return (
+    <Td sticky align="left" className={className}>
+      {href ? (
+        <Link
+          href={href}
+          title={`Open ${name}'s deals`}
+          className="block hover:text-indigo-600 hover:underline dark:hover:text-indigo-300"
+        >
+          {body}
+        </Link>
+      ) : (
+        body
+      )}
+    </Td>
+  );
+}
+
+/**
+ * A number that opens the rows behind it.
+ *
+ * Renders as plain text when `href` is absent — a cell with nothing to drill
+ * into (a zero, an "n/a") should not advertise a click that lands on an empty
+ * list.
+ */
+export function DrillCell({
+  href,
+  title,
+  children,
+  align = 'right',
+  muted = false,
+  className,
+}: {
+  href?: string | null;
+  title?: string;
+  children: ReactNode;
+  align?: 'left' | 'right' | 'center';
+  muted?: boolean;
+  className?: string;
+}) {
+  return (
+    <Td align={align} muted={muted} className={className} title={title}>
+      {href ? (
+        <Link
+          href={href}
+          className="hover:text-indigo-600 hover:underline dark:hover:text-indigo-300"
+        >
+          {children}
+        </Link>
+      ) : (
+        children
+      )}
     </Td>
   );
 }
@@ -202,12 +273,15 @@ export function PctCell({
   tone,
   label,
   title,
+  delta,
 }: {
   ratio: number;
   tone: ChipTone;
   /** Overrides the rendered text (e.g. "—" when nothing applies). */
   label?: string;
   title?: string;
+  /** Optional movement badge, rendered beside the number at table weight. */
+  delta?: ReactNode;
 }) {
   const pct = Math.round(ratio * 100);
   const width = Math.min(100, Math.max(0, pct));
@@ -219,7 +293,10 @@ export function PctCell({
   };
   return (
     <Td title={title}>
-      <span className="block leading-tight">{label ?? `${pct}%`}</span>
+      <span className="flex items-center justify-end gap-1 leading-tight">
+        {label ?? `${pct}%`}
+        {delta}
+      </span>
       <span className="mt-0.5 block h-1 w-full min-w-[36px] overflow-hidden rounded-full bg-slate-100 dark:bg-[#1F1F1F]">
         <span
           className={cn('block h-full rounded-full', barTone[tone])}
@@ -257,3 +334,87 @@ export function EmptyRow({ children }: { children: ReactNode }) {
     </p>
   );
 }
+
+/**
+ * Movement since the last month-close snapshot.
+ *
+ * The arithmetic is `@/lib/dashboard/delta`, shared with both dashboards —
+ * this only renders it. Two things it does NOT do:
+ *
+ *   · It never colours by direction alone. `higherIsBetter` comes from the
+ *     metric's own entry in `DELTA_HIGHER_IS_BETTER`, so "close dates pushed,
+ *     down 4" is green and "attainment, down 4 pts" is red. A single colour
+ *     rule across the strip would congratulate a team for pushing more deals.
+ *   · It never renders a missing baseline as 0%. Until the first snapshot
+ *     exists the badge says so in words, because a grey "0%" is
+ *     indistinguishable from a month in which genuinely nothing moved.
+ */
+export function DeltaBadge({
+  delta: scorecardDelta,
+  formatChange = (n) => String(Math.round(n)),
+  variant = 'table',
+}: {
+  delta: ScorecardDelta;
+  /** Renders the magnitude of an absolute change in the metric's own units. */
+  formatChange?: (magnitude: number) => string;
+  /** `tile` spells out a missing baseline; `table` shows a quiet dash. */
+  variant?: 'tile' | 'table';
+}) {
+  const { delta, higherIsBetter, baselinePeriod } = scorecardDelta;
+
+  if (delta.kind === 'none' || baselinePeriod === null) {
+    const title =
+      'No comparison yet — the first month-close snapshot for this workspace has not been captured.';
+    return variant === 'tile' ? (
+      <span
+        title={title}
+        className="text-[10px] font-medium text-slate-400 dark:text-[#71717A]"
+      >
+        no comparison yet
+      </span>
+    ) : (
+      <span
+        title={title}
+        className="text-[10px] text-slate-300 dark:text-[#52525B]"
+      >
+        —
+      </span>
+    );
+  }
+
+  const direction = deltaDirection(delta);
+  // "New this period" and "flat" are facts, not verdicts — neither earns a
+  // colour, the same rule the dashboard KPI strip follows.
+  const good =
+    delta.kind === 'new' || direction === null
+      ? null
+      : (direction === 'up') === higherIsBetter;
+
+  return (
+    <span
+      title={`${describeDelta(delta, 'period', formatChange)} Baseline: ${periodLabel(
+        baselinePeriod,
+      )} month close.`}
+      className={cn(
+        'inline-flex items-center gap-0.5 rounded px-1 py-px text-[10px] font-semibold tabular-nums',
+        good === null
+          ? 'bg-slate-50 text-slate-500 dark:bg-[#181818] dark:text-[#A1A1AA]'
+          : good
+            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+            : 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+      )}
+    >
+      {direction === null ? (
+        <Minus className="h-2.5 w-2.5" aria-hidden />
+      ) : direction === 'up' ? (
+        <ArrowUp className="h-2.5 w-2.5" aria-hidden />
+      ) : (
+        <ArrowDown className="h-2.5 w-2.5" aria-hidden />
+      )}
+      {formatDelta(delta, formatChange)}
+    </span>
+  );
+}
+
+/** Re-exported so section files import one delta surface, not two. */
+export type { Delta };

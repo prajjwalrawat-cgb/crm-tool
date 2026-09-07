@@ -8,8 +8,11 @@ import {
 import { SEVERE_PUSH_COUNT } from '@/lib/deals/slip';
 import type { TeamScorecard } from '@/lib/team-analytics/scorecard';
 
+import { dealsHref } from './drill-links';
 import {
   Chip,
+  DeltaBadge,
+  DrillCell,
   EmptyRow,
   Notes,
   RepCell,
@@ -111,7 +114,11 @@ export function PushbackSection({
               const perDeal = p.dealsPushed > 0 ? p.pushEvents / p.dealsPushed : 0;
               return (
                 <tr key={r.userId}>
-                  <RepCell name={r.displayName} role={r.role} />
+                  <RepCell
+                    name={r.displayName}
+                    role={r.role}
+                    href={dealsHref({ ownerId: r.userId, slipped: true })}
+                  />
                   <Td
                     className="font-semibold text-slate-900 dark:text-[#FAFAFA]"
                     title={
@@ -120,14 +127,30 @@ export function PushbackSection({
                         : undefined
                     }
                   >
-                    {p.pushEvents}
-                    {p.pushedByOthers > 0 ? (
-                      <span className="ml-1 text-[10px] font-normal text-slate-400">
-                        ({p.pushedByOthers} by others)
+                    <span className="flex items-center justify-end gap-1">
+                      <span>
+                        {p.pushEvents}
+                        {p.pushedByOthers > 0 ? (
+                          <span className="ml-1 text-[10px] font-normal text-slate-400">
+                            ({p.pushedByOthers} by others)
+                          </span>
+                        ) : null}
                       </span>
-                    ) : null}
+                      <DeltaBadge delta={r.deltas.pushEvents} />
+                    </span>
                   </Td>
-                  <Td>{p.dealsPushed}</Td>
+                  {/* The deals themselves, not just how many. `slipped=1`
+                      is the same predicate the board's "slipped only"
+                      toggle uses. */}
+                  <DrillCell
+                    href={
+                      p.dealsPushed > 0
+                        ? dealsHref({ ownerId: r.userId, slipped: true })
+                        : null
+                    }
+                  >
+                    {p.dealsPushed}
+                  </DrillCell>
                   <Td muted={perDeal < 2}>{perDeal.toFixed(1)}×</Td>
                   <Td>
                     <Chip

@@ -15,6 +15,7 @@ import {
   regenerateEmbedding,
   relationshipSignalsDerive,
   staleDealsScan,
+  teamMetricsMonthly,
   workflowRunsRetention,
 } from '@/lib/inngest/workflows';
 
@@ -40,6 +41,7 @@ export const { GET, POST, PUT } = serve({
     regenerateEmbedding,
     relationshipSignalsDerive,
     staleDealsScan,
+    teamMetricsMonthly,
     workflowRunsRetention,
   ],
 });

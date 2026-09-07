@@ -17,6 +17,11 @@ import { listTargets, targetAchievement } from '@/lib/targets/queries';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import {
+  buildDeltas,
+  type PriorInputs,
+  type ScorecardDeltaSet,
+} from './deltas';
+import {
   completenessByOwner,
   engagementByOwner,
   pushbackLeaderboard,
@@ -27,6 +32,12 @@ import {
   type EngagementRow,
   type PushbackRow,
 } from './queries';
+import {
+  baselineValue,
+  periodKey,
+  readBaselines,
+  type Baselines,
+} from './snapshots';
 
 /**
  * THE TEAM SCORECARD — one row per rep, assembled from the four
@@ -91,6 +102,13 @@ export type ScorecardRow = {
   pushback: PushbackRow;
   engagement: EngagementRow;
   completeness: CompletenessRow;
+
+  /**
+   * Movement since the last period-close snapshot. Every member is
+   * `{ kind: 'none' }` with a null baseline until the first snapshot exists —
+   * rendered as "no comparison yet", never as a 0% change.
+   */
+  deltas: ScorecardDeltaSet;
 };
 
 export type ScorecardField = {
@@ -118,9 +136,16 @@ export type TeamScorecard = {
     completeness: { applicable: number; filled: number };
     /** The single busiest rep-week in the window, for the headline stat. */
     bestWeek: { userId: string; displayName: string; count: number; weekStart: string } | null;
+    deltas: ScorecardDeltaSet;
   };
   /** Scored data points, in render order — static fields then custom ones. */
   fields: ScorecardField[];
+  /**
+   * Which snapshot periods the deltas on this page were measured against.
+   * Null on both when nothing has been captured yet; the page says so rather
+   * than showing arrows that compare against nothing.
+   */
+  baselinePeriods: { cumulative: string | null; state: string | null };
   quarterWindows: FiscalQuarter[];
   window: { from: Date; to: Date };
   fyStart: Date;
@@ -206,6 +231,17 @@ export async function getTeamScorecard(
     pushbackRecordedSince(tenantId),
   ]);
 
+  // Deltas compare against the last CLOSED month, never against a moving
+  // "30 days ago": two tiles read state that no longer exists in the deals
+  // table, so the comparison has to come from something written down. The
+  // period the page itself sits in is excluded — a half-finished month is
+  // not a baseline.
+  const baselines = await readBaselines(
+    tenantId,
+    periodKey(windowTo),
+    periodKey(fyStart),
+  );
+
   const targetByUser = new Map(targets.map((t) => [t.userId, t]));
   const achByUser = new Map(achievement.map((a) => [a.userId, a]));
   const qByUser = new Map(quarterly.map((q) => [q.userId, q]));
@@ -237,6 +273,8 @@ export async function getTeamScorecard(
       const ach = achByUser.get(t.id);
       const q = qByUser.get(t.id);
       const eng = engByUser.get(t.id) ?? EMPTY_ENGAGEMENT(t.id);
+      const push = pushByUser.get(t.id) ?? EMPTY_PUSHBACK(t.id);
+      const comp = compByUser.get(t.id) ?? EMPTY_COMPLETENESS(t.id);
       const revenueTargetMinor = target?.revenueTargetMinor ?? 0;
       const fyRevenueMinor = ach?.fyRevenueMinor ?? 0;
       const quarterTargets = splitAnnualTarget(revenueTargetMinor);
@@ -274,9 +312,21 @@ export async function getTeamScorecard(
           targetMinor: revenueTargetMinor,
           achievedMinor: fyRevenueMinor,
         }),
-        pushback: pushByUser.get(t.id) ?? EMPTY_PUSHBACK(t.id),
+        pushback: push,
         engagement: eng,
-        completeness: compByUser.get(t.id) ?? EMPTY_COMPLETENESS(t.id),
+        completeness: comp,
+        deltas: buildDeltas(
+          {
+            fyRevenueMinor,
+            revenueTargetMinor,
+            pushEvents: push.pushEvents,
+            dealsCreated: eng.dealsCreated,
+            staleOpenDeals: eng.staleOpenDeals,
+            completenessFilled: comp.total.filled,
+            completenessApplicable: comp.total.applicable,
+          },
+          priorInputs(baselines, t.id),
+        ),
       };
     });
 
@@ -290,7 +340,14 @@ export async function getTeamScorecard(
       a.displayName.localeCompare(b.displayName),
   );
 
-  const team = buildTeamTotals(rows, quarterWindows, fyStart, fyEnd, now);
+  const team = buildTeamTotals(
+    rows,
+    quarterWindows,
+    fyStart,
+    fyEnd,
+    now,
+    baselines,
+  );
 
   const fields: ScorecardField[] = [
     ...DEAL_FIELD_SPECS.map((s) => ({
@@ -316,6 +373,10 @@ export async function getTeamScorecard(
     fyStart,
     fyEnd,
     pushbackRecordedSince: recordedSince,
+    baselinePeriods: {
+      cumulative: baselines.cumulative.period,
+      state: baselines.state.period,
+    },
   };
 }
 
@@ -337,12 +398,35 @@ function buildQuarter(
   };
 }
 
+/**
+ * Pull one rep's (or the team's, with a null id) figures out of the
+ * baselines. Each metric resolves against the baseline appropriate to its
+ * kind — see `./snapshots` for why cumulative and state metrics cannot share
+ * one.
+ */
+function priorInputs(baselines: Baselines, repId: string | null): PriorInputs {
+  const read = (metric: string): number | null =>
+    baselineValue(baselines, metric, repId)?.value ?? null;
+  return {
+    fyRevenueMinor: read('fy_revenue_minor'),
+    revenueTargetMinor: read('revenue_target_minor'),
+    pushEvents: read('push_events'),
+    dealsCreated: read('deals_created'),
+    staleOpenDeals: read('stale_open_deals'),
+    completenessFilled: read('completeness_filled'),
+    completenessApplicable: read('completeness_applicable'),
+    cumulativePeriod: baselines.cumulative.period,
+    statePeriod: baselines.state.period,
+  };
+}
+
 function buildTeamTotals(
   rows: ScorecardRow[],
   quarterWindows: FiscalQuarter[],
   fyStart: Date,
   fyEnd: Date,
   now: Date,
+  baselines: Baselines,
 ): TeamScorecard['team'] {
   const sum = (pick: (r: ScorecardRow) => number) =>
     rows.reduce((acc, r) => acc + pick(r), 0);
@@ -375,6 +459,14 @@ function buildTeamTotals(
     }
   }
 
+  const pushEvents = sum((r) => r.pushback.pushEvents);
+  const dealsCreated = sum((r) => r.engagement.dealsCreated);
+  const staleOpenDeals = sum((r) => r.engagement.staleOpenDeals);
+  const completeness = {
+    applicable: sum((r) => r.completeness.total.applicable),
+    filled: sum((r) => r.completeness.total.filled),
+  };
+
   return {
     revenueTargetMinor,
     fyRevenueMinor,
@@ -391,15 +483,27 @@ function buildTeamTotals(
       targetMinor: revenueTargetMinor,
       achievedMinor: fyRevenueMinor,
     }),
-    pushEvents: sum((r) => r.pushback.pushEvents),
+    pushEvents,
     daysPushed: sum((r) => r.pushback.daysPushed),
-    dealsCreated: sum((r) => r.engagement.dealsCreated),
-    staleOpenDeals: sum((r) => r.engagement.staleOpenDeals),
+    dealsCreated,
+    staleOpenDeals,
     openDeals: sum((r) => r.engagement.openDeals),
-    completeness: {
-      applicable: sum((r) => r.completeness.total.applicable),
-      filled: sum((r) => r.completeness.total.filled),
-    },
+    completeness,
     bestWeek,
+    // The team row is snapshotted under a NULL rep id rather than summed from
+    // the rep rows — a rep who has since left the workspace is in last
+    // month's team total and in nobody's current row.
+    deltas: buildDeltas(
+      {
+        fyRevenueMinor,
+        revenueTargetMinor,
+        pushEvents,
+        dealsCreated,
+        staleOpenDeals,
+        completenessFilled: completeness.filled,
+        completenessApplicable: completeness.applicable,
+      },
+      priorInputs(baselines, null),
+    ),
   };
 }

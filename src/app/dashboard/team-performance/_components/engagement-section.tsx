@@ -13,8 +13,11 @@ import {
 } from '@/lib/team-analytics/engagement';
 import type { TeamScorecard } from '@/lib/team-analytics/scorecard';
 
+import { dealsHref } from './drill-links';
 import {
   Chip,
+  DeltaBadge,
+  DrillCell,
   Notes,
   RepCell,
   Section,
@@ -117,7 +120,11 @@ export function EngagementSection({
               e.openDeals > 0 ? e.staleOpenDeals / e.openDeals : 0;
             return (
               <tr key={r.userId}>
-                <RepCell name={r.displayName} role={r.role} />
+                <RepCell
+                  name={r.displayName}
+                  role={r.role}
+                  href={dealsHref({ ownerId: r.userId, openOnly: true })}
+                />
                 <Td
                   muted={e.dealsCreated === 0}
                   className={
@@ -126,7 +133,10 @@ export function EngagementSection({
                       : undefined
                   }
                 >
-                  {e.dealsCreated || '—'}
+                  <span className="flex items-center justify-end gap-1">
+                    {e.dealsCreated || '—'}
+                    <DeltaBadge delta={r.deltas.dealsCreated} />
+                  </span>
                 </Td>
                 <Td
                   muted={e.createdValueMinor === 0}
@@ -154,31 +164,49 @@ export function EngagementSection({
                 <Td muted={e.activeWeeks === 0}>
                   {e.activeWeeks > 0 ? `${e.activeWeeks}/${weeks}` : '—'}
                 </Td>
-                <Td muted={e.openDeals === 0}>{e.openDeals || '—'}</Td>
-                <Td
+                <DrillCell
+                  muted={e.openDeals === 0}
+                  href={
+                    e.openDeals > 0
+                      ? dealsHref({ ownerId: r.userId, openOnly: true })
+                      : null
+                  }
+                  title={`Open ${r.displayName}'s ${e.openDeals} open deals`}
+                >
+                  {e.openDeals || '—'}
+                </DrillCell>
+                <DrillCell
                   muted={e.staleOpenDeals === 0}
+                  href={
+                    e.staleOpenDeals > 0
+                      ? dealsHref({ ownerId: r.userId, stale: true })
+                      : null
+                  }
                   title={
                     e.oldestUntouchedDays != null
                       ? `Oldest untouched open deal: ${e.oldestUntouchedDays} days`
                       : undefined
                   }
                 >
-                  {e.staleOpenDeals > 0 ? (
-                    <Chip
-                      tone={
-                        staleRatio >= 0.5
-                          ? 'bad'
-                          : staleRatio >= 0.25
-                            ? 'warn'
-                            : 'neutral'
-                      }
-                    >
-                      {e.staleOpenDeals}/{e.openDeals}
-                    </Chip>
-                  ) : (
-                    '—'
-                  )}
-                </Td>
+                  <span className="flex items-center justify-end gap-1">
+                    {e.staleOpenDeals > 0 ? (
+                      <Chip
+                        tone={
+                          staleRatio >= 0.5
+                            ? 'bad'
+                            : staleRatio >= 0.25
+                              ? 'warn'
+                              : 'neutral'
+                        }
+                      >
+                        {e.staleOpenDeals}/{e.openDeals}
+                      </Chip>
+                    ) : (
+                      '—'
+                    )}
+                    <DeltaBadge delta={r.deltas.staleOpenDeals} />
+                  </span>
+                </DrillCell>
                 <Td muted={e.daysSinceLastTouch == null}>
                   {agoLabel(e.daysSinceLastTouch)}
                 </Td>
@@ -203,17 +231,33 @@ export function EngagementSection({
             <Td sticky align="left">
               Team
             </Td>
-            <Td>{team.dealsCreated || '—'}</Td>
+            <Td>
+              <span className="flex items-center justify-end gap-1">
+                {team.dealsCreated || '—'}
+                <DeltaBadge delta={team.deltas.dealsCreated} />
+              </span>
+            </Td>
             <Td muted>—</Td>
             <Td muted>—</Td>
             <Td>{(team.dealsCreated / weeks).toFixed(1)}</Td>
             <Td muted>—</Td>
-            <Td>{team.openDeals || '—'}</Td>
-            <Td>
-              {team.staleOpenDeals > 0
-                ? `${team.staleOpenDeals}/${team.openDeals}`
-                : '—'}
-            </Td>
+            <DrillCell
+              href={team.openDeals > 0 ? dealsHref({ openOnly: true }) : null}
+              title="Open every open deal in the workspace"
+            >
+              {team.openDeals || '—'}
+            </DrillCell>
+            <DrillCell
+              href={team.staleOpenDeals > 0 ? dealsHref({ stale: true }) : null}
+              title="Open every untouched open deal in the workspace"
+            >
+              <span className="flex items-center justify-end gap-1">
+                {team.staleOpenDeals > 0
+                  ? `${team.staleOpenDeals}/${team.openDeals}`
+                  : '—'}
+                <DeltaBadge delta={team.deltas.staleOpenDeals} />
+              </span>
+            </DrillCell>
             <Td muted>—</Td>
             <Td muted>—</Td>
           </tr>

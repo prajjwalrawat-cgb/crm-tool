@@ -19,10 +19,13 @@ import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { marginPctToBps } from '@/lib/deals/approval';
 import { formatCurrency, fromMinorUnits, toMinorUnits } from '@/lib/deals/currency';
+import { DEAL_FIELD_SPECS } from '@/lib/deals/completeness';
 import {
   type DealFilters,
   DEAL_FILTER_URL_KEYS,
   dealFiltersToSearchParams,
+  DEAL_SEARCH_URL_KEY,
+  withSearchTerm,
 } from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
 import type { PageSize } from '@/lib/pagination/page-size';
@@ -283,25 +286,43 @@ export function DealsView({
     });
   }
 
-  const isFirstSearchRender = useRef(true);
+  /**
+   * Debounced search -> URL sync. THE URL IS THE SOURCE OF TRUTH; this effect
+   * contributes one key to it (`q`) and must leave every other key alone.
+   *
+   * Two rules, both learned from the same bug. This effect used to build a
+   * fresh `URLSearchParams` containing only `q` and `size`, which deleted
+   * every filter in the URL — owner, `missing=`, `stale`, `slipped`, the
+   * stage list. And it guarded itself with a first-render ref, which React
+   * consumes on the first of the two mount invocations it makes in
+   * development, so the second one scheduled a write. Together that meant a
+   * deep link from Team Performance arrived correctly filtered and was
+   * stripped bare 250ms later.
+   *
+   *   1. MERGE, never rebuild — `withSearchTerm` owns `q` and `cursor` and
+   *      carries everything else through untouched.
+   *   2. Write only when the box and the URL actually disagree. A remount, a
+   *      `router.refresh()`, a StrictMode double-invoke and a hard reload all
+   *      arrive with the box already equal to `?q=`, so none of them writes
+   *      anything at all.
+   *
+   * `size` is deliberately not written here — pagination owns it, and it now
+   * survives on its own because this merges instead of rebuilding.
+   */
+  const urlSearchTerm = searchParams.get(DEAL_SEARCH_URL_KEY) ?? '';
 
   useEffect(() => {
-    if (isFirstSearchRender.current) {
-      isFirstSearchRender.current = false;
-      return;
-    }
+    if (search.trim() === urlSearchTerm.trim()) return;
     const handle = setTimeout(() => {
       startSearchTransition(() => {
-        const params = new URLSearchParams();
-        const trimmed = search.trim();
-        if (trimmed) params.set('q', trimmed);
-        if (pageSize !== 50) params.set('size', String(pageSize));
-        const qs = params.toString();
-        router.replace(`/dashboard/deals${qs ? `?${qs}` : ''}`);
+        const qs = withSearchTerm(searchParams, search).toString();
+        router.replace(`/dashboard/deals${qs ? `?${qs}` : ''}`, {
+          scroll: false,
+        });
       });
     }, 250);
     return () => clearTimeout(handle);
-  }, [search, router, pageSize]);
+  }, [search, urlSearchTerm, searchParams, router]);
 
   function buildOptimisticDraft(formData: FormData, base?: DealRow): DealItem {
     const name = String(formData.get('name') ?? '').trim();
@@ -2290,6 +2311,19 @@ function buildDealFilterChips(
       id: 'owners',
       keys: ['owner'],
       label: `Owner: ${names.join(', ')}${suffix}`,
+    });
+  }
+
+  if (filters.missingField) {
+    const label =
+      DEAL_FIELD_SPECS.find((f) => f.key === filters.missingField)?.label ??
+      filters.missingField;
+    chips.push({
+      id: 'missing',
+      keys: ['missing'],
+      // Says "owe it and don't have it", not just "empty" — a Lead with no
+      // close date is not in this list and the chip shouldn't imply it is.
+      label: `Missing: ${label}`,
     });
   }
 
