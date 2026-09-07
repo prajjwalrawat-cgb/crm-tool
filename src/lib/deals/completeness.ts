@@ -73,10 +73,35 @@ export type CompletenessDeal = {
   customFields: Record<string, unknown>;
 };
 
+/**
+ * Display grouping for the scorecard's heatmap header. Presentation only —
+ * grouping has no effect on scoring, and a field's group can be changed
+ * without touching a single number.
+ *
+ * `custom` exists so a workspace's required custom fields land somewhere
+ * honest instead of being wedged into a group whose name doesn't describe
+ * them.
+ */
+export const FIELD_GROUPS = [
+  { key: 'identity', label: 'Identity' },
+  { key: 'financials', label: 'Financials' },
+  { key: 'metadata', label: 'Deal metadata' },
+  { key: 'execution', label: 'Execution' },
+  { key: 'custom', label: 'Custom fields' },
+] as const;
+
+export type FieldGroupKey = (typeof FIELD_GROUPS)[number]['key'];
+
+export function fieldGroupLabel(key: FieldGroupKey): string {
+  return FIELD_GROUPS.find((g) => g.key === key)?.label ?? key;
+}
+
 export type DealFieldSpec = {
   /** Stable key — also the aggregate's column suffix. */
   key: string;
   label: string;
+  /** Which header group this column sits under. Presentation only. */
+  group: FieldGroupKey;
   /** Short "why this matters", rendered as the column tooltip. */
   hint: string;
   /**
@@ -102,12 +127,18 @@ function textSql(column: string): string {
 }
 
 /**
- * The scored data points, in the order they appear on the scorecard —
- * commercials first, then the fields a forecast depends on, then context.
+ * The scored data points, in the order they appear on the scorecard.
+ *
+ * ORDER IS GROUPED ORDER. The scorecard renders these under group headers
+ * by walking this list once and chunking on `group`, so fields sharing a
+ * group have to be adjacent here. Moving one changes only where its column
+ * appears — the SQL aliases are positional but generated and consumed in
+ * the same query, and the self-test compares by key.
  */
 export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   {
     key: 'company',
+    group: 'identity',
     label: 'Company',
     hint: 'Linked company record, or at least a typed company name',
     requiredFromRank: 1,
@@ -116,6 +147,7 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   },
   {
     key: 'contact',
+    group: 'identity',
     label: 'Contact',
     hint: 'Someone on the other side of the deal',
     requiredFromRank: 1,
@@ -124,6 +156,7 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   },
   {
     key: 'contact_email',
+    group: 'identity',
     label: 'Contact email',
     hint: 'Required from Qualified — without it nothing can be sent or synced',
     requiredFromRank: 2,
@@ -132,6 +165,7 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   },
   {
     key: 'amount',
+    group: 'financials',
     label: 'Value',
     hint: 'A deal worth 0 is a deal missing from every forecast',
     requiredFromRank: 1,
@@ -140,6 +174,7 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   },
   {
     key: 'margin',
+    group: 'financials',
     label: 'Margin',
     hint: 'Mandatory from Qualified on; a NULL margin scores as zero margin on the targets page',
     requiredFromRank: 2,
@@ -147,15 +182,8 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
     isFilled: (d) => d.marginBps != null && d.marginBps > 0,
   },
   {
-    key: 'close_date',
-    label: 'Close date',
-    hint: 'Mandatory from Proposal on (chk_close_date_required); a Lead must NOT carry one',
-    requiredFromRank: 3,
-    filledSql: 'd.expected_close_date IS NOT NULL',
-    isFilled: (d) => d.expectedCloseDate != null,
-  },
-  {
     key: 'value_split',
+    group: 'financials',
     label: 'Revenue breakdown',
     hint: 'Without it the whole contract value is counted against this fiscal year',
     requiredFromRank: 3,
@@ -163,7 +191,17 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
     isFilled: (d) => d.hasValueSplit,
   },
   {
+    key: 'close_date',
+    group: 'metadata',
+    label: 'Close date',
+    hint: 'Mandatory from Proposal on (chk_close_date_required); a Lead must NOT carry one',
+    requiredFromRank: 3,
+    filledSql: 'd.expected_close_date IS NOT NULL',
+    isFilled: (d) => d.expectedCloseDate != null,
+  },
+  {
     key: 'deal_type',
+    group: 'metadata',
     label: 'Deal type',
     hint: 'New logo / renewal / expansion / upsell — new-business reporting needs it',
     requiredFromRank: 1,
@@ -172,6 +210,7 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   },
   {
     key: 'source',
+    group: 'metadata',
     label: 'Source',
     hint: 'Where the deal came from — the only input to channel ROI',
     requiredFromRank: 1,
@@ -180,6 +219,7 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   },
   {
     key: 'next_step',
+    group: 'execution',
     label: 'Next step',
     hint: 'What has to happen to close. The one field a pipeline review reads first',
     requiredFromRank: 2,
@@ -188,6 +228,7 @@ export const DEAL_FIELD_SPECS: readonly DealFieldSpec[] = [
   },
   {
     key: 'description',
+    group: 'execution',
     label: 'Description',
     hint: 'What the deal is actually for — the handover-when-a-rep-leaves field',
     requiredFromRank: 2,
@@ -260,17 +301,30 @@ export function scoreDeal(
 }
 
 /* ---------------------------------------------------------------
- * Bands
+ * Bands (the red / amber / green of the scorecard heatmap)
  * ---------------------------------------------------------------
  * Deliberately coarse. The number this produces is a hygiene signal,
  * not a measurement, and three bands stop a 2-point difference between
  * two reps from reading as a ranking.
+ *
+ * ONE SET OF THRESHOLDS, HERE. The heatmap cell, the overall column, the
+ * KPI tile and the weakest-field callout all colour through
+ * `completenessBand`, so a cell reading 80% cannot be green in one place
+ * and amber three inches away.
+ *
+ * The cut-offs are flat across every field for now. They probably should
+ * not stay that way: a missing Description on a Lead is not the same
+ * failure as a missing Close date on a Proposal, and 40% on the first is
+ * survivable where 40% on the second is a broken forecast. Per-field (or
+ * per-stage) thresholds are the obvious next step — they belong on
+ * `DealFieldSpec` when someone has an opinion about the numbers, not
+ * scattered through the renderer.
  */
 
 export type CompletenessBand = 'good' | 'patchy' | 'poor';
 
-export const COMPLETENESS_GOOD = 0.9;
-export const COMPLETENESS_PATCHY = 0.7;
+export const COMPLETENESS_GOOD = 0.8;
+export const COMPLETENESS_PATCHY = 0.4;
 
 export function completenessBand(ratio: number): CompletenessBand {
   if (ratio >= COMPLETENESS_GOOD) return 'good';

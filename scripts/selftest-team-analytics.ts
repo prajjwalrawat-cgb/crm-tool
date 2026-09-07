@@ -87,6 +87,11 @@ async function main() {
   const { activityBand, silenceNote, weekLabel, weeksIn } = await import(
     '../src/lib/team-analytics/engagement'
   );
+  // The heatmap's colour + ranking rules. React-free on purpose, so the
+  // thing that decides "is this cell red" is testable without a renderer.
+  const { fieldFills, groupRuns, ragStyle, weakestFirst } = await import(
+    '../src/app/dashboard/team-performance/_components/completeness-rag'
+  );
 
   /* ---------- 1: the pure rules ---------- */
 
@@ -265,6 +270,69 @@ async function main() {
   check(
     'nothing applicable scores as complete rather than dividing by zero',
     ratioOf(0, 0) === 1 && completenessBand(ratioOf(0, 0)) === 'good',
+  );
+
+  /* ---------- the heatmap's presentation rules ---------- */
+
+  // 40 / 80, read off the DISPLAYED percentage. The boundaries are the
+  // whole point: a cell reading exactly 80% must not be amber.
+  const green = ragStyle(100).bg;
+  const amber = ragStyle(60).bg;
+  const red = ragStyle(0).bg;
+  check(
+    'RAG boundaries sit exactly on 40 and 80',
+    ragStyle(80).bg === green &&
+      ragStyle(79).bg === amber &&
+      ragStyle(40).bg === amber &&
+      ragStyle(39).bg === red,
+    `80=${ragStyle(80).bg} 79=${ragStyle(79).bg} 40=${ragStyle(40).bg} 39=${ragStyle(39).bg}`,
+  );
+  check(
+    'each band is a distinct pair of classes, and every one carries a dark variant',
+    new Set([green, amber, red]).size === 3 &&
+      [0, 60, 100].every(
+        (p) => ragStyle(p).bg.includes('dark:') && ragStyle(p).fg.includes('dark:'),
+      ),
+  );
+
+  // The header claims a colSpan per group; if a run could ever cover a
+  // different number of columns than are rendered under it, the grid skews.
+  const runs = groupRuns(DEAL_FIELD_SPECS);
+  check(
+    'group runs cover every field exactly once',
+    runs.reduce((n, r) => n + r.fields.length, 0) === DEAL_FIELD_SPECS.length,
+    `${runs.reduce((n, r) => n + r.fields.length, 0)} vs ${DEAL_FIELD_SPECS.length}`,
+  );
+  check(
+    'no group is split across two runs — grouped fields stay adjacent in the spec',
+    new Set(runs.map((r) => r.key)).size === runs.length,
+    runs.map((r) => `${r.key}:${r.fields.length}`).join(' '),
+  );
+
+  // The callout and the collapsed column set both read this ranking, so a
+  // field nothing owes must not be nominated as the team's worst.
+  const fills = fieldFills(
+    [
+      { key: 'a', label: 'A', hint: '', group: 'identity' },
+      { key: 'b', label: 'B', hint: '', group: 'identity' },
+      { key: 'c', label: 'C', hint: '', group: 'financials' },
+    ],
+    {
+      a: { applicable: 10, filled: 9 },
+      b: { applicable: 10, filled: 2 },
+      c: { applicable: 0, filled: 0 },
+    },
+  );
+  const ranked = weakestFirst(fills);
+  check(
+    'the weakest field is the lowest-filled one that some deal actually owes',
+    ranked.length === 2 && ranked[0].key === 'b' && ranked[0].pct === 20,
+    ranked.map((f) => `${f.key}=${f.pct}`).join(' '),
+  );
+  check(
+    'a field no open deal owes is never nominated as the weakest',
+    ranked.every((f) => f.key !== 'c') &&
+      fills.find((f) => f.key === 'c')?.applicable === 0,
   );
 
   /* ---------- engagement helpers ---------- */

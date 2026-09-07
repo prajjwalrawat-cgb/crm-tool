@@ -62,6 +62,8 @@ export function Th({
   title,
   sticky = false,
   className,
+  colSpan,
+  rowSpan,
 }: {
   children: ReactNode;
   align?: 'left' | 'right' | 'center';
@@ -69,11 +71,17 @@ export function Th({
   title?: string;
   sticky?: boolean;
   className?: string;
+  /** Set on a two-tier header: a group cell spans its fields. */
+  colSpan?: number;
+  /** Set on a two-tier header: an ungrouped column spans both rows. */
+  rowSpan?: number;
 }) {
   return (
     <th
       title={title}
-      scope="col"
+      colSpan={colSpan}
+      rowSpan={rowSpan}
+      scope={colSpan && colSpan > 1 ? 'colgroup' : 'col'}
       className={cn(
         'whitespace-nowrap border-b border-slate-200 pb-1.5 pt-0.5 text-[10.5px] font-medium uppercase tracking-wide text-slate-400 dark:border-[#1F1F1F] dark:text-[#71717A]',
         align === 'left' && 'text-left',

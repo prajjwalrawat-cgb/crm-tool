@@ -1,7 +1,10 @@
 import 'server-only';
 
 import { computeCoverage, type Coverage } from '@/lib/dashboard/coverage';
-import { DEAL_FIELD_SPECS } from '@/lib/deals/completeness';
+import {
+  DEAL_FIELD_SPECS,
+  type FieldGroupKey,
+} from '@/lib/deals/completeness';
 import { fiscalYearRange } from '@/lib/targets/fiscal';
 import {
   fiscalQuarters,
@@ -90,7 +93,13 @@ export type ScorecardRow = {
   completeness: CompletenessRow;
 };
 
-export type ScorecardField = { key: string; label: string; hint: string };
+export type ScorecardField = {
+  key: string;
+  label: string;
+  hint: string;
+  /** Header group the scorecard renders this column under. */
+  group: FieldGroupKey;
+};
 
 export type TeamScorecard = {
   rows: ScorecardRow[];
@@ -288,11 +297,13 @@ export async function getTeamScorecard(
       key: s.key,
       label: s.label,
       hint: s.hint,
+      group: s.group,
     })),
     ...customFields.map((c) => ({
       key: c.key,
       label: c.label,
       hint: 'Required custom field for this workspace',
+      group: 'custom' as const,
     })),
   ];
 
