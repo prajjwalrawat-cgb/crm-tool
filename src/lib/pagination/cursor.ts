@@ -35,12 +35,21 @@ export type Cursor = {
   ts: string;
   /** UUID for tie-breaking when timestamps collide. */
   id: string;
+  /**
+   * Optional NUMERIC keyset value, for a list ordered by a number rather than
+   * by a timestamp (the deals list sorted by risk score). `ts` stays
+   * populated in that mode so an old cursor still decodes and so the shape
+   * never becomes conditional — only the predicate changes.
+   */
+  n?: number;
 };
 
 const CURSOR_RE = /^[A-Za-z0-9_-]+$/;
 
 export function encodeCursor(c: Cursor): string {
-  const json = JSON.stringify({ ts: c.ts, id: c.id });
+  const json = JSON.stringify(
+    c.n === undefined ? { ts: c.ts, id: c.id } : { ts: c.ts, id: c.id, n: c.n },
+  );
   return Buffer.from(json, 'utf8')
     .toString('base64')
     .replace(/\+/g, '-')
@@ -61,7 +70,9 @@ export function decodeCursor(raw: string | undefined | null): Cursor | null {
     // Reject obviously bad timestamps so a downstream Date() coercion
     // doesn't produce NaN that would silently match nothing.
     if (Number.isNaN(Date.parse(obj.ts))) return null;
-    return { ts: obj.ts, id: obj.id };
+    return typeof obj.n === 'number' && Number.isFinite(obj.n)
+      ? { ts: obj.ts, id: obj.id, n: obj.n }
+      : { ts: obj.ts, id: obj.id };
   } catch {
     return null;
   }

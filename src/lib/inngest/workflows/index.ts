@@ -16,6 +16,7 @@ import {
   dealHealthRecompute,
   dealHealthRecomputeHandler,
 } from './deal-health-recompute';
+import { dealRiskNightly } from './deal-risk-nightly';
 import { dealScoresNightly } from './deal-scores-nightly';
 import { forecastSnapshotWeekly } from './forecast-snapshot-weekly';
 import { gmailSync } from './gmail-sync';
@@ -50,6 +51,7 @@ export {
   dealLost,
   dealWon,
   dealHealthRecompute,
+  dealRiskNightly,
   dealScoresNightly,
   forecastSnapshotWeekly,
   gmailSync,

@@ -23,7 +23,7 @@ import {
   deals,
   type Deal,
   type DealApprovalStatus,
-} from '@/db/schema';
+  dealRiskScores,} from '@/db/schema';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
 import {
   buildPage,
@@ -37,6 +37,10 @@ import {
   DEAL_FIELD_SPECS,
   fieldMissingSql,
 } from '@/lib/deals/completeness';
+import {
+  RISK_ELEVATED_FROM,
+  RISK_HIGH_FROM,
+} from '@/lib/deals/risk/score';
 import { type DealFilters } from '@/lib/deals/filters';
 import { type DealStage } from '@/lib/deals/schema';
 
@@ -51,6 +55,13 @@ export type DealRow = Deal & {
   contactEmail: string | null;
   // Health (Module 2) rides along as `healthScore` / `healthBand` — real
   // columns on `deals`, already part of `Deal`.
+  /**
+   * Phase 1 risk, joined from `deal_risk_scores` rather than cached on
+   * `deals`. NULL means NOT SCORED — a deal the nightly job has not reached,
+   * or one that is won/lost/hold. Never read it as "no risk".
+   */
+  riskScore: number | null;
+  riskBand: string | null;
 };
 
 export type DealOption = {
@@ -73,8 +84,21 @@ export async function listDealOptions(tenantId: string): Promise<DealOption[]> {
   );
 }
 
+/**
+ * How the deals list is ordered.
+ *
+ *   recent — newest first, keyset on (created_at, id). The default.
+ *   risk   — highest Phase 1 risk first, keyset on (risk_score, id).
+ *
+ * Two modes rather than an arbitrary sort-by-any-column: each needs its own
+ * index and its own cursor predicate, and a mode nobody can page through is
+ * not a sort, it is a first page.
+ */
+export type DealSort = 'recent' | 'risk';
+
 export type ListDealsOptions = {
   search?: string;
+  sort?: DealSort;
   cursor?: Cursor | null;
   size?: PageSize;
   filters?: DealFilters;
@@ -135,6 +159,8 @@ type RawJoinedRow = {
   updatedBy: string | null;
   healthScore: number | null;
   healthBand: string | null;
+  riskScore: number | null;
+  riskBand: string | null;
   forecastCategory: string | null;
   forecastCategoryOverridden: boolean;
   holdReason: string | null;
@@ -169,6 +195,11 @@ const DEALS_PROJECTION = {
   source: deals.source,
   currency: deals.currency,
   expectedCloseDate: deals.expectedCloseDate,
+  // Phase 1 risk, read straight from `deal_risk_scores` through the join
+  // above. NOT a denormalised column on `deals`: see the note on the risk
+  // sort below for why that cache had to go.
+  riskScore: dealRiskScores.score,
+  riskBand: dealRiskScores.band,
   // Pushback cache (0058) — every card on the board renders its slip
   // indicator straight from these, no per-card aggregate.
   originalCloseDate: deals.originalCloseDate,
@@ -357,6 +388,12 @@ export async function listDeals(
     const spec = DEAL_FIELD_SPECS.find((s) => s.key === f.missingField);
     if (spec) conditions.push(sql.raw(fieldMissingSql(spec, 'deals')));
   }
+  // `risk=<band>` — the nightly Phase 1 score. A deal with no scored row
+  // matches nothing: absence of a score is not evidence of low risk.
+  if (f.riskBand) {
+    const floor = f.riskBand === 'high' ? RISK_HIGH_FROM : RISK_ELEVATED_FROM;
+    conditions.push(gte(dealRiskScores.score, floor));
+  }
   // Hard scope: members see only their deals + unassigned. URL params
   // cannot widen this — they're additive within the allowed set.
   if (options.restrictToOwnerOrUnassigned) {
@@ -365,10 +402,28 @@ export async function listDeals(
     conditions.push(scoped);
   }
 
+  const sort: DealSort = options.sort === 'risk' ? 'risk' : 'recent';
+
   if (options.cursor) {
-    conditions.push(
-      sql`(${deals.createdAt}, ${deals.id}) < (${options.cursor.ts}::timestamptz, ${options.cursor.id}::uuid)`,
-    );
+    if (sort === 'risk') {
+      // NULLs are excluded from this mode entirely (see the ORDER BY below),
+      // so the tuple comparison never meets one.
+      conditions.push(
+        sql`(${dealRiskScores.score}, ${deals.id}) < (${options.cursor.n ?? 101}::smallint, ${options.cursor.id}::uuid)`,
+      );
+    } else {
+      conditions.push(
+        sql`(${deals.createdAt}, ${deals.id}) < (${options.cursor.ts}::timestamptz, ${options.cursor.id}::uuid)`,
+      );
+    }
+  }
+
+  // Sorting by risk shows only deals that HAVE one. A NULL score means the
+  // nightly job has not reached the deal (or it is closed) — sorting those to
+  // the bottom of a risk-ordered list would pad it with rows that are not
+  // low-risk, merely unscored.
+  if (sort === 'risk') {
+    conditions.push(sql`${dealRiskScores.score} IS NOT NULL`);
   }
 
   return await timeQuery('deals.list', async () => {
@@ -378,14 +433,20 @@ export async function listDeals(
         .from(deals)
         .leftJoin(companies, eq(deals.companyId, companies.id))
         .leftJoin(contacts, eq(deals.contactId, contacts.id))
+        .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
         .where(and(...conditions))
-        .orderBy(desc(deals.createdAt), desc(deals.id))
+        .orderBy(
+          ...(sort === 'risk'
+            ? [desc(dealRiskScores.score), desc(deals.id)]
+            : [desc(deals.createdAt), desc(deals.id)]),
+        )
         .limit(size + 1),
     );
     const shaped = rows.map(shapeDealRow);
     return buildPage(shaped, size, (r) => ({
       ts: r.createdAt.toISOString(),
       id: r.id,
+      ...(sort === 'risk' ? { n: r.riskScore ?? 0 } : {}),
     }));
   });
 }
@@ -400,6 +461,7 @@ export async function getDealById(
       .from(deals)
       .leftJoin(companies, eq(deals.companyId, companies.id))
       .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
       .where(
         and(
           eq(deals.tenantId, tenantId),
@@ -426,6 +488,7 @@ export async function listDealsAwaitingApproval(
       .from(deals)
       .leftJoin(companies, eq(deals.companyId, companies.id))
       .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
       .where(
         and(
           eq(deals.tenantId, tenantId),
@@ -455,6 +518,7 @@ export async function listRecentlyApprovedDeals(
       .from(deals)
       .leftJoin(companies, eq(deals.companyId, companies.id))
       .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
       .where(
         and(
           eq(deals.tenantId, tenantId),
@@ -485,6 +549,7 @@ export async function listRecentlyRejectedDeals(
       .from(deals)
       .leftJoin(companies, eq(deals.companyId, companies.id))
       .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
       .where(
         and(
           eq(deals.tenantId, tenantId),
@@ -520,6 +585,7 @@ export async function listDeletedDeals(
           .from(deals)
           .leftJoin(companies, eq(deals.companyId, companies.id))
           .leftJoin(contacts, eq(deals.contactId, contacts.id))
+          .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
           .where(and(...conditions))
           .orderBy(desc(deals.deletedAt), desc(deals.id))
           .limit(size + 1);
@@ -650,6 +716,15 @@ function boardSharedConditions(
     const spec = DEAL_FIELD_SPECS.find((s) => s.key === f.missingField);
     if (spec) conds.push(sql.raw(fieldMissingSql(spec, 'deals')));
   }
+  // `risk=<band>` — same rule as the list. An EXISTS here because this
+  // builder is shared by callers that do not carry the risk join.
+  if (f.riskBand) {
+    const floor = f.riskBand === 'high' ? RISK_HIGH_FROM : RISK_ELEVATED_FROM;
+    conds.push(
+      sql`EXISTS (SELECT 1 FROM deal_risk_scores r
+                  WHERE r.deal_id = deals.id AND r.score >= ${floor})`,
+    );
+  }
   if (options.restrictToOwnerOrUnassigned) {
     const me = options.restrictToOwnerOrUnassigned;
     conds.push(sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)`);
@@ -696,6 +771,7 @@ export async function listStageDealsPage(
         .from(deals)
         .leftJoin(companies, eq(deals.companyId, companies.id))
         .leftJoin(contacts, eq(deals.contactId, contacts.id))
+        .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
         .where(and(...conds))
         .orderBy(desc(deals.updatedAt), desc(deals.id))
         .limit(size + 1);
@@ -811,6 +887,7 @@ export async function listDealsForBoard(
             .from(deals)
             .leftJoin(companies, eq(deals.companyId, companies.id))
             .leftJoin(contacts, eq(deals.contactId, contacts.id))
+            .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
             .where(and(...sharedConds, eq(deals.stage, stage)))
             .orderBy(desc(deals.updatedAt), desc(deals.id))
             .limit(BOARD_PER_STAGE_LIMIT);

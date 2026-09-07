@@ -12,7 +12,7 @@ import {
   type Contact,
   contacts,
   deals,
-} from '@/db/schema';
+  dealRiskScores,} from '@/db/schema';
 
 
 import {
@@ -115,6 +115,8 @@ export async function loadSerializedDeal(
       updatedBy: deals.updatedBy,
       healthScore: deals.healthScore,
       healthBand: deals.healthBand,
+      riskScore: dealRiskScores.score,
+      riskBand: dealRiskScores.band,
       forecastCategory: deals.forecastCategory,
       forecastCategoryOverridden: deals.forecastCategoryOverridden,
       holdReason: deals.holdReason,
@@ -128,6 +130,7 @@ export async function loadSerializedDeal(
     .from(deals)
     .leftJoin(companies, eq(deals.companyId, companies.id))
     .leftJoin(contacts, eq(deals.contactId, contacts.id))
+    .leftJoin(dealRiskScores, eq(dealRiskScores.dealId, deals.id))
     .where(and(eq(deals.tenantId, tenantId), eq(deals.id, id)))
     .limit(1);
 

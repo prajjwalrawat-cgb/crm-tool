@@ -21,6 +21,7 @@ import { type DealStage, DEAL_STAGES } from './schema';
  *   owner=<uuid1>,<uuid2>      — comma list of owners (multi-select)
  *   missing=next_step          — deals that OWE a completeness field at
  *                                their current stage and don't have it
+ *   risk=high|elevated         — Phase 1 deal risk band and above
  *
  * Within a filter group the SQL is OR (e.g. `stage IN (...)`); between
  * groups it's AND. Multi-value keys are intentionally comma-joined
@@ -69,6 +70,12 @@ export type DealFilters = {
    * forbidden from having one. See `fieldMissingSql`.
    */
   missingField?: string;
+  /**
+   * Phase 1 risk band, inclusive upward: `elevated` matches elevated AND
+   * high. Reads the nightly `deal_risk_scores` row — a deal never scored
+   * (the job has not run, or it is won/lost/hold) matches neither.
+   */
+  riskBand?: 'elevated' | 'high';
 };
 
 /** Field keys the `missing=` filter accepts — the completeness spec's own. */
@@ -97,6 +104,7 @@ const URL_FILTER_KEYS = [
   'revisitDue',
   'slipped',
   'missing',
+  'risk',
 ] as const;
 
 /**
@@ -180,6 +188,8 @@ export function parseDealFilters(
       typeof raw.missing === 'string' && MISSING_FIELD_KEYS.includes(raw.missing)
         ? raw.missing
         : undefined,
+    riskBand:
+      raw.risk === 'high' || raw.risk === 'elevated' ? raw.risk : undefined,
   };
 }
 
@@ -222,6 +232,7 @@ export function dealFiltersToSearchParams(
   if (filters.revisitDue) out.set('revisitDue', '1');
   if (filters.slipped) out.set('slipped', '1');
   if (filters.missingField) out.set('missing', filters.missingField);
+  if (filters.riskBand) out.set('risk', filters.riskBand);
   return out;
 }
 
@@ -274,6 +285,7 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.score ||
       filters.revisitDue ||
       filters.slipped ||
-      filters.missingField,
+      filters.missingField ||
+      filters.riskBand,
   );
 }

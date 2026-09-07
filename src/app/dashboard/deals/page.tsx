@@ -30,6 +30,9 @@ export default async function DealsPage({
     const cursor = parseCursorParam(typeof sp.cursor === 'string' ? sp.cursor : undefined);
     const size = parsePageSize(typeof sp.size === 'string' ? sp.size : undefined);
     const filters = parseDealFilters(sp);
+    // `?sort=risk` orders by the nightly risk score instead of recency. It is
+    // a distinct keyset mode, not a client-side re-sort of the page.
+    const sort = sp.sort === 'risk' ? 'risk' : 'recent';
     // Resolve persona BEFORE the parallel fetch so we can clamp the
     // deals query to "mine or unassigned" for sales personas. The
     // restriction is server-enforced — URL params can narrow further
@@ -50,6 +53,7 @@ export default async function DealsPage({
     ] = await Promise.all([
       listDeals(tenant.id, {
         search,
+        sort,
         cursor,
         size,
         filters,
@@ -81,6 +85,7 @@ export default async function DealsPage({
         <DealsView
           initialItems={page.items}
           initialSearch={search ?? ''}
+          sort={sort}
           initialFilters={filters}
           companyOptions={companyOptions}
           formCompanyOptions={formCompanyOptions}

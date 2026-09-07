@@ -2,7 +2,7 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Flag, Loader2, Undo2 } from 'lucide-react';
+import { AlertTriangle, Flag, Loader2, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import { memo } from 'react';
 
@@ -219,7 +219,7 @@ export const DealCard = memo(function DealCard({
             deal.stage !== 'lost' &&
             deal.healthScore != null ? (
             <span
-              title={`Health score: ${deal.healthScore}/100`}
+              title={`Health ${deal.healthScore}/100 — higher is better. The red triangle chip, when present, is the separate risk score where higher is worse.`}
               className={cn(
                 'inline-flex h-5 min-w-7 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums',
                 bandChip(deal.healthBand),
@@ -295,6 +295,24 @@ export const DealCard = memo(function DealCard({
                   can see teaches nobody anything — which is the entire point
                   of R6 as a behavioural rule rather than just a math change. */}
               {deweighted ? <span className="font-bold">· 50%</span> : null}
+            </span>
+          ) : null}
+          {/* Phase 1 risk, written nightly. Only Elevated and above earn a
+              chip: a "low risk" badge on two thirds of the board would be
+              decoration, and the point of a card chip is that it is rare
+              enough to notice. */}
+          {deal.riskScore != null && deal.riskBand !== 'low' ? (
+            <span
+              title={`Risk ${deal.riskScore}/100 — higher is worse, the opposite of the plain health number on this card. Rules-based, updated nightly.`}
+              className={cn(
+                'inline-flex h-4 items-center gap-0.5 rounded-full px-1.5 text-[10px] font-semibold tabular-nums',
+                deal.riskBand === 'high'
+                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+              )}
+            >
+              <AlertTriangle className="h-2.5 w-2.5" aria-hidden />
+              {deal.riskScore}
             </span>
           ) : null}
           {rolledBack ? (
