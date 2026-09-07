@@ -3,7 +3,7 @@ import {
   formatCompactTenantCurrency,
   formatTenantCurrency,
 } from '@/lib/currency/format';
-import { completenessBand, ratioOf } from '@/lib/deals/completeness';
+import { bandFor, ratioOf } from '@/lib/deals/completeness';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
 import {
@@ -12,10 +12,12 @@ import {
   fiscalYearLabel,
 } from '@/lib/targets/fiscal';
 import { PACE_STATUS_LABELS, paceNote } from '@/lib/targets/quarters';
+import { periodLabel } from '@/lib/team-analytics/deltas';
 import { STALE_DEAL_DAYS, weekLabel } from '@/lib/team-analytics/engagement';
 import { getTeamScorecard } from '@/lib/team-analytics/scorecard';
 
 import { MetricCard, type MetricTone } from '../_components/metric-card';
+import { DeltaBadge } from './_components/scorecard-primitives';
 import { FiscalYearSelect } from '../targets/_components/fy-select';
 
 import { CompletenessSection } from './_components/completeness-section';
@@ -149,6 +151,13 @@ export default async function TeamPerformancePage({
                   }`
                 : 'No targets set for this year'
             }
+            trend={
+              <DeltaBadge
+                delta={team.deltas.attainment}
+                variant="tile"
+                formatChange={(n) => formatCompactTenantCurrency(n, ctx)}
+              />
+            }
             tone={paceTone}
             emptyState={
               team.revenueTargetMinor <= 0 && team.fyRevenueMinor <= 0
@@ -163,6 +172,9 @@ export default async function TeamPerformancePage({
               team.pushEvents > 0
                 ? `${team.daysPushed} days added this year`
                 : 'No deal has slipped this year'
+            }
+            trend={
+              <DeltaBadge delta={team.deltas.pushEvents} variant="tile" />
             }
             tone={
               team.pushEvents === 0
@@ -182,6 +194,9 @@ export default async function TeamPerformancePage({
                   ).replace('Week of ', 'w/c ')}`
                 : 'None created this year'
             }
+            trend={
+              <DeltaBadge delta={team.deltas.dealsCreated} variant="tile" />
+            }
             tone="info"
           />
           <MetricCard
@@ -192,6 +207,9 @@ export default async function TeamPerformancePage({
                 : '—'
             }
             hint={`Open, no change in ${STALE_DEAL_DAYS}+ days · as of today`}
+            trend={
+              <DeltaBadge delta={team.deltas.staleOpenDeals} variant="tile" />
+            }
             tone={
               team.openDeals === 0
                 ? 'neutral'
@@ -207,10 +225,16 @@ export default async function TeamPerformancePage({
             label="Field completeness"
             value={`${Math.round(completenessRatio * 100)}%`}
             hint={`Of what open deals owe at their stage · ${team.openDeals} deals`}
-            // Same 40/80 bands the heatmap below colours with — one rule,
-            // so the tile can't call 78% healthy while every cell in the
-            // table calls it amber.
-            tone={COMPLETENESS_TONES[completenessBand(completenessRatio)]}
+            trend={
+              <DeltaBadge delta={team.deltas.completeness} variant="tile" />
+            }
+            // The default ladder, same one the Overall column below uses —
+            // so the tile can't call 60% healthy while the column beneath
+            // it calls the same number amber. Individual fields have their
+            // own ladders; a roll-up across all of them does not.
+            tone={
+              COMPLETENESS_TONES[bandFor(Math.round(completenessRatio * 100))]
+            }
             emptyState={
               team.completeness.applicable === 0
                 ? 'No open deals to score'
@@ -218,6 +242,18 @@ export default async function TeamPerformancePage({
             }
           />
         </div>
+
+        {/* Where every arrow above is measured from. Stated once, out loud:
+            a delta whose basis is unnamed is the ambiguity this whole pass
+            exists to remove. */}
+        <p className="mt-2 text-[11px] text-slate-400 dark:text-[#71717A]">
+          {scorecard.baselinePeriods.state || scorecard.baselinePeriods.cumulative
+            ? `Change measured against the ${periodLabel(
+                scorecard.baselinePeriods.state ??
+                  scorecard.baselinePeriods.cumulative,
+              )} month close.`
+            : 'No month-close snapshot has been captured yet, so nothing on this page has a comparison. The first one lands on the 1st of next month.'}
+        </p>
 
         {team.pace.state === 'tracked' ? (
           <p className="mt-2 text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">

@@ -616,8 +616,8 @@ export async function completenessByOwner(
     const idx = sql.raw(String(i));
     keys.push(spec.key);
     projections.push(
-      sql`(${sql.raw(fieldAppliesSql(spec))}) AS app_${idx},
-          ((${sql.raw(fieldAppliesSql(spec))}) AND (${sql.raw(spec.filledSql)})) AS fil_${idx}`,
+      sql`(${sql.raw(fieldAppliesSql(spec, 'd'))}) AS app_${idx},
+          ((${sql.raw(fieldAppliesSql(spec, 'd'))}) AND (${sql.raw(spec.filledSql('d'))})) AS fil_${idx}`,
     );
     aggregates.push(
       sql`COUNT(*) FILTER (WHERE app_${idx})::int AS app_${idx},
@@ -646,20 +646,13 @@ export async function completenessByOwner(
   const rows = (await timeQuery('teamAnalytics.completeness', async () =>
     tenantTransaction(async (tx) =>
       tx.execute(sql`
-        WITH base AS (
-          SELECT d.*,
-                 EXISTS (
-                   SELECT 1 FROM deal_value_splits s WHERE s.deal_id = d.id
-                 ) AS has_value_split
+        WITH scoped AS (
+          SELECT d.owner_id, ${sql.join(projections, sql`, `)}
           FROM deals d
           WHERE d.tenant_id = ${tenantId}::uuid
             AND d.deleted_at IS NULL
             AND d.owner_id IS NOT NULL
             AND d.stage NOT IN ('won','lost')
-        ),
-        scoped AS (
-          SELECT d.owner_id, ${sql.join(projections, sql`, `)}
-          FROM base d
         )
         SELECT owner_id AS user_id,
                COUNT(*)::int AS deals_scored,

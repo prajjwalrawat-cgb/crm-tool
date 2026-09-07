@@ -31,6 +31,7 @@ import {
 import { notificationsRetention } from './notifications-retention';
 import { relationshipSignalsDerive } from './relationship-signals-derive';
 import { staleDealsScan } from './stale-deals-scan';
+import { teamMetricsMonthly } from './team-metrics-monthly';
 import { workflowRunsRetention } from './workflow-runs-retention';
 
 // Register the handlers eagerly at module load. Server-component pages
@@ -58,5 +59,6 @@ export {
   regenerateEmbedding,
   relationshipSignalsDerive,
   staleDealsScan,
+  teamMetricsMonthly,
   workflowRunsRetention,
 };

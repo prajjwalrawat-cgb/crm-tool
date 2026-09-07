@@ -1,14 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { fieldGroupLabel } from '@/lib/deals/completeness';
+import type { ScorecardDelta } from '@/lib/team-analytics/deltas';
 import type { ScorecardField } from '@/lib/team-analytics/scorecard';
 import { cn } from '@/lib/utils';
 
 import { groupRuns, ragStyle, type FieldFill } from './completeness-rag';
-import { RepCell, Td, Th } from './scorecard-primitives';
+import { dealsHref } from './drill-links';
+import { DeltaBadge, RepCell, Td, Th } from './scorecard-primitives';
 
 /**
  * The completeness heatmap.
@@ -37,6 +40,13 @@ export type CompletenessTableRow = {
   overall: FieldFill;
   /** Per-field fills, in the same order as `fields`. */
   fills: FieldFill[];
+  /** Movement in the overall score since the last month close. */
+  overallDelta: ScorecardDelta;
+  /**
+   * Owner to scope drill-through links to. Null on the Team row, whose
+   * links open the whole workspace's open deals.
+   */
+  ownerId: string | null;
 };
 
 export function CompletenessTable({
@@ -78,26 +88,58 @@ export function CompletenessTable({
     const edge = isTeam
       ? 'border-t-2 border-t-slate-300 dark:border-t-[#3F3F46]'
       : undefined;
+    const scope = { ownerId: row.ownerId, openOnly: true };
     return (
       <tr key={row.userId} className={cn(isTeam && 'font-medium')}>
         {isTeam ? (
           <Td sticky align="left" className={edge}>
-            Team
+            <Link
+              href={dealsHref(scope)}
+              className="hover:text-indigo-600 hover:underline dark:hover:text-indigo-300"
+              title="Open every open deal in the workspace"
+            >
+              Team
+            </Link>
           </Td>
         ) : (
-          <RepCell name={row.displayName} role={row.role} />
+          <RepCell
+            name={row.displayName}
+            role={row.role}
+            href={dealsHref(scope)}
+          />
         )}
         <Td muted className={edge}>
-          {row.dealsScored}
+          <Link
+            href={dealsHref(scope)}
+            className="hover:text-indigo-600 hover:underline dark:hover:text-indigo-300"
+          >
+            {row.dealsScored}
+          </Link>
         </Td>
-        <HeatCell fill={row.overall} className={edge} emphasis />
-        {visibleFields.map((f, i) => (
-          <HeatCell
-            key={f.key}
-            fill={fillFor(row, f.key)}
-            className={cn(edge, startsGroup(visibleFields, i) && GROUP_EDGE)}
-          />
-        ))}
+        <HeatCell
+          fill={row.overall}
+          className={edge}
+          emphasis
+          delta={row.overallDelta}
+        />
+        {visibleFields.map((f, i) => {
+          const fill = fillFor(row, f.key);
+          return (
+            <HeatCell
+              key={f.key}
+              fill={fill}
+              className={cn(edge, startsGroup(visibleFields, i) && GROUP_EDGE)}
+              /* Only the deals actually behind the gap: a cell reading
+                 "3 of 12" opens the 9 that are missing it, not all 12 and
+                 not the rep's whole book. */
+              href={
+                fill.applicable > fill.filled
+                  ? dealsHref({ ...scope, missingField: f.key })
+                  : null
+              }
+            />
+          );
+        })}
       </tr>
     );
   };
@@ -223,11 +265,17 @@ function HeatCell({
   fill,
   className,
   emphasis = false,
+  href,
+  delta,
 }: {
   fill: FieldFill;
   className?: string;
   /** The Overall column — same colours, slightly louder. */
   emphasis?: boolean;
+  /** Opens the deals missing this field. Absent when none are. */
+  href?: string | null;
+  /** Movement badge, rendered under the number on the Overall column. */
+  delta?: ScorecardDelta;
 }) {
   if (fill.applicable === 0) {
     return (
@@ -242,7 +290,28 @@ function HeatCell({
       </td>
     );
   }
-  const { bg, fg } = ragStyle(fill.pct);
+  // The field's OWN ladder — `fill.key` selects it. The Overall column
+  // carries a synthetic key and falls back to the default.
+  const { bg, fg } = ragStyle(fill.pct, fill.key);
+  const missing = fill.applicable - fill.filled;
+  const chip = (
+    <span
+      title={
+        href
+          ? `${fill.filled} of ${fill.applicable} deals have this — open the ${missing} that do not`
+          : `${fill.filled} of ${fill.applicable} deals have this`
+      }
+      className={cn(
+        'block min-w-[44px] rounded-md px-2 py-1 text-center tabular-nums',
+        emphasis ? 'text-[12px] font-semibold' : 'text-[11.5px] font-medium',
+        bg,
+        fg,
+        href && 'transition-opacity hover:opacity-80',
+      )}
+    >
+      {fill.pct}%
+    </span>
+  );
   return (
     <td
       className={cn(
@@ -250,17 +319,12 @@ function HeatCell({
         className,
       )}
     >
-      <span
-        title={`${fill.filled} of ${fill.applicable} deals have this`}
-        className={cn(
-          'block min-w-[44px] rounded-md px-2 py-1 text-center tabular-nums',
-          emphasis ? 'text-[12px] font-semibold' : 'text-[11.5px] font-medium',
-          bg,
-          fg,
-        )}
-      >
-        {fill.pct}%
-      </span>
+      {href ? <Link href={href}>{chip}</Link> : chip}
+      {delta ? (
+        <span className="mt-0.5 flex justify-center">
+          <DeltaBadge delta={delta} />
+        </span>
+      ) : null}
     </td>
   );
 }

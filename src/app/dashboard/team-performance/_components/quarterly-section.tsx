@@ -11,8 +11,10 @@ import {
 } from '@/lib/targets/quarters';
 import type { ScorecardQuarter, TeamScorecard } from '@/lib/team-analytics/scorecard';
 
+import { dealsHref } from './drill-links';
 import {
   Chip,
+  DeltaBadge,
   PctCell,
   RepCell,
   Section,
@@ -119,7 +121,7 @@ export function QuarterlySection({
                 ) : null}
               </Th>
             ))}
-            <Th title="This fiscal year's revenue as a share of the annual target">
+            <Th title="This fiscal year's revenue as a share of the annual target, and its change since the last month close">
               {fiscalLabel}
             </Th>
             <Th title="Annual revenue target from Settings → Targets">
@@ -144,7 +146,11 @@ export function QuarterlySection({
                 : 0;
             return (
               <tr key={r.userId}>
-                <RepCell name={r.displayName} role={r.role} />
+                <RepCell
+                  name={r.displayName}
+                  role={r.role}
+                  href={dealsHref({ ownerId: r.userId })}
+                />
                 {r.quarters.map((q) => (
                   <Td
                     key={q.index}
@@ -167,6 +173,12 @@ export function QuarterlySection({
                 ))}
                 {r.revenueTargetMinor > 0 ? (
                   <PctCell
+                    delta={
+                      <DeltaBadge
+                        delta={r.deltas.attainment}
+                        formatChange={(n) => money(n)}
+                      />
+                    }
                     ratio={attainRatio}
                     tone={
                       attainRatio >= 1
@@ -241,7 +253,10 @@ export function QuarterlySection({
               </Td>
             ))}
             <Td title={fullMoney(team.fyRevenueMinor)}>
-              {money(team.fyRevenueMinor)}
+              <span className="flex items-center justify-end gap-1">
+                {money(team.fyRevenueMinor)}
+                <DeltaBadge delta={team.deltas.attainment} />
+              </span>
             </Td>
             <Td title={fullMoney(team.revenueTargetMinor)}>
               {team.revenueTargetMinor > 0

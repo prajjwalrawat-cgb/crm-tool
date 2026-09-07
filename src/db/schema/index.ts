@@ -1,5 +1,6 @@
 export * from './enums';
 export * from './users';
+export * from './team-metric-snapshots';
 export * from './tenants';
 export * from './memberships';
 export * from './pending-role-intents';

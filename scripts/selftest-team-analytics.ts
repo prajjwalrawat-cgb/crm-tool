@@ -79,7 +79,7 @@ async function main() {
   const { fiscalYearRange } = await import('../src/lib/targets/fiscal');
   const {
     DEAL_FIELD_SPECS,
-    completenessBand,
+    bandFor,
     fieldApplies,
     ratioOf,
     scoreDeal,
@@ -91,6 +91,19 @@ async function main() {
   // thing that decides "is this cell red" is testable without a renderer.
   const { fieldFills, groupRuns, ragStyle, weakestFirst } = await import(
     '../src/app/dashboard/team-performance/_components/completeness-rag'
+  );
+  const { DEFAULT_FIELD_THRESHOLDS, fieldMissingSql, thresholdsFor } =
+    await import('../src/lib/deals/completeness');
+  const { buildDeltas, DELTA_HIGHER_IS_BETTER, periodLabel } = await import(
+    '../src/lib/team-analytics/deltas'
+  );
+  const { TEAM_METRICS, periodKey, previousPeriodKey, scorecardToRows } =
+    await import('../src/lib/team-analytics/snapshots');
+  const { dealsHref } = await import(
+    '../src/app/dashboard/team-performance/_components/drill-links'
+  );
+  const { parseDealFilters, withSearchTerm } = await import(
+    '../src/lib/deals/filters'
   );
 
   /* ---------- 1: the pure rules ---------- */
@@ -269,23 +282,31 @@ async function main() {
   );
   check(
     'nothing applicable scores as complete rather than dividing by zero',
-    ratioOf(0, 0) === 1 && completenessBand(ratioOf(0, 0)) === 'good',
+    ratioOf(0, 0) === 1 && bandFor(100) === 'good',
   );
 
   /* ---------- the heatmap's presentation rules ---------- */
 
-  // 40 / 80, read off the DISPLAYED percentage. The boundaries are the
-  // whole point: a cell reading exactly 80% must not be amber.
+  // Read off the DISPLAYED percentage, against the ladder the cell
+  // belongs to. The boundaries are the whole point: a cell reading exactly
+  // its green threshold must not come out amber.
   const green = ragStyle(100).bg;
   const amber = ragStyle(60).bg;
   const red = ragStyle(0).bg;
   check(
-    'RAG boundaries sit exactly on 40 and 80',
-    ragStyle(80).bg === green &&
-      ragStyle(79).bg === amber &&
+    'the default ladder boundaries sit exactly on 40 and 75',
+    ragStyle(75).bg === green &&
+      ragStyle(74).bg === amber &&
       ragStyle(40).bg === amber &&
       ragStyle(39).bg === red,
-    `80=${ragStyle(80).bg} 79=${ragStyle(79).bg} 40=${ragStyle(40).bg} 39=${ragStyle(39).bg}`,
+    `75=${ragStyle(75).bg} 74=${ragStyle(74).bg} 40=${ragStyle(40).bg} 39=${ragStyle(39).bg}`,
+  );
+  check(
+    'a cell colours on ITS FIELD ladder, not the default one',
+    // 65% under Source (25/60) is green; the same 65% with no field key
+    // falls back to the default (40/75) and is amber.
+    ragStyle(65, 'source').bg === green && ragStyle(65).bg === amber,
+    `source=${ragStyle(65, 'source').bg} default=${ragStyle(65).bg}`,
   );
   check(
     'each band is a distinct pair of classes, and every one carries a dark variant',
@@ -333,6 +354,304 @@ async function main() {
     'a field no open deal owes is never nominated as the weakest',
     ranked.every((f) => f.key !== 'c') &&
       fills.find((f) => f.key === 'c')?.applicable === 0,
+  );
+
+  /* ---------- per-field thresholds ---------- */
+
+  check(
+    'every scored field declares its own ladder, and each is a real ordering',
+    DEAL_FIELD_SPECS.every(
+      (f) =>
+        f.thresholds.amberFrom > 0 &&
+        f.thresholds.greenFrom > f.thresholds.amberFrom &&
+        f.thresholds.greenFrom <= 100,
+    ),
+  );
+  check(
+    'a field without a ladder falls back to the documented default',
+    thresholdsFor('__overall__').greenFrom === DEFAULT_FIELD_THRESHOLDS.greenFrom &&
+      thresholdsFor(null).amberFrom === DEFAULT_FIELD_THRESHOLDS.amberFrom,
+  );
+  check(
+    'one percentage bands differently under two different ladders',
+    // 65% is green against Source (25/60) and amber against Company (60/90) —
+    // the whole point of per-field thresholds. If these ever agree, the
+    // ladders have collapsed back into one global constant.
+    bandFor(65, thresholdsFor('source')) === 'good' &&
+      bandFor(65, thresholdsFor('company')) === 'patchy',
+    `source=${bandFor(65, thresholdsFor('source'))} company=${bandFor(65, thresholdsFor('company'))}`,
+  );
+  check(
+    'each ladder is exclusive at its own boundaries',
+    DEAL_FIELD_SPECS.every((f) => {
+      const { amberFrom, greenFrom } = f.thresholds;
+      return (
+        bandFor(greenFrom, f.thresholds) === 'good' &&
+        bandFor(greenFrom - 1, f.thresholds) === 'patchy' &&
+        bandFor(amberFrom, f.thresholds) === 'patchy' &&
+        bandFor(amberFrom - 1, f.thresholds) === 'poor'
+      );
+    }),
+  );
+
+  /* ---------- delta semantics ---------- */
+
+  // Getting one of these backwards paints a green arrow on a team that
+  // pushed more deals — the exact behaviour the page exists to expose.
+  check(
+    'down is good for pushes and untouched deals, up is good for the rest',
+    DELTA_HIGHER_IS_BETTER.pushEvents === false &&
+      DELTA_HIGHER_IS_BETTER.staleOpenDeals === false &&
+      DELTA_HIGHER_IS_BETTER.attainment === true &&
+      DELTA_HIGHER_IS_BETTER.completeness === true &&
+      DELTA_HIGHER_IS_BETTER.dealsCreated === true,
+  );
+
+  const priorNone = {
+    fyRevenueMinor: null,
+    revenueTargetMinor: null,
+    pushEvents: null,
+    dealsCreated: null,
+    staleOpenDeals: null,
+    completenessFilled: null,
+    completenessApplicable: null,
+    cumulativePeriod: null,
+    statePeriod: null,
+  };
+  const nowInputs = {
+    fyRevenueMinor: 60,
+    revenueTargetMinor: 100,
+    pushEvents: 4,
+    dealsCreated: 9,
+    staleOpenDeals: 3,
+    completenessFilled: 8,
+    completenessApplicable: 10,
+  };
+  const noBaseline = buildDeltas(nowInputs, priorNone);
+  check(
+    'with no snapshot yet every delta is "none" with a null baseline',
+    Object.values(noBaseline).every(
+      (d) => d.delta.kind === 'none' && d.baselinePeriod === null,
+    ),
+  );
+
+  const withBaseline = buildDeltas(nowInputs, {
+    ...priorNone,
+    fyRevenueMinor: 25,
+    revenueTargetMinor: 100,
+    pushEvents: 10,
+    dealsCreated: 4,
+    staleOpenDeals: 1,
+    completenessFilled: 5,
+    completenessApplicable: 10,
+    cumulativePeriod: '2026-08',
+    statePeriod: '2026-08',
+  });
+  check(
+    'a rate moves in percentage points, not percent',
+    withBaseline.attainment.delta.kind === 'points' &&
+      Math.abs(
+        (withBaseline.attainment.delta as { points: number }).points - 35,
+      ) < 0.001,
+    JSON.stringify(withBaseline.attainment.delta),
+  );
+  check(
+    'completeness 50% to 80% reads as +30 points',
+    withBaseline.completeness.delta.kind === 'points' &&
+      Math.abs(
+        (withBaseline.completeness.delta as { points: number }).points - 30,
+      ) < 0.001,
+  );
+  check(
+    'counts keep percentage semantics and name their baseline',
+    withBaseline.pushEvents.delta.kind === 'percent' &&
+      withBaseline.pushEvents.baselinePeriod === '2026-08',
+    JSON.stringify(withBaseline.pushEvents.delta),
+  );
+  check(
+    'attainment compares the RATIO, so a raised target is not a collapse',
+    // Closed more (25 to 60) against a target raised 100 to 300: the ratio
+    // fell, and reporting the numerator alone would have called it a rise.
+    (() => {
+      const d = buildDeltas(
+        { ...nowInputs, revenueTargetMinor: 300 },
+        {
+          ...priorNone,
+          fyRevenueMinor: 25,
+          revenueTargetMinor: 100,
+          cumulativePeriod: '2026-08',
+          statePeriod: '2026-08',
+        },
+      ).attainment.delta;
+      return d.kind === 'points' && d.points < 0;
+    })(),
+  );
+  check(
+    'a baseline period renders as a month, and its absence says so',
+    periodLabel('2026-08') === 'Aug 2026' &&
+      periodLabel(null) === 'no prior period',
+    periodLabel('2026-08'),
+  );
+
+  /* ---------- snapshot plumbing ---------- */
+
+  check(
+    'period keys are month-shaped and step backwards across a year boundary',
+    periodKey(new Date('2026-09-07T12:00:00Z')) === '2026-09' &&
+      previousPeriodKey('2026-01') === '2025-12' &&
+      previousPeriodKey('2026-09') === '2026-08',
+  );
+  check(
+    'lexicographic order on a period key is chronological order',
+    // readBaselines picks the latest baseline by string comparison; if that
+    // ever stopped matching real time the page would compare against the
+    // wrong month without erroring.
+    ['2025-12', '2026-01', '2026-09', '2026-10'].every(
+      (p, i, arr) => i === 0 || arr[i - 1] < p,
+    ),
+  );
+  {
+    // Every metric in the registry must actually be produced, or a tile
+    // shows a permanent "no comparison yet" that looks like a data problem.
+    const produced = new Set(
+      scorecardToRows({
+        team: {
+          revenueTargetMinor: 1,
+          fyRevenueMinor: 1,
+          pushEvents: 1,
+          daysPushed: 1,
+          dealsCreated: 1,
+          openDeals: 1,
+          staleOpenDeals: 1,
+          completeness: { applicable: 1, filled: 1 },
+        },
+        rows: [],
+      }).map((r) => r.metric),
+    );
+    check(
+      'every declared metric is actually written by the capture',
+      TEAM_METRICS.every((m) => produced.has(m.key)),
+      [...produced].join(', '),
+    );
+  }
+
+  /* ---------- drill-through links ---------- */
+
+  {
+    // The link builder and the Deals view parser are a matched pair; a URL
+    // that fails to round-trip lands the user on a page that looks filtered
+    // and is not.
+    const href = dealsHref({
+      ownerId: 'user_abc',
+      openOnly: true,
+      missingField: 'next_step',
+    });
+    const parsed = parseDealFilters(
+      Object.fromEntries(new URLSearchParams(href.split('?')[1] ?? '')),
+    );
+    check(
+      'a drill-through URL round-trips through the Deals view parser',
+      parsed.ownerIds?.[0] === 'user_abc' &&
+        parsed.missingField === 'next_step' &&
+        !parsed.stages?.includes('won') &&
+        !parsed.stages?.includes('lost'),
+      href,
+    );
+    const stale = parseDealFilters(
+      Object.fromEntries(
+        new URLSearchParams(dealsHref({ stale: true }).split('?')[1] ?? ''),
+      ),
+    );
+    check('the untouched-deals link carries the stale filter', stale.stale === true);
+    const slipped = parseDealFilters(
+      Object.fromEntries(
+        new URLSearchParams(
+          dealsHref({ ownerId: 'u1', slipped: true }).split('?')[1] ?? '',
+        ),
+      ),
+    );
+    check(
+      'the pushback link carries the slipped filter and the owner',
+      slipped.slipped === true && slipped.ownerIds?.[0] === 'u1',
+    );
+    check(
+      'an unknown field key is rejected rather than reaching the SQL builder',
+      parseDealFilters({ missing: 'not_a_field' }).missingField === undefined,
+    );
+  }
+  {
+    // A drill-through must survive everything the Deals page does to its own
+    // URL afterwards. The search box used to rebuild the query string from
+    // scratch, which deleted every filter 250ms after arrival.
+    const arrived =
+      dealsHref({
+        ownerId: 'user_abc',
+        openOnly: true,
+        missingField: 'next_step',
+      }).split('?')[1] ?? '';
+
+    const typed = withSearchTerm(arrived, 'acme');
+    const afterTyping = parseDealFilters(Object.fromEntries(typed));
+    check(
+      'typing in the search box keeps the drill-through filters',
+      afterTyping.ownerIds?.[0] === 'user_abc' &&
+        afterTyping.missingField === 'next_step' &&
+        (afterTyping.stages?.length ?? 0) > 0 &&
+        typed.get('q') === 'acme',
+      typed.toString(),
+    );
+
+    const cleared = withSearchTerm(typed, '   ');
+    const afterClearing = parseDealFilters(Object.fromEntries(cleared));
+    check(
+      'clearing the search box drops only the search term',
+      cleared.get('q') === null &&
+        afterClearing.ownerIds?.[0] === 'user_abc' &&
+        afterClearing.missingField === 'next_step',
+      cleared.toString(),
+    );
+
+    const paged = new URLSearchParams(arrived);
+    paged.set('cursor', 'abc123');
+    check(
+      'a new search returns to the first page but keeps the filters',
+      withSearchTerm(paged, 'acme').get('cursor') === null &&
+        parseDealFilters(Object.fromEntries(withSearchTerm(paged, 'acme')))
+          .missingField === 'next_step',
+    );
+
+    // The effect only writes when the box and the URL disagree, so a
+    // remount / refresh / StrictMode double-invoke is a no-op. Same term in,
+    // same params out.
+    const stable = withSearchTerm(typed, 'acme');
+    check(
+      're-applying the term already in the URL changes nothing',
+      stable.toString() === typed.toString(),
+      `${stable.toString()} vs ${typed.toString()}`,
+    );
+
+    const withSize = new URLSearchParams(arrived);
+    withSize.set('size', '100');
+    check(
+      'page size survives a search — the search box does not own it',
+      withSearchTerm(withSize, 'acme').get('size') === '100',
+    );
+  }
+
+  check(
+    'missing means owes it AND lacks it, never merely blank',
+    // Dropping the "owes" half would list Leads under a close-date cell that
+    // never counted them.
+    (() => {
+      const spec = DEAL_FIELD_SPECS.find((f) => f.key === 'close_date');
+      if (!spec) return false;
+      const predicate = fieldMissingSql(spec, 'deals');
+      return (
+        predicate.includes('deal_stage_rank') &&
+        predicate.includes('NOT (') &&
+        predicate.includes('deals.expected_close_date')
+      );
+    })(),
   );
 
   /* ---------- engagement helpers ---------- */
@@ -507,6 +826,40 @@ async function main() {
         Object.values(row.byField).every((c) => c.filled <= c.applicable),
       );
     }
+
+    /* --- 2b: the drill-through opens exactly the cell it came from --- */
+
+    // The heatmap says "3 of 12"; clicking it must open the 9. The cell
+    // counts with an aggregate FILTER and the Deals list counts with a
+    // WHERE, so this is a genuine wiring check on two different query
+    // shapes over one predicate — not the predicate agreeing with itself.
+    let drillChecked = 0;
+    let drillMatched = 0;
+    for (const row of completeness) {
+      for (const spec of DEAL_FIELD_SPECS) {
+        const tally = row.byField[spec.key];
+        if (!tally || tally.applicable === 0) continue;
+        const expected = tally.applicable - tally.filled;
+        const counted = (await runWithSystemContext(t.id, async () =>
+          db.execute(sql`
+            SELECT COUNT(*)::int AS n
+            FROM deals
+            WHERE tenant_id = ${t.id}::uuid
+              AND deleted_at IS NULL
+              AND owner_id = ${row.userId}
+              AND stage NOT IN ('won','lost')
+              AND ${sql.raw(fieldMissingSql(spec, 'deals'))}
+          `),
+        )) as unknown as Array<{ n: number }>;
+        drillChecked++;
+        if (Number(counted[0]?.n ?? -1) === expected) drillMatched++;
+      }
+    }
+    check(
+      `[${t.name}] every heatmap cell drills through to exactly its own deals`,
+      drillChecked > 0 && drillMatched === drillChecked,
+      `${drillMatched}/${drillChecked} cells matched`,
+    );
 
     /* --- 3: quarters reconcile to the year --- */
 

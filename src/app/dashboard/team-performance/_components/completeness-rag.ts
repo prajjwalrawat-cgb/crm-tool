@@ -1,6 +1,7 @@
 import {
-  completenessBand,
+  bandFor,
   ratioOf,
+  thresholdsFor,
   type CompletenessBand,
   type FieldGroupKey,
 } from '@/lib/deals/completeness';
@@ -32,18 +33,19 @@ export type RagStyle = {
  * the unrounded ratio is what makes a cell reading "80%" come out amber
  * because it was really 0.7996.
  *
- * Thresholds live in `@/lib/deals/completeness` (40 / 80) and are read
- * through `completenessBand` rather than repeated here — see the note there
- * about why they are flat across every field for now, and why per-field or
- * per-stage cut-offs belong on the spec rather than in this renderer.
+ * Thresholds live in `@/lib/deals/completeness`, one ladder per field, and
+ * are read through `bandFor` rather than repeated here — see the note there
+ * about why a single global cut-off left 57% of every cell permanently red.
+ * `fieldKey` selects the ladder; omit it (the Overall column, a required
+ * custom field) to get the default.
  *
  * Classes rather than `var(--bg-success)`: this codebase has no CSS custom
  * property token layer — every surface expresses theming as Tailwind
  * utilities with explicit `dark:` variants, and inventing a parallel
  * variable system for one table would leave the page half in each scheme.
  */
-export function ragStyle(pct: number): RagStyle {
-  return RAG_STYLES[completenessBand(pct / 100)];
+export function ragStyle(pct: number, fieldKey?: string | null): RagStyle {
+  return RAG_STYLES[bandFor(pct, thresholdsFor(fieldKey))];
 }
 
 const RAG_STYLES: Record<CompletenessBand, RagStyle> = {
@@ -69,6 +71,8 @@ export type FieldFill = {
   filled: number;
   /** Rounded percentage — the number shown, and the one `ragStyle` reads. */
   pct: number;
+  /** Band under THIS field's ladder. */
+  band: CompletenessBand;
 };
 
 /**
@@ -83,12 +87,14 @@ export function fieldFills(
 ): FieldFill[] {
   return fields.map((f) => {
     const t = byField[f.key] ?? { applicable: 0, filled: 0 };
+    const pct = Math.round(ratioOf(t.filled, t.applicable) * 100);
     return {
       key: f.key,
       label: f.label,
       applicable: t.applicable,
       filled: t.filled,
-      pct: Math.round(ratioOf(t.filled, t.applicable) * 100),
+      pct,
+      band: bandFor(pct, thresholdsFor(f.key)),
     };
   });
 }

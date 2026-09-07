@@ -1,6 +1,6 @@
 import { AlertTriangle } from 'lucide-react';
 
-import { ratioOf } from '@/lib/deals/completeness';
+import { bandFor, ratioOf } from '@/lib/deals/completeness';
 import type { TeamScorecard } from '@/lib/team-analytics/scorecard';
 import { cn } from '@/lib/utils';
 
@@ -97,6 +97,8 @@ export function CompletenessSection({
       r.completeness.total.applicable,
     ),
     fills: fieldFills(fields, r.completeness.byField),
+    overallDelta: r.deltas.completeness,
+    ownerId: r.userId,
   }));
 
   const teamRow: CompletenessTableRow = {
@@ -109,6 +111,10 @@ export function CompletenessSection({
       team.completeness.applicable,
     ),
     fills: teamFills,
+    overallDelta: team.deltas.completeness,
+    // Null, not '__team__': the drill-through opens the workspace's open
+    // deals rather than filtering on an owner id no deal carries.
+    ownerId: null,
   };
 
   return (
@@ -157,13 +163,21 @@ export function CompletenessSection({
   );
 }
 
+/**
+ * The Overall column, shaped like any other cell so the table can render it
+ * with the same component. It carries no field key, so it colours on the
+ * DEFAULT ladder — a roll-up across eleven fields has no single field's
+ * realistic ceiling to be judged against.
+ */
 function overallFill(filled: number, applicable: number): FieldFill {
+  const pct = Math.round(ratioOf(filled, applicable) * 100);
   return {
     key: '__overall__',
     label: 'Overall',
     applicable,
     filled,
-    pct: Math.round(ratioOf(filled, applicable) * 100),
+    pct,
+    band: bandFor(pct),
   };
 }
 
@@ -176,7 +190,7 @@ function overallFill(filled: number, applicable: number): FieldFill {
  * would teach everyone to ignore the next real one.
  */
 function WeakestChip({ fill }: { fill: FieldFill }) {
-  const { bg, fg } = ragStyle(fill.pct);
+  const { bg, fg } = ragStyle(fill.pct, fill.key);
   return (
     <div
       className={cn(

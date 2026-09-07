@@ -1,3 +1,4 @@
+import { DEAL_FIELD_SPECS } from './completeness';
 import { type DealStage, DEAL_STAGES } from './schema';
 
 /**
@@ -18,6 +19,8 @@ import { type DealStage, DEAL_STAGES } from './schema';
  *   staleDays=30               — override the staleness threshold
  *   companyId=<uuid1>,<uuid2>  — comma list of companies (multi-select)
  *   owner=<uuid1>,<uuid2>      — comma list of owners (multi-select)
+ *   missing=next_step          — deals that OWE a completeness field at
+ *                                their current stage and don't have it
  *
  * Within a filter group the SQL is OR (e.g. `stage IN (...)`); between
  * groups it's AND. Multi-value keys are intentionally comma-joined
@@ -56,7 +59,22 @@ export type DealFilters = {
    * (`deals.push_count >= 1`) — the board's "show slipped deals only" toggle.
    */
   slipped?: boolean;
+  /**
+   * A `DEAL_FIELD_SPECS` key. Matches deals that OWE that field at their
+   * current stage and have not filled it — the same predicate the Team
+   * Performance heatmap counts, so clicking a cell reading "3 of 12" opens
+   * exactly the 9 deals behind it.
+   *
+   * Owing is half the definition: a Lead is not missing a close date, it is
+   * forbidden from having one. See `fieldMissingSql`.
+   */
+  missingField?: string;
 };
+
+/** Field keys the `missing=` filter accepts — the completeness spec's own. */
+export const MISSING_FIELD_KEYS: readonly string[] = DEAL_FIELD_SPECS.map(
+  (s) => s.key,
+);
 
 export const SCORE_BANDS = ['strong', 'moderate', 'at_risk'] as const;
 
@@ -78,6 +96,7 @@ const URL_FILTER_KEYS = [
   'score',
   'revisitDue',
   'slipped',
+  'missing',
 ] as const;
 
 /**
@@ -154,6 +173,13 @@ export function parseDealFilters(
         : undefined,
     revisitDue: flag(raw.revisitDue),
     slipped: flag(raw.slipped),
+    // Validated against the spec here rather than at the query, so an
+    // unknown key from a hand-edited URL degrades to "no filter" instead of
+    // reaching the SQL builder at all.
+    missingField:
+      typeof raw.missing === 'string' && MISSING_FIELD_KEYS.includes(raw.missing)
+        ? raw.missing
+        : undefined,
   };
 }
 
@@ -195,7 +221,40 @@ export function dealFiltersToSearchParams(
   if (filters.score) out.set('score', filters.score);
   if (filters.revisitDue) out.set('revisitDue', '1');
   if (filters.slipped) out.set('slipped', '1');
+  if (filters.missingField) out.set('missing', filters.missingField);
   return out;
+}
+
+/** The URL key the search box owns. Nothing else may write it. */
+export const DEAL_SEARCH_URL_KEY = 'q';
+
+/**
+ * Apply a search term to the params ALREADY in the URL, touching only the
+ * two keys the search box owns.
+ *
+ * The URL is the source of truth for what the list shows, and the search box
+ * is one contributor to it — not its owner. Rebuilding the query string from
+ * scratch here (which is what this replaced) silently dropped every filter
+ * key: an owner filter, a `missing=` drill-through, `stale`, `slipped`, the
+ * stage list. A deep link from Team Performance would arrive correctly
+ * filtered and then be stripped by the first debounce tick.
+ *
+ * `cursor` is dropped on purpose: a new search starts at the first page, and
+ * a cursor from the previous result set points into rows that are no longer
+ * there.
+ */
+export function withSearchTerm(
+  current: URLSearchParams | string,
+  term: string,
+): URLSearchParams {
+  const next = new URLSearchParams(
+    typeof current === 'string' ? current : current.toString(),
+  );
+  const trimmed = term.trim();
+  if (trimmed) next.set(DEAL_SEARCH_URL_KEY, trimmed);
+  else next.delete(DEAL_SEARCH_URL_KEY);
+  next.delete('cursor');
+  return next;
 }
 
 export function hasActiveDealFilters(filters: DealFilters): boolean {
@@ -214,6 +273,7 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.approvedOnly ||
       filters.score ||
       filters.revisitDue ||
-      filters.slipped,
+      filters.slipped ||
+      filters.missingField,
   );
 }
