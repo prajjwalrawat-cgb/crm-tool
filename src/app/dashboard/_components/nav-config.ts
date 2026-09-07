@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertTriangle,
   BadgeCheck,
   BarChart3,
   Banknote,
@@ -83,6 +84,11 @@ const ADMIN_NAV: readonly NavGroup[] = [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
       { href: '/dashboard/deals/approvals', label: 'Approvals', icon: BadgeCheck },
+      {
+        href: '/dashboard/deals/at-risk',
+        label: 'At Risk',
+        icon: AlertTriangle,
+      },
       { href: '/dashboard/targets', label: 'Targets', icon: Target },
       {
         href: '/dashboard/team-performance',
@@ -147,6 +153,11 @@ const MANAGER_NAV: readonly NavGroup[] = [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
       { href: '/dashboard/deals/approvals', label: 'Approvals', icon: BadgeCheck },
+      {
+        href: '/dashboard/deals/at-risk',
+        label: 'At Risk',
+        icon: AlertTriangle,
+      },
       { href: '/dashboard/targets', label: 'Targets', icon: Target },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
       { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
@@ -182,6 +193,11 @@ const MEMBER_NAV: readonly NavGroup[] = [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/dashboard/deals', label: 'My Deals', icon: Briefcase },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      {
+        href: '/dashboard/deals/at-risk',
+        label: 'At Risk',
+        icon: AlertTriangle,
+      },
       { href: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
       // Communications removed for members — inbox is tenant-shared
       // in the current schema, so member access leaks other reps'
@@ -279,7 +295,8 @@ export function navItemsForPersona(persona: Persona): readonly NavItem[] {
  *
  * The two specific report paths (revenue-forecast, rep-performance)
  * are exact-match too so they don't claim "Reports" highlight at the
- * same time.
+ * same time, and `/dashboard/deals/at-risk` is excluded from the Deals
+ * prefix match for the same reason the board is.
  */
 const EXACT_MATCH_HREFS = new Set([
   '/dashboard',
@@ -287,6 +304,7 @@ const EXACT_MATCH_HREFS = new Set([
   // doesn't light up both nav rows.
   '/dashboard/executive',
   '/dashboard/deals/board',
+  '/dashboard/deals/at-risk',
   '/dashboard/my-performance',
   '/dashboard/reports/revenue-forecast',
   '/dashboard/reports/rep-performance',
@@ -300,7 +318,9 @@ export function isNavActive(href: string, pathname: string): boolean {
   if (href === '/dashboard/deals') {
     return (
       pathname === '/dashboard/deals' ||
-      (pathname.startsWith('/dashboard/deals/') && pathname !== '/dashboard/deals/board')
+      (pathname.startsWith('/dashboard/deals/') &&
+        pathname !== '/dashboard/deals/board' &&
+        pathname !== '/dashboard/deals/at-risk')
     );
   }
   if (href === '/dashboard/reports') {

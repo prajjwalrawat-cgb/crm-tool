@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { Check, ChevronDown, Download, Eye, EyeOff, ExternalLink, Loader2, MoreVertical, Pencil, Search, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   useEffect,
@@ -95,6 +96,7 @@ function isDealStage(value: string): value is DealStage {
 export function DealsView({
   initialItems,
   initialSearch,
+  sort,
   initialFilters,
   companyOptions,
   formCompanyOptions,
@@ -109,6 +111,8 @@ export function DealsView({
 }: {
   initialItems: DealRow[];
   initialSearch: string;
+  /** Active ordering. `risk` is a server-side keyset mode, not a page re-sort. */
+  sort: 'recent' | 'risk';
   initialFilters: DealFilters;
   /** Free-text company names for the filter dropdown. */
   companyOptions: CompanyOption[];
@@ -138,6 +142,21 @@ export function DealsView({
     const qs = merged.toString();
     router.replace(`/dashboard/deals${qs ? `?${qs}` : ''}`, { scroll: false });
   };
+  /**
+   * Sorting is a URL mode, not component state — the same rule the filters
+   * follow. A reload, a refresh or a shared link all reproduce the order,
+   * and paging works because the server hands back a cursor for the mode it
+   * actually ordered by.
+   */
+  const pushSort = (next: 'recent' | 'risk') => {
+    const merged = new URLSearchParams(searchParams.toString());
+    merged.delete('cursor');
+    if (next === 'risk') merged.set('sort', 'risk');
+    else merged.delete('sort');
+    const qs = merged.toString();
+    router.replace(`/dashboard/deals${qs ? `?${qs}` : ''}`, { scroll: false });
+  };
+
   const canEdit = canManageDeals(currentRole);
   const canDelete = canDeleteDeals(currentRole);
   // Inline owner reassignment: owner + manager only; a manager may not assign
@@ -453,6 +472,9 @@ export function DealsView({
       // value, which arrives via realtime/refresh. Carry any known value.
       healthScore: base?.healthScore ?? null,
       healthBand: base?.healthBand ?? null,
+      // A brand-new deal has no risk score until the nightly job runs.
+      riskScore: base?.riskScore ?? null,
+      riskBand: base?.riskBand ?? null,
       forecastCategory: base?.forecastCategory ?? null,
       forecastCategoryOverridden: base?.forecastCategoryOverridden ?? false,
       holdReason: base?.holdReason ?? null,
@@ -870,6 +892,8 @@ export function DealsView({
               filters={initialFilters}
               filterCompanyOptions={companyOptions}
               onPushFilters={pushFilters}
+              sort={sort}
+              onPushSort={pushSort}
               onPatchCompany={commitCompany}
               onPatchContact={commitContact}
               selectable={canEdit || canDelete}
@@ -968,6 +992,7 @@ const COLUMN_STORAGE_KEY = 'deals.hiddenColumns';
 
 // Toggleable columns (Name + Actions are always shown).
 const TABLE_COLUMNS = [
+  { key: 'risk', label: 'Risk' },
   { key: 'stage', label: 'Stage' },
   { key: 'amount', label: 'Amount' },
   { key: 'company', label: 'Company' },
@@ -1404,6 +1429,8 @@ function DealsTable({
   filters,
   filterCompanyOptions,
   onPushFilters,
+  sort,
+  onPushSort,
   selectable,
   selectedIds,
   allSelected,
@@ -1432,6 +1459,8 @@ function DealsTable({
   filters: DealFilters;
   filterCompanyOptions: CompanyOption[];
   onPushFilters: (next: DealFilters) => void;
+  sort: 'recent' | 'risk';
+  onPushSort: (next: 'recent' | 'risk') => void;
   selectable: boolean;
   selectedIds: Set<string>;
   allSelected: boolean;
@@ -1576,6 +1605,26 @@ function DealsTable({
                   />
                 </span>
               </th>
+              {vis('risk') ? (
+                <th scope="col" className="px-3 py-1.5 text-right font-semibold">
+                  <HeaderMenu
+                    colKey="risk"
+                    label="Risk"
+                    align="right"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                    filter={
+                      <RiskColumnBody
+                        filters={filters}
+                        onPush={onPushFilters}
+                        sort={sort}
+                        onPushSort={onPushSort}
+                      />
+                    }
+                  />
+                </th>
+              ) : null}
               {vis('stage') ? (
                 <th scope="col" className="px-3 py-1.5 text-left font-semibold">
                   <HeaderMenu
@@ -1718,6 +1767,11 @@ function DealsTable({
                       )}
                     </div>
                   </td>
+                  {vis('risk') ? (
+                  <td className="whitespace-nowrap px-3 py-2 text-right">
+                    <RiskCell score={d.riskScore} band={d.riskBand} />
+                  </td>
+                  ) : null}
                   {vis('stage') ? (
                   <td className="px-3 py-2">
                     {canEdit && !isOptimistic ? (
@@ -2327,5 +2381,116 @@ function buildDealFilterChips(
     });
   }
 
+  if (filters.riskBand) {
+    chips.push({
+      id: 'risk',
+      keys: ['risk'],
+      label:
+        filters.riskBand === 'high' ? 'Risk: High' : 'Risk: Elevated and above',
+    });
+  }
+
   return chips;
+}
+
+/**
+ * The Risk column cell — the nightly Phase 1 score.
+ *
+ * An unscored deal renders an em dash, never a zero: NULL means the job has
+ * not reached it, and a 0 would read as "no risk" on a deal nobody has
+ * assessed. The chip carries the direction in its tooltip because a bare
+ * number next to a health score that points the other way is ambiguous.
+ */
+function RiskCell({
+  score,
+  band,
+}: {
+  score: number | null;
+  band: string | null;
+}) {
+  if (score == null) {
+    return (
+      <span
+        className="text-[11px] text-slate-300 dark:text-[#52525B]"
+        title="Not scored yet — risk is written nightly"
+      >
+        —
+      </span>
+    );
+  }
+  const tone =
+    band === 'high'
+      ? 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/30'
+      : band === 'elevated'
+        ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30'
+        : 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/30';
+  return (
+    <span
+      title={`Deal risk ${score}/100 (higher is worse) — rules-based, updated nightly`}
+      className={cn(
+        'inline-flex min-w-[34px] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ring-1 ring-inset',
+        tone,
+      )}
+    >
+      {score}
+    </span>
+  );
+}
+
+/** The Risk header menu body: sort by risk, and filter to a band. */
+function RiskColumnBody({
+  filters,
+  onPush,
+  sort,
+  onPushSort,
+}: {
+  filters: DealFilters;
+  onPush: (next: DealFilters) => void;
+  sort: 'recent' | 'risk';
+  onPushSort: (next: 'recent' | 'risk') => void;
+}) {
+  const btn =
+    'w-full rounded px-2 py-1 text-left text-[12px] hover:bg-slate-100 dark:hover:bg-[#1F1F1F]';
+  return (
+    <div className="space-y-0.5">
+      <button
+        type="button"
+        className={cn(btn, sort === 'risk' && 'font-semibold text-indigo-600')}
+        onClick={() => onPushSort(sort === 'risk' ? 'recent' : 'risk')}
+      >
+        {sort === 'risk' ? '✓ Sorted by risk' : 'Sort by risk (highest first)'}
+      </button>
+      <div className="my-1 border-t border-slate-100 dark:border-[#1F1F1F]" />
+      <button
+        type="button"
+        className={cn(btn, filters.riskBand === 'high' && 'font-semibold')}
+        onClick={() =>
+          onPush({
+            ...filters,
+            riskBand: filters.riskBand === 'high' ? undefined : 'high',
+          })
+        }
+      >
+        High only
+      </button>
+      <button
+        type="button"
+        className={cn(btn, filters.riskBand === 'elevated' && 'font-semibold')}
+        onClick={() =>
+          onPush({
+            ...filters,
+            riskBand: filters.riskBand === 'elevated' ? undefined : 'elevated',
+          })
+        }
+      >
+        Elevated and above
+      </button>
+      <Link
+        href="/dashboard/deals/at-risk"
+        className={cn(btn, 'block text-indigo-600 dark:text-indigo-300')}
+      >
+        Open At Risk view →
+      </Link>
+    </div>
+  );
 }

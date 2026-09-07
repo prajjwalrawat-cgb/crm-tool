@@ -18,6 +18,7 @@ import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
 import { getDealStageHistory } from '@/lib/deals/stage-history';
 import { getDealScoreWithHistory } from '@/lib/deals/scoring/service';
+import { getDealRisk } from '@/lib/deals/risk/queries';
 import { listDealValueSplit } from '@/lib/deals/value-split-queries';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
@@ -62,6 +63,7 @@ import { StageHistoryCard } from './_components/stage-history-card';
 import { DealAuditCard } from './_components/deal-audit-card';
 import { SummaryCard } from './_components/summary-card';
 import { DealPathBar } from './_components/deal-path-bar';
+import { DealRiskCard } from './_components/deal-risk-card';
 import { DealScoreCard } from './_components/deal-score-card';
 import { ForecastCategorySelect } from './_components/forecast-category-select';
 import { HoldControl } from './_components/hold-control';
@@ -103,6 +105,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       pathBarGates,
       dealScore,
       valueSplitRows,
+      dealRisk,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -127,6 +130,9 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       getDealScoreWithHistory(tenant.id, deal.id),
       // Multi-year TCV breakdown (empty for single-year deals).
       listDealValueSplit(tenant.id, deal.id),
+      // Phase 1 risk score. A stored read — the nightly job writes it, this
+      // page never computes it and never calls a model.
+      getDealRisk(tenant.id, deal.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -567,6 +573,11 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 ) : null
               }
             />
+
+            {/* Risk sits directly under Health on purpose: a reader who has
+                just seen "82 healthy" needs "31 risk" in the same glance, and
+                each card states its own direction. */}
+            {dealRisk ? <DealRiskCard risk={dealRisk} /> : null}
 
             {dealScore.current ? (
               <DealScoreCard

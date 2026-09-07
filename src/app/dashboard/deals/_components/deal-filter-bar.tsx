@@ -423,6 +423,19 @@ function StagePopover({
   );
 }
 
+/**
+ * Bands of the HEALTH score (`deals.health_band`, Module 2) — high is good.
+ *
+ * Labelled "Health", not "Score", since the Risk column arrived: two 0-100
+ * numbers now live on a deal and they run in opposite directions, so a filter
+ * called "Score" no longer says which one it filters. The URL key stays
+ * `score=` so existing links and saved views keep working.
+ *
+ * The <40 band is called "Weak" rather than its internal name `at_risk`: a
+ * deal can be at_risk on health and Low risk on the risk score at the same
+ * time, and two opposite meanings for one word on one screen is how a number
+ * stops being read at all.
+ */
 const SCORE_OPTIONS: Array<{
   value: NonNullable<DealFilters['score']>;
   label: string;
@@ -430,7 +443,7 @@ const SCORE_OPTIONS: Array<{
 }> = [
   { value: 'strong', label: 'Strong (≥70)', dot: 'bg-emerald-500' },
   { value: 'moderate', label: 'Moderate (40–69)', dot: 'bg-amber-400' },
-  { value: 'at_risk', label: 'At risk (<40)', dot: 'bg-rose-500' },
+  { value: 'at_risk', label: 'Weak (<40)', dot: 'bg-rose-500' },
 ];
 
 function ScorePopover({
@@ -444,7 +457,7 @@ function ScorePopover({
   const [open, setOpen] = useState(false);
   const active = !!selected;
   const current = SCORE_OPTIONS.find((o) => o.value === selected);
-  const label = active ? `Score: ${current?.label.split(' ')[0]}` : 'Score';
+  const label = active ? `Health: ${current?.label.split(' ')[0]}` : 'Health';
 
   return (
     <div className="relative">

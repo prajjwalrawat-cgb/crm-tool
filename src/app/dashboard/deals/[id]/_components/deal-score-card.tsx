@@ -25,7 +25,11 @@ const BAND_META: Record<
     stroke: '#f59e0b',
   },
   at_risk: {
-    label: 'At risk',
+    // "Weak", not "At risk": the Deal risk card on this same page has its own
+    // bands, and a deal reading "At risk" for health while reading "Low risk"
+    // beside it is two opposite meanings for one word, six inches apart. The
+    // stored band value is untouched.
+    label: 'Weak',
     text: 'text-rose-600 dark:text-rose-400',
     ring: 'ring-rose-500/30',
     stroke: '#f43f5e',
@@ -65,10 +69,19 @@ export function DealScoreCard({
 
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-4 dark:border-[#262626] dark:bg-[#0F0F0F]">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
-          Deal Score
-        </h2>
+      <div className="flex items-start justify-between">
+        <div>
+          {/* "Deal Score" alone was ambiguous the moment a second 0-100
+              number landed on this page pointing the other way. The name says
+              what it measures and the line under it says which direction is
+              good — neither is inferable from the number or its colour. */}
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
+            Deal health
+          </h2>
+          <p className="mt-0.5 text-[11px] normal-case tracking-normal text-slate-400 dark:text-[#71717A]">
+            Higher is better · engagement, stakeholders, tasks
+          </p>
+        </div>
         <span className={cn('text-[11px] font-semibold', meta.text)}>
           {meta.label}
         </span>
