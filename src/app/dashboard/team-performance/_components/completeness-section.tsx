@@ -1,32 +1,27 @@
-import {
-  completenessBand,
-  ratioOf,
-  type CompletenessBand,
-} from '@/lib/deals/completeness';
+import { AlertTriangle } from 'lucide-react';
+
+import { ratioOf } from '@/lib/deals/completeness';
 import type { TeamScorecard } from '@/lib/team-analytics/scorecard';
+import { cn } from '@/lib/utils';
 
 import {
-  EmptyRow,
-  Notes,
-  PctCell,
-  RepCell,
-  Section,
-  TableFrame,
-  Td,
-  Th,
-  type ChipTone,
-} from './scorecard-primitives';
+  fieldFills,
+  ragStyle,
+  weakestFirst,
+  type FieldFill,
+} from './completeness-rag';
+import {
+  CompletenessTable,
+  type CompletenessTableRow,
+} from './completeness-table';
+import { EmptyRow, Notes, Section } from './scorecard-primitives';
 
-const BAND_TONES: Record<CompletenessBand, ChipTone> = {
-  good: 'good',
-  patchy: 'warn',
-  poor: 'bad',
-};
+/** How many of the team's weakest fields the collapsed table shows. */
+const COLLAPSED_FIELD_COUNT = 2;
 
 /**
- * FIELD-LEVEL COMPLETENESS — one column per data point a deal owes, one
- * row per rep, and a team row that says which field the whole workspace is
- * worst at.
+ * FIELD-LEVEL COMPLETENESS — a heatmap of what each rep's open deals are
+ * missing, with the team's weakest column called out above it.
  *
  * The matrix is the point. A single "data quality: 74%" per rep says
  * nothing anyone can act on; a column of red under "Next step" says the
@@ -36,6 +31,11 @@ const BAND_TONES: Record<CompletenessBand, ChipTone> = {
  * Every cell is filled ÷ APPLICABLE, never filled ÷ total. A field a deal
  * does not owe at its stage is in neither number — see
  * `@/lib/deals/completeness` for which stage owes what and why.
+ *
+ * This file computes; `./completeness-table` renders and holds the
+ * collapsed/expanded state. The split keeps the ranking (which field is
+ * weakest, which two the collapsed view shows) on the server, where it is
+ * computed once from the same numbers the callout quotes.
  */
 export function CompletenessSection({
   scorecard,
@@ -44,6 +44,9 @@ export function CompletenessSection({
 }) {
   const { rows, team, fields } = scorecard;
 
+  // No sort. Rows arrive in the order the scorecard assembled them and stay
+  // that way; only reps with open deals to score are dropped, because a row
+  // of "n/a" teaches nobody anything.
   const scored = rows.filter((r) => r.completeness.dealsScored > 0);
   if (scored.length === 0) {
     return (
@@ -53,29 +56,60 @@ export function CompletenessSection({
     );
   }
 
-  // Per-field team totals, so the footer can show the workspace-wide fill
-  // rate for each column rather than an average of averages.
-  const fieldTotals = new Map<string, { applicable: number; filled: number }>();
-  for (const field of fields) {
+  // Per-field team totals — summed from the tallies, not averaged from the
+  // rep percentages. An average of averages would let a rep with two deals
+  // weigh as heavily as one with forty.
+  const teamByField: Record<string, { applicable: number; filled: number }> = {};
+  for (const f of fields) {
     let applicable = 0;
     let filled = 0;
     for (const r of scored) {
-      const t = r.completeness.byField[field.key];
+      const t = r.completeness.byField[f.key];
       if (!t) continue;
       applicable += t.applicable;
       filled += t.filled;
     }
-    fieldTotals.set(field.key, { applicable, filled });
+    teamByField[f.key] = { applicable, filled };
   }
 
-  const worstField = [...fieldTotals.entries()]
-    .filter(([, t]) => t.applicable > 0)
-    .sort((a, b) => ratioOf(a[1].filled, a[1].applicable) - ratioOf(b[1].filled, b[1].applicable))[0];
-  const worstLabel = worstField
-    ? fields.find((f) => f.key === worstField[0])?.label
-    : null;
+  const teamFills = fieldFills(fields, teamByField);
+  const ranked = weakestFirst(teamFills);
+  const weakest = ranked[0] ?? null;
+  const collapsedKeys = ranked.slice(0, COLLAPSED_FIELD_COUNT).map((f) => f.key);
 
-  const teamRatio = ratioOf(team.completeness.filled, team.completeness.applicable);
+  const teamRatio = ratioOf(
+    team.completeness.filled,
+    team.completeness.applicable,
+  );
+  const teamPct = Math.round(teamRatio * 100);
+  const dealsScored = scored.reduce(
+    (n, r) => n + r.completeness.dealsScored,
+    0,
+  );
+
+  const tableRows: CompletenessTableRow[] = scored.map((r) => ({
+    userId: r.userId,
+    displayName: r.displayName,
+    role: r.role,
+    dealsScored: r.completeness.dealsScored,
+    overall: overallFill(
+      r.completeness.total.filled,
+      r.completeness.total.applicable,
+    ),
+    fills: fieldFills(fields, r.completeness.byField),
+  }));
+
+  const teamRow: CompletenessTableRow = {
+    userId: '__team__',
+    displayName: 'Team',
+    role: null,
+    dealsScored,
+    overall: overallFill(
+      team.completeness.filled,
+      team.completeness.applicable,
+    ),
+    fills: teamFills,
+  };
 
   return (
     <Section
@@ -87,118 +121,75 @@ export function CompletenessSection({
           is. Percentages are filled ÷ applicable.
         </>
       }
-      aside={
-        <span className="text-[11px] text-slate-400 dark:text-[#71717A]">
-          {Math.round(teamRatio * 100)}% across {team.openDeals} open deals
-        </span>
-      }
     >
-      <TableFrame>
-        <thead>
-          <tr>
-            <Th align="left" sticky>
-              Rep
-            </Th>
-            <Th title="Open deals behind this row">Deals</Th>
-            <Th title="Every applicable field on every open deal they own">
-              Overall
-            </Th>
-            {fields.map((f) => (
-              <Th key={f.key} title={f.hint}>
-                {f.label}
-              </Th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {scored.map((r) => {
-            const overall = ratioOf(
-              r.completeness.total.filled,
-              r.completeness.total.applicable,
-            );
-            return (
-              <tr key={r.userId}>
-                <RepCell name={r.displayName} role={r.role} />
-                <Td muted>{r.completeness.dealsScored}</Td>
-                <PctCell
-                  ratio={overall}
-                  tone={BAND_TONES[completenessBand(overall)]}
-                  title={`${r.completeness.total.filled} of ${r.completeness.total.applicable} applicable fields filled`}
-                />
-                {fields.map((f) => {
-                  const t = r.completeness.byField[f.key];
-                  if (!t || t.applicable === 0) {
-                    return (
-                      <Td
-                        key={f.key}
-                        muted
-                        title="Not owed by any of this rep’s open deals at their current stage"
-                      >
-                        n/a
-                      </Td>
-                    );
-                  }
-                  const ratio = ratioOf(t.filled, t.applicable);
-                  return (
-                    <PctCell
-                      key={f.key}
-                      ratio={ratio}
-                      tone={BAND_TONES[completenessBand(ratio)]}
-                      title={`${t.filled} of ${t.applicable} deals have this`}
-                    />
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-        <tfoot>
-          <tr className="font-medium">
-            <Td sticky align="left">
-              Team
-            </Td>
-            <Td muted>
-              {scored.reduce((n, r) => n + r.completeness.dealsScored, 0)}
-            </Td>
-            <PctCell
-              ratio={teamRatio}
-              tone={BAND_TONES[completenessBand(teamRatio)]}
-              title={`${team.completeness.filled} of ${team.completeness.applicable} applicable fields filled`}
-            />
-            {fields.map((f) => {
-              const t = fieldTotals.get(f.key);
-              if (!t || t.applicable === 0) {
-                return (
-                  <Td key={f.key} muted>
-                    n/a
-                  </Td>
-                );
-              }
-              const ratio = ratioOf(t.filled, t.applicable);
-              return (
-                <PctCell
-                  key={f.key}
-                  ratio={ratio}
-                  tone={BAND_TONES[completenessBand(ratio)]}
-                  title={`${t.filled} of ${t.applicable} deals workspace-wide`}
-                />
-              );
-            })}
-          </tr>
-        </tfoot>
-      </TableFrame>
+      {/* The headline and the one thing to do about it, side by side. The
+          flagged field is whichever column is lowest across the team right
+          now — it is read from the numbers below, never named in code. */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 dark:border-[#1F1F1F] dark:bg-[#111111]">
+        <div>
+          <div className="text-[18px] font-semibold leading-none tracking-tight text-slate-900 dark:text-[#FAFAFA]">
+            {teamPct}%{' '}
+            <span className="text-[12px] font-medium text-slate-500 dark:text-[#A1A1AA]">
+              overall
+            </span>
+          </div>
+          <div className="mt-1 text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
+            across {dealsScored} open {dealsScored === 1 ? 'deal' : 'deals'}
+          </div>
+        </div>
+        {weakest ? <WeakestChip fill={weakest} /> : null}
+      </div>
+
+      <CompletenessTable
+        fields={fields}
+        rows={tableRows}
+        team={teamRow}
+        collapsedKeys={collapsedKeys}
+      />
 
       <Notes
         notes={[
-          worstLabel
-            ? `Weakest field across the team: ${worstLabel} — filled on ${Math.round(
-                ratioOf(worstField![1].filled, worstField![1].applicable) * 100,
-              )}% of the deals that owe it.`
-            : null,
           'Won and lost deals are not scored. Their data is history a rep cannot usefully be asked to go back and fix, and including it would move the score with close volume rather than with the habit.',
           'Competitor and probability are deliberately not scored: “no competitor” is a real answer that looks identical to an empty column, and probability is stage-derived unless someone overrides it.',
         ]}
       />
     </Section>
+  );
+}
+
+function overallFill(filled: number, applicable: number): FieldFill {
+  return {
+    key: '__overall__',
+    label: 'Overall',
+    applicable,
+    filled,
+    pct: Math.round(ratioOf(filled, applicable) * 100),
+  };
+}
+
+/**
+ * The weakest column, flagged.
+ *
+ * Coloured through `ragStyle` rather than pinned to the danger role: the
+ * chip is red exactly when the weakest field is genuinely poor, and a team
+ * whose worst column is 94% gets a green chip instead of a false alarm that
+ * would teach everyone to ignore the next real one.
+ */
+function WeakestChip({ fill }: { fill: FieldFill }) {
+  const { bg, fg } = ragStyle(fill.pct);
+  return (
+    <div
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11.5px] font-medium',
+        bg,
+        fg,
+      )}
+      title={`${fill.filled} of ${fill.applicable} open deals that owe this field have it`}
+    >
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span>
+        Weakest field: {fill.label} — {fill.pct}% team-wide
+      </span>
+    </div>
   );
 }

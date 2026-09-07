@@ -3,7 +3,7 @@ import {
   formatCompactTenantCurrency,
   formatTenantCurrency,
 } from '@/lib/currency/format';
-import { ratioOf } from '@/lib/deals/completeness';
+import { completenessBand, ratioOf } from '@/lib/deals/completeness';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
 import {
@@ -24,6 +24,13 @@ import { PushbackSection } from './_components/pushback-section';
 import { QuarterlySection } from './_components/quarterly-section';
 
 export const metadata = { title: 'Team Performance' };
+
+/** The completeness bands, in the KPI strip's tone vocabulary. */
+const COMPLETENESS_TONES = {
+  good: 'success',
+  patchy: 'warning',
+  poor: 'danger',
+} as const satisfies Record<string, MetricTone>;
 
 /**
  * TEAM PERFORMANCE — the manager's accountability surface.
@@ -200,13 +207,10 @@ export default async function TeamPerformancePage({
             label="Field completeness"
             value={`${Math.round(completenessRatio * 100)}%`}
             hint={`Of what open deals owe at their stage · ${team.openDeals} deals`}
-            tone={
-              completenessRatio >= 0.9
-                ? 'success'
-                : completenessRatio >= 0.7
-                  ? 'warning'
-                  : 'danger'
-            }
+            // Same 40/80 bands the heatmap below colours with — one rule,
+            // so the tile can't call 78% healthy while every cell in the
+            // table calls it amber.
+            tone={COMPLETENESS_TONES[completenessBand(completenessRatio)]}
             emptyState={
               team.completeness.applicable === 0
                 ? 'No open deals to score'
