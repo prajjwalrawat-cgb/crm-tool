@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { Loader2, Pencil, Search, Trash2 } from 'lucide-react';
+import { ExternalLink, Loader2, Pencil, Search, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
   useEffect,
@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 
 import { BulkActionBar } from '../../_components/bulk-action-bar';
 import { CreateDrawer } from '../../_components/create-drawer';
+import { HoverPrefetchLink } from '../../_components/hover-prefetch-link';
 import { InlineEditCell } from '../../_components/inline-edit-cell';
 import { PaginationControls } from '../../_components/pagination-controls';
 import { ToggleFilterBar } from '../../_components/toggle-filter-bar';
@@ -533,6 +534,23 @@ function CompaniesTable({
                         onCommit={(v) => onPatchField(c, 'name', v)}
                       />
                     </div>
+                    {/*
+                      The name cell is an inline editor, so unlike the deals
+                      table the text itself cannot double as the link — a
+                      click has to land in the input. This icon is the row's
+                      only door to the account view; without it the page is
+                      reachable only from search and the activity feed.
+                    */}
+                    {c.id.startsWith('optimistic-') ? null : (
+                      <HoverPrefetchLink
+                        href={`/dashboard/companies/${c.id}`}
+                        aria-label={`Open ${c.name}`}
+                        title={`Open ${c.name}`}
+                        className="shrink-0 rounded p-0.5 text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 focus:text-slate-600"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                      </HoverPrefetchLink>
+                    )}
                   </div>
                 </td>
                 <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">

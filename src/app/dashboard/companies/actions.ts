@@ -332,6 +332,9 @@ export async function patchCompanyAction(
 
       if (!updated) return { ok: false, message: 'Company not found.' };
       revalidatePath('/dashboard/companies');
+      // The Account 360 view renders these fields too, so an inline edit
+      // there has to invalidate the detail route as well as the list.
+      revalidatePath('/dashboard/companies/[id]', 'page');
       revalidatePath('/dashboard/activity');
       return { ok: true };
     },

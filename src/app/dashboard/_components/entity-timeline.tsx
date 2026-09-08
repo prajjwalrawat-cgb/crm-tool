@@ -16,6 +16,7 @@ import {
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
+import Link from 'next/link';
 import { type ReactNode, useMemo, useState } from 'react';
 
 import { formatActivity } from '@/lib/activity/format';
@@ -118,6 +119,8 @@ export function EntityTimeline({
   filterModes = FILTER_ORDER,
   headerAction,
   emptyLabel,
+  groupByMonth = false,
+  showSource = false,
 }: {
   items: TimelineItem[];
   authorLookup: Record<string, string>;
@@ -129,6 +132,20 @@ export function EntityTimeline({
   /** Rendered on the right of the header — e.g. the "Log activity" button. */
   headerAction?: ReactNode;
   emptyLabel?: string;
+  /**
+   * Break the flat feed into "September 2026" sections, newest month
+   * first. Off by default: a single record's timeline is short enough to
+   * scan whole, and the per-item relative time already carries the date.
+   * The account feed turns it on because it merges every deal and
+   * contact under the account, which is long enough that "when" stops
+   * being obvious from position alone.
+   */
+  groupByMonth?: boolean;
+  /**
+   * Show which deal / contact each item came from. Only meaningful on a
+   * feed that spans records — see `TimelineSource`.
+   */
+  showSource?: boolean;
 }) {
   const [filter, setFilter] = useState<FilterMode>('all');
 
@@ -248,27 +265,122 @@ export function EntityTimeline({
             ? emptyLabel ?? 'No activity yet for this record.'
             : `No ${FILTER_LABEL[filter].toLowerCase()} yet.`}
         </p>
+      ) : groupByMonth ? (
+        <div className="flex flex-col gap-4">
+          {groupItemsByMonth(filtered).map((group) => (
+            <div key={group.key}>
+              <h3 className="mb-2 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                {group.label}
+                <span className="h-px flex-1 bg-slate-100" aria-hidden />
+                <span className="tabular-nums">{group.items.length}</span>
+              </h3>
+              <ol className="flex flex-col gap-3">
+                {group.items.map((item) => (
+                  <TimelineRow
+                    key={item.id}
+                    item={item}
+                    authorLookup={authorLookup}
+                    currentUserId={currentUserId}
+                    showSource={showSource}
+                  />
+                ))}
+              </ol>
+            </div>
+          ))}
+        </div>
       ) : (
         <ol className="flex flex-col gap-3">
           {filtered.map((item) => (
-            <li key={item.id} className="flex items-start gap-2.5">
-              <IconCircle item={item} />
-              <div className="min-w-0 flex-1">
-                <ItemBody
-                  item={item}
-                  authorLookup={authorLookup}
-                  currentUserId={currentUserId}
-                />
-                <RelativeTime
-                  date={item.createdAt}
-                  className="mt-0.5 block text-[10px] tabular-nums text-slate-400"
-                />
-              </div>
-            </li>
+            <TimelineRow
+              key={item.id}
+              item={item}
+              authorLookup={authorLookup}
+              currentUserId={currentUserId}
+              showSource={showSource}
+            />
           ))}
         </ol>
       )}
     </section>
+  );
+}
+
+/**
+ * Month buckets, newest first, preserving the newest-first order inside
+ * each. `items` arrives already sorted, so one pass is enough — no
+ * re-sorting, and no `Date` comparison beyond the bucket key.
+ *
+ * The key is UTC-pinned (`getUTCFullYear`/`getUTCMonth`) and the label
+ * is formatted with `timeZone: 'UTC'`: this list is server-rendered and
+ * then hydrated, so a viewer-local month boundary would put the same
+ * item in two different buckets on the two passes.
+ */
+function groupItemsByMonth(
+  items: TimelineItem[],
+): Array<{ key: string; label: string; items: TimelineItem[] }> {
+  const groups: Array<{ key: string; label: string; items: TimelineItem[] }> =
+    [];
+  let current: (typeof groups)[number] | null = null;
+  for (const item of items) {
+    const d = item.createdAt;
+    const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+    if (!current || current.key !== key) {
+      current = { key, label: MONTH_FORMATTER.format(d), items: [] };
+      groups.push(current);
+    }
+    current.items.push(item);
+  }
+  return groups;
+}
+
+const MONTH_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+function TimelineRow({
+  item,
+  authorLookup,
+  currentUserId,
+  showSource,
+}: {
+  item: TimelineItem;
+  authorLookup: Record<string, string>;
+  currentUserId: string;
+  showSource: boolean;
+}) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <IconCircle item={item} />
+      <div className="min-w-0 flex-1">
+        <ItemBody
+          item={item}
+          authorLookup={authorLookup}
+          currentUserId={currentUserId}
+        />
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+          <RelativeTime
+            date={item.createdAt}
+            className="block text-[10px] tabular-nums text-slate-400"
+          />
+          {showSource && item.source ? (
+            <Link
+              href={
+                item.source.type === 'deal'
+                  ? `/dashboard/deals/${item.source.id}`
+                  : `/dashboard/contacts/${item.source.id}`
+              }
+              className="max-w-[16rem] truncate rounded bg-slate-100 px-1 py-px text-[10px] font-medium text-slate-500 transition hover:bg-slate-200 hover:text-slate-700"
+              title={item.source.name}
+            >
+              {item.source.type === 'deal' ? 'Deal' : 'Contact'} ·{' '}
+              {item.source.name}
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    </li>
   );
 }
 
