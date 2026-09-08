@@ -284,6 +284,12 @@ export type SerializedDeal = DateToString<Deal> & {
   contactEmail: string | null;
   // Health score (Module 2) rides along as `healthScore` / `healthBand` — real
   // columns on `deals`, so they're already part of DateToString<Deal>.
+  /**
+   * Phase 1 risk, joined from `deal_risk_scores` — not a column on `deals`,
+   * so it has to be named here. NULL means not scored.
+   */
+  riskScore: number | null;
+  riskBand: string | null;
 };
 
 export type SerializedCompany = DateToString<Company>;

@@ -47,6 +47,7 @@ export * from './organization-settings';
 export * from './relationship-signals';
 export * from './workspace-settings';
 export * from './stage-gates';
+export * from './deal-risk-scores';
 export * from './deal-scores';
 export * from './gmail-connections';
 export * from './forecast-snapshots';
