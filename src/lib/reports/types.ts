@@ -44,6 +44,24 @@ export type ReportFilter = {
   owner?: OwnerScope;
 };
 
+/**
+ * The filter shape as the REGISTRY sees it, after it has erased each
+ * report's concrete filter type.
+ *
+ * The index signature is the point. Reports extend `ReportFilter` by
+ * intersection — `funnel-by-offering` adds a `scope`, and more will follow —
+ * but the registry stores every runner behind one erased type so the list
+ * page can iterate them. Without a declared extension point, a caller that
+ * passes `{ ...filter, scope }` to a registry-typed runner is rejected by
+ * excess-property checking, and the only ways out are widening
+ * `ReportFilter` with per-report fields (which is exactly the "one giant
+ * union" this file's header rules out) or an `as` cast at every call site.
+ *
+ * The concrete runner still declares its real filter type and still narrows
+ * it; this type only describes the erased edge.
+ */
+export type AnyReportFilter = ReportFilter & Record<string, unknown>;
+
 export type ReportResultMeta = {
   generatedAt: string;
   queryMs: number;

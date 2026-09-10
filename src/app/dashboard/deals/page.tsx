@@ -4,6 +4,7 @@ import { listContactPickerOptions } from '@/lib/contacts/queries';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { parseDealFilters } from '@/lib/deals/filters';
 import { listDealCompanyOptions, listDeals } from '@/lib/deals/queries';
+import { listOfferingOptions } from '@/lib/offerings/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
@@ -50,6 +51,7 @@ export default async function DealsPage({
       teammates,
       customFieldDefs,
       orgSettings,
+      offeringOptions,
     ] = await Promise.all([
       listDeals(tenant.id, {
         search,
@@ -68,6 +70,10 @@ export default async function DealsPage({
       listTeammates(tenant.id, tenant.name),
       listCustomFieldDefs(tenant.id, 'deal'),
       getOrgSettings(tenant.id),
+      // ACTIVE only: the create form must not be able to tag a new deal with
+      // a retired offering. The deal detail page loads the full catalog for
+      // display, since a retired tag still has to render where it already is.
+      listOfferingOptions(tenant.id),
     ]);
 
     return (
@@ -97,6 +103,7 @@ export default async function DealsPage({
           pageSize={page.size}
           customFieldDefs={customFieldDefs}
           unitPricingEnabled={orgSettings.dealUnitPricingEnabled}
+          offeringOptions={offeringOptions}
         />
       </main>
     );

@@ -7,6 +7,7 @@ import type { MembershipRole } from '@/db/schema';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { ContactPickerOption } from '@/lib/contacts/queries';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
+import type { OfferingOption } from '@/lib/offerings/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { validateDealForm } from '@/lib/deals/client-validate';
 import { closeDateRequiredForStage } from '@/lib/deals/stage-governance';
@@ -22,6 +23,7 @@ import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { OwnerFormField } from '../../_components/owner-form-field';
 import { DealAmountFields } from './deal-amount-fields';
 import { DealCompanyContactFields } from './deal-company-contact-fields';
+import { OfferingsField } from './offerings-field';
 
 /** Pull `cf_*` errors out of the field-error map (first message each). */
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
@@ -45,6 +47,8 @@ type Props = {
   currentRole: MembershipRole;
   customFieldDefs: CustomFieldDef[];
   unitPricingEnabled: boolean;
+  /** Active offerings only — a retired one must not be taggable onto a new deal. */
+  offeringOptions: OfferingOption[];
 };
 
 export function CreateDealForm({
@@ -60,6 +64,7 @@ export function CreateDealForm({
   currentRole,
   customFieldDefs,
   unitPricingEnabled,
+  offeringOptions,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
   // Client-side validation errors, shown alongside server fieldErrors. We
@@ -83,7 +88,9 @@ export function CreateDealForm({
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    const found = validateDealForm(fd);
+    // A new deal is always under the 'required' rule. The edit drawer derives
+    // its rule from the deal's existing tags instead — see `offeringRuleFor`.
+    const found = validateDealForm(fd, null, { offeringRule: 'required' });
     if (Object.keys(found).length > 0) {
       setClientErrors(found);
       setClientMsg('Please fix the highlighted fields.');
@@ -201,6 +208,17 @@ export function CreateDealForm({
         contactOptions={contactOptions}
         companyError={errs.companyId}
         contactError={errs.contactId}
+      />
+
+      {/* Mandatory on create — a new deal that doesn't say what it sells is
+          the untagged legacy row this feature exists to stop producing. */}
+      {/* `key` rather than a reset prop: the field holds its selection in
+          local state, and remounting on the parent's reset signal clears it
+          without an effect. See OfferingsField. */}
+      <OfferingsField
+        key={resetKey}
+        options={offeringOptions}
+        errors={errs.offeringIds}
       />
 
       {canAssign ? (

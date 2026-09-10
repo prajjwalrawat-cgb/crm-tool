@@ -7,6 +7,7 @@ import type {
   MembershipRole,
 } from '@/db/schema';
 import type { ActorSummary } from '@/lib/activity/queries';
+import type { DealOfferingTag } from '@/lib/offerings/types';
 
 /**
  * Discriminated union of every realtime event the app publishes.
@@ -290,6 +291,13 @@ export type SerializedDeal = DateToString<Deal> & {
    */
   riskScore: number | null;
   riskBand: string | null;
+  /**
+   * Every offering on the deal (0066). Carried on the wire for the same
+   * reason the pushback and governance caches are: without it a realtime
+   * reconcile would blank a card's Offering chip to "Uncategorized" — a
+   * meaningful state here — until the next full page load.
+   */
+  offerings: DealOfferingTag[];
 };
 
 export type SerializedCompany = DateToString<Company>;

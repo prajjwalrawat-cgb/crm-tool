@@ -20,10 +20,12 @@ import { db } from '@/db';
 import {
   companies,
   contacts,
+  dealOfferings,
   deals,
   type Deal,
   type DealApprovalStatus,
-  dealRiskScores,} from '@/db/schema';
+  dealRiskScores,
+  offerings,} from '@/db/schema';
 import { tenantTransaction, withIncludeDeleted } from '@/lib/db-context';
 import {
   buildPage,
@@ -43,6 +45,7 @@ import {
 } from '@/lib/deals/risk/score';
 import { type DealFilters } from '@/lib/deals/filters';
 import { type DealStage } from '@/lib/deals/schema';
+import { type DealOfferingTag } from '@/lib/offerings/types';
 
 // Re-export so existing imports of `DealFilters` from this module keep
 // working — but the canonical home for filter helpers is
@@ -62,6 +65,19 @@ export type DealRow = Deal & {
    */
   riskScore: number | null;
   riskBand: string | null;
+  /**
+   * EVERY offering tagged on the deal (0066), primary first then catalog
+   * order. An empty array is the "Uncategorized" state that every deal
+   * predating 0066 is in.
+   *
+   * The whole array and not just the primary, even though the table column
+   * renders one chip: the edit drawer has to PREFILL the tag picker, and a
+   * count-plus-primary row cannot say which other offerings are on the deal.
+   * Fetching them when the drawer opens would be the alternative — an extra
+   * round trip and a loading state on a control that is otherwise instant.
+   * Use `primaryOfferingOf()` for the one-chip view.
+   */
+  offerings: DealOfferingTag[];
 };
 
 export type DealOption = {
@@ -170,6 +186,8 @@ type RawJoinedRow = {
   contactFirstName: string | null;
   contactLastName: string | null;
   contactEmail: string | null;
+  /** jsonb from the aggregate below; postgres-js hands it back parsed. */
+  offerings: DealOfferingTag[] | null;
 };
 
 const DEALS_PROJECTION = {
@@ -237,6 +255,45 @@ const DEALS_PROJECTION = {
   contactLastName: contacts.lastName,
   // Free-text email wins, else the linked contact's email.
   contactEmail: sql<string | null>`coalesce(${deals.contactEmailText}, ${contacts.email})`,
+  /**
+   * Every offering on the deal, aggregated to one jsonb value (0066).
+   *
+   * ONE correlated aggregate rather than two LEFT JOINs for the primary plus
+   * a scalar count. Three reasons, in order of how much they matter:
+   *
+   *   1. It carries the full tag list the edit drawer needs to prefill,
+   *      which a join to the single primary row cannot.
+   *   2. It cannot fan the page out. The joins were safe only because of the
+   *      partial unique index on (deal_id) WHERE is_primary — correct, but a
+   *      correctness argument every future edit would have to re-derive. A
+   *      subquery in the projection returns one value per row by construction.
+   *   3. It costs the same: one index probe per outer row on
+   *      deal_offerings_tenant_deal_idx, and the page is 25-100 keyset rows.
+   *
+   * Correlated through the TABLE (`${deals}.id`), not through column
+   * references: drizzle renders a column inside a `.select()` projection
+   * UNQUALIFIED, so `${deals.id}` emits a bare `"id"` that Postgres resolves
+   * against the SUBQUERY's scope — silently comparing deal_offerings to
+   * itself instead of correlating.
+   */
+  offerings: sql<DealOfferingTag[] | null>`(
+    SELECT coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', o.id,
+          'name', o.name,
+          'category', o.category,
+          'active', o.active,
+          'isPrimary', dof.is_primary
+        )
+        ORDER BY dof.is_primary DESC, o.category, o.sort_order, o.name
+      ),
+      '[]'::jsonb
+    )
+    FROM ${dealOfferings} dof
+    JOIN ${offerings} o ON o.id = dof.offering_id
+    WHERE dof.tenant_id = ${deals}.tenant_id AND dof.deal_id = ${deals}.id
+  )`,
 };
 
 /**
@@ -297,6 +354,9 @@ function shapeDealRow(r: RawJoinedRow): DealRow {
   const nameParts = [contactFirstName, contactLastName].filter(Boolean) as string[];
   return {
     ...rest,
+    // `coalesce(..., '[]')` means this is never null in practice; the guard
+    // covers the row shapes that bypass the projection.
+    offerings: r.offerings ?? [],
     contactName:
       r.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
     contactEmail,
@@ -387,6 +447,40 @@ export async function listDeals(
   if (f.missingField) {
     const spec = DEAL_FIELD_SPECS.find((s) => s.key === f.missingField);
     if (spec) conditions.push(sql.raw(fieldMissingSql(spec, 'deals')));
+  }
+  // `offering=<id,...>` — deals carrying ANY of these tags (0066).
+  //
+  // EXISTS rather than a join: the projection already LEFT JOINs
+  // deal_offerings for the PRIMARY tag, and filtering on that join would
+  // silently narrow the filter to "primary is X", quietly hiding every
+  // bundle deal from its own funnel's list. A separate semi-join keeps the
+  // two readings apart, and returns one row per deal no matter how many of
+  // the selected offerings it carries.
+  if (f.offeringIds && f.offeringIds.length > 0) {
+    const ids = sql.join(
+      f.offeringIds.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    );
+    conditions.push(
+      sql`EXISTS (
+        SELECT 1 FROM ${dealOfferings} dof
+        WHERE dof.tenant_id = ${deals.tenantId}
+          AND dof.deal_id = ${deals.id}
+          AND dof.offering_id IN (${ids})
+      )`,
+    );
+  }
+  // `uncategorized=1` — the legacy backlog: no tags at all. NOT EXISTS is
+  // the exact complement of the clause above, so a deal is in exactly one of
+  // the two populations and the coverage arithmetic on the funnel report
+  // (tagged + uncategorized = all) holds by construction.
+  if (f.uncategorized) {
+    conditions.push(
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${dealOfferings} dof
+        WHERE dof.tenant_id = ${deals.tenantId} AND dof.deal_id = ${deals.id}
+      )`,
+    );
   }
   // `risk=<band>` — the nightly Phase 1 score. A deal with no scored row
   // matches nothing: absence of a score is not evidence of low risk.

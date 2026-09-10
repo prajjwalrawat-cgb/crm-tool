@@ -8,6 +8,11 @@ import { decodeCursor, type Cursor } from '@/lib/pagination/cursor';
 import { listDeals, type DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
 import {
+  OFFERING_CATEGORY_LABELS,
+  primaryOfferingOf,
+  UNCATEGORIZED_LABEL,
+} from '@/lib/offerings/types';
+import {
   componentDisplayName,
   rowsToElements,
   type SplitRow,
@@ -104,6 +109,14 @@ const COLUMNS = [
   'Company',
   'Contact',
   'Contact Email',
+  // The PRIMARY offering, matching the list's Offering column — and
+  // "Uncategorized" rather than a blank cell, so a spreadsheet filter can
+  // isolate the untagged backlog the same way the list's chip does. `Offering
+  // Count` is what stops the single name reading as the whole story on a
+  // bundle deal.
+  'Offering',
+  'Offering Category',
+  'Offering Count',
   'Owner',
   'Close Date',
   'Forecast Category',
@@ -188,6 +201,11 @@ function buildCsv(
         r.companyName ?? '',
         r.contactName ?? '',
         r.contactEmail ?? '',
+        primaryOfferingOf(r.offerings)?.name ?? UNCATEGORIZED_LABEL,
+        primaryOfferingOf(r.offerings)
+          ? OFFERING_CATEGORY_LABELS[primaryOfferingOf(r.offerings)!.category]
+          : '',
+        String(r.offerings.length),
         (r.ownerId && ownerNames[r.ownerId]) || r.ownerId || '',
         r.expectedCloseDate ?? '',
         r.forecastCategory

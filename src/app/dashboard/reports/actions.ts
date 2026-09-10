@@ -2,6 +2,7 @@
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { rowsToCsv } from '@/lib/reports/csv';
+import { parseFunnelScope } from '@/lib/reports/funnel-scope';
 import { getReport, type ReportId } from '@/lib/reports/registry';
 import type {
   OwnerScope,
@@ -20,6 +21,12 @@ import type {
  */
 const REPORT_COLUMNS: Record<ReportId, { key: string; label: string }[]> = {
   'pipeline-by-stage': [
+    { key: 'stage', label: 'Stage' },
+    { key: 'stageLabel', label: 'Stage label' },
+    { key: 'count', label: 'Deal count' },
+    { key: 'totalAmountMinor', label: 'Total amount (minor units)' },
+  ],
+  'funnel-by-offering': [
     { key: 'stage', label: 'Stage' },
     { key: 'stageLabel', label: 'Stage label' },
     { key: 'count', label: 'Deal count' },
@@ -81,7 +88,18 @@ const REPORT_COLUMNS: Record<ReportId, { key: string; label: string }[]> = {
 
 export async function buildReportCsvAction(input: {
   reportId: string;
-  filters: { owner: 'all' | 'mine' };
+  filters: {
+    owner: 'all' | 'mine';
+    /**
+     * Raw URL params for reports that carry a scope beyond owner + range.
+     * Passed through verbatim and parsed by the same function the page uses,
+     * so a download can never disagree with the table it was clicked next to
+     * — which is exactly what happened while this action hard-coded an
+     * unfiltered filter.
+     */
+    offering?: string;
+    category?: string;
+  };
 }): Promise<{ ok: true; filename: string; csv: string } | { ok: false; message: string }> {
   const report = getReport(input.reportId);
   if (!report) return { ok: false, message: 'Unknown report' };
@@ -94,9 +112,19 @@ export async function buildReportCsvAction(input: {
         : { type: 'all' };
     const filter: ReportFilter = { range: 'all_time', owner };
 
-    const result = await report.runner(tenant.id, filter, {
-      currentUserId: userId,
-    });
+    const result = await report.runner(
+      tenant.id,
+      report.id === 'funnel-by-offering'
+        ? {
+            ...filter,
+            scope: parseFunnelScope({
+              offering: input.filters.offering,
+              category: input.filters.category,
+            }),
+          }
+        : filter,
+      { currentUserId: userId },
+    );
     const cols = REPORT_COLUMNS[report.id as ReportId];
     const csv = rowsToCsv(
       result.rows as Record<string, unknown>[],

@@ -10,6 +10,7 @@ import { memberships, tenants, type Tenant } from '@/db/schema';
 import { ensureDefaultOwnerUserId } from '@/lib/auth/default-owner';
 import { auth } from '@/lib/auth/server';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
+import { seedDefaultOfferings } from '@/lib/offerings/queries';
 
 /**
  * Tenant resolution for self-hosted auth. The active tenant is carried in
@@ -95,6 +96,20 @@ export async function createTenant(input: {
           .onConflictDoNothing();
       }),
   );
+
+  // Give the workspace the default Offerings catalog (0066). Migration 0066
+  // seeded the tenants that already existed; this covers the ones created
+  // after it ran. Best-effort: a workspace with no catalog is recoverable
+  // from Settings → Offerings, whereas failing the whole creation over a
+  // seed would leave the user with no workspace at all.
+  try {
+    await runWithTenantContext(
+      { tenantId: row.id, userId: input.ownerUserId },
+      () => seedDefaultOfferings(row.id),
+    );
+  } catch (err) {
+    console.error('createTenant: offerings seed failed', err);
+  }
 
   // Seat the default owner (info@cgbindia.com) on every new workspace too.
   const defaultOwnerId = await ensureDefaultOwnerUserId();

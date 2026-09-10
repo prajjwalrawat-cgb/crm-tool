@@ -14,9 +14,16 @@ import { buildReportCsvAction } from '../actions';
 export function CsvDownloadButton({
   reportId,
   owner,
+  scopeParams,
 }: {
   reportId: string;
   owner: 'all' | 'mine';
+  /**
+   * Extra URL params the report's runner understands (today: the funnel's
+   * offering / category scope). Forwarded so the file matches what is on
+   * screen rather than silently exporting the unfiltered report.
+   */
+  scopeParams?: { offering?: string; category?: string };
 }) {
   const [pending, start] = useTransition();
 
@@ -28,7 +35,7 @@ export function CsvDownloadButton({
         start(async () => {
           const result = await buildReportCsvAction({
             reportId,
-            filters: { owner },
+            filters: { owner, ...scopeParams },
           });
           if (!result.ok) {
             toast.error(result.message);

@@ -29,6 +29,14 @@ import {
   withSearchTerm,
 } from '@/lib/deals/filters';
 import type { DealRow } from '@/lib/deals/queries';
+import {
+  type DealOfferingTag,
+  OFFERING_CATEGORY_CHIP,
+  type OfferingOption,
+  primaryOfferingOf,
+  UNCATEGORIZED_CHIP,
+  UNCATEGORIZED_LABEL,
+} from '@/lib/offerings/types';
 import type { PageSize } from '@/lib/pagination/page-size';
 import {
   type DealStage,
@@ -108,6 +116,7 @@ export function DealsView({
   pageSize,
   customFieldDefs,
   unitPricingEnabled,
+  offeringOptions,
 }: {
   initialItems: DealRow[];
   initialSearch: string;
@@ -126,6 +135,8 @@ export function DealsView({
   pageSize: PageSize;
   customFieldDefs: CustomFieldDef[];
   unitPricingEnabled: boolean;
+  /** Active offerings, for the create form's required picker and the column filter. */
+  offeringOptions: OfferingOption[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -170,6 +181,7 @@ export function DealsView({
     companyOptions,
     teammates,
     currentUserId,
+    offeringOptions,
   });
 
   const [search, setSearch] = useState(initialSearch);
@@ -480,6 +492,13 @@ export function DealsView({
       holdReason: base?.holdReason ?? null,
       holdRevisitOn: base?.holdRevisitOn ?? null,
       holdNote: base?.holdNote ?? null,
+      // Offerings (0066) are written as their own rows alongside the deal, so
+      // an optimistic draft can't name them from the form alone. Carrying the
+      // previous tags on an EDIT (rather than emptying them) keeps the chip
+      // from flickering to "Uncategorized" during a save; on a CREATE there is
+      // no base, so the row shows Uncategorized for the one render before the
+      // server row replaces it.
+      offerings: base?.offerings ?? [],
       __pending: true,
     };
   }
@@ -832,6 +851,7 @@ export function DealsView({
                     currentRole={currentRole}
                     customFieldDefs={customFieldDefs}
                     unitPricingEnabled={unitPricingEnabled}
+                    offeringOptions={offeringOptions}
                   />
                 )}
               </CreateDrawer>
@@ -891,6 +911,7 @@ export function DealsView({
               contactOptions={formContactOptions}
               filters={initialFilters}
               filterCompanyOptions={companyOptions}
+              offeringOptions={offeringOptions}
               onPushFilters={pushFilters}
               sort={sort}
               onPushSort={pushSort}
@@ -934,6 +955,7 @@ export function DealsView({
         currentRole={currentRole}
         customFieldDefs={customFieldDefs}
         unitPricingEnabled={unitPricingEnabled}
+        offeringOptions={offeringOptions}
         onSubmit={handleEditSubmit}
         onDelete={handleDeleteFromDrawer}
         pending={editPending}
@@ -994,6 +1016,7 @@ const COLUMN_STORAGE_KEY = 'deals.hiddenColumns';
 const TABLE_COLUMNS = [
   { key: 'risk', label: 'Risk' },
   { key: 'stage', label: 'Stage' },
+  { key: 'offering', label: 'Offering' },
   { key: 'amount', label: 'Amount' },
   { key: 'company', label: 'Company' },
   { key: 'contact', label: 'Contact' },
@@ -1413,6 +1436,154 @@ function CompanyFilterBody({
   );
 }
 
+/**
+ * The deals table's Offering cell: the PRIMARY tag as a category-coloured
+ * chip, with a "+N" when the deal carries more.
+ *
+ * One chip and not all of them — a bundle deal would otherwise blow the row
+ * height out and push every other column off screen. The count is what stops
+ * that being a lie: "SafeOps360 +2" says plainly that the primary is a label,
+ * not the whole answer, and the funnel report is where all three are counted.
+ *
+ * An untagged deal renders a dashed "Uncategorized" chip rather than an em
+ * dash. Every other empty cell in this table means "nobody filled this in";
+ * this one means "this deal is missing from every per-offering funnel", which
+ * is worth a shape the eye catches — and it's clickable straight into the
+ * filter that lists all of them.
+ */
+function OfferingCell({ tags }: { tags: DealOfferingTag[] }) {
+  const primary = primaryOfferingOf(tags);
+  if (!primary) {
+    return (
+      <span
+        className={cn(
+          'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px]',
+          UNCATEGORIZED_CHIP,
+        )}
+        title="No offering tagged — this deal is missing from every per-offering funnel"
+      >
+        {UNCATEGORIZED_LABEL}
+      </span>
+    );
+  }
+  const extra = tags.length - 1;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={cn(
+          'inline-flex max-w-[11rem] items-center truncate rounded-full border px-2 py-0.5 text-[11px]',
+          OFFERING_CATEGORY_CHIP[primary.category],
+        )}
+        title={primary.name}
+      >
+        {primary.name}
+      </span>
+      {extra > 0 ? (
+        <span
+          className="shrink-0 text-[10px] font-medium text-slate-400"
+          title={`Also tagged: ${tags
+            .filter((t) => !t.isPrimary)
+            .map((t) => t.name)
+            .join(', ')}`}
+        >
+          +{extra}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * The Offering column's header filter. Two controls that are deliberately
+ * mutually exclusive:
+ *
+ *   - the checkbox list matches deals tagged with ANY of the picked
+ *     offerings, on ALL their tags (a bundle shows up under either half);
+ *   - "Uncategorized only" matches deals with no tags at all — the legacy
+ *     backlog, and the ONLY mechanism this feature ships for working through
+ *     it. There is no bulk-tag action by design: a guessed tag is worse than
+ *     an absent one, so somebody opens each deal and says what it sells.
+ *
+ * Picking either one clears the other, because their intersection is always
+ * empty and a UI that lets you ask for it is a UI that returns a blank list
+ * and looks broken.
+ */
+function OfferingFilterBody({
+  filters,
+  options,
+  onPush,
+}: {
+  filters: DealFilters;
+  options: OfferingOption[];
+  onPush: (f: DealFilters) => void;
+}) {
+  const [q, setQ] = useState('');
+  const selected = new Set(filters.offeringIds ?? []);
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onPush({
+      ...filters,
+      offeringIds: next.size ? Array.from(next) : undefined,
+      uncategorized: false,
+    });
+  };
+  const term = q.trim().toLowerCase();
+  const list = options
+    .filter((o) => o.name.toLowerCase().includes(term))
+    .slice(0, 50);
+
+  return (
+    <div className="p-1">
+      <label className="mb-1 flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-50">
+        <input
+          type="checkbox"
+          checked={Boolean(filters.uncategorized)}
+          onChange={() =>
+            onPush({
+              ...filters,
+              uncategorized: !filters.uncategorized,
+              offeringIds: undefined,
+            })
+          }
+          className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+        />
+        <span className="font-medium">Uncategorized only</span>
+      </label>
+      <div className="border-t border-slate-100 pt-1 text-[10px] uppercase tracking-wide text-slate-400">
+        Filter by offering
+      </div>
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search…"
+        className="mb-1 w-full rounded border border-slate-200 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+      />
+      <ul className="max-h-48 overflow-y-auto">
+        {list.length === 0 ? (
+          <li className="px-2 py-1.5 text-[11px] text-slate-400">No matches</li>
+        ) : (
+          list.map((o) => (
+            <li key={o.id}>
+              <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={selected.has(o.id)}
+                  onChange={() => toggle(o.id)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="truncate">{o.name}</span>
+              </label>
+            </li>
+          ))
+        )}
+      </ul>
+    </div>
+  );
+}
+
 function DealsTable({
   items,
   canEdit,
@@ -1428,6 +1599,7 @@ function DealsTable({
   onPatchContact,
   filters,
   filterCompanyOptions,
+  offeringOptions,
   onPushFilters,
   sort,
   onPushSort,
@@ -1458,6 +1630,7 @@ function DealsTable({
   onPatchContact: (deal: DealItem, contactId: string) => void;
   filters: DealFilters;
   filterCompanyOptions: CompanyOption[];
+  offeringOptions: OfferingOption[];
   onPushFilters: (next: DealFilters) => void;
   sort: 'recent' | 'risk';
   onPushSort: (next: 'recent' | 'risk') => void;
@@ -1558,6 +1731,7 @@ function DealsTable({
                   ) : (
                     <StageBadge stage={d.stage} />
                   )}
+                  <OfferingCell tags={d.offerings} />
                   <OwnerCell
                     ownerId={d.ownerId}
                     teammate={d.ownerId ? teammateById.get(d.ownerId) : undefined}
@@ -1634,6 +1808,27 @@ function DealsTable({
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={<StageFilterBody filters={filters} onPush={onPushFilters} />}
+                  />
+                </th>
+              ) : null}
+              {vis('offering') ? (
+                <th
+                  scope="col"
+                  className="hidden px-3 py-1.5 text-left font-semibold lg:table-cell"
+                >
+                  <HeaderMenu
+                    colKey="offering"
+                    label="Offering"
+                    hidden={hiddenCols}
+                    onHide={toggleColumn}
+                    onShow={toggleColumn}
+                    filter={
+                      <OfferingFilterBody
+                        filters={filters}
+                        options={offeringOptions}
+                        onPush={onPushFilters}
+                      />
+                    }
                   />
                 </th>
               ) : null}
@@ -1783,6 +1978,11 @@ function DealsTable({
                     ) : (
                       <StageBadge stage={d.stage} />
                     )}
+                  </td>
+                  ) : null}
+                  {vis('offering') ? (
+                  <td className="hidden px-3 py-2 lg:table-cell">
+                    <OfferingCell tags={d.offerings} />
                   </td>
                   ) : null}
                   {vis('amount') ? (
@@ -2288,6 +2488,7 @@ function buildDealFilterChips(
     companyOptions: CompanyOption[];
     teammates: Teammate[];
     currentUserId: string;
+    offeringOptions: OfferingOption[];
   },
 ): FilterChip[] {
   const chips: FilterChip[] = [];
@@ -2387,6 +2588,32 @@ function buildDealFilterChips(
       keys: ['risk'],
       label:
         filters.riskBand === 'high' ? 'Risk: High' : 'Risk: Elevated and above',
+    });
+  }
+  if (filters.offeringIds && filters.offeringIds.length > 0) {
+    // Resolve ids to names against the catalog rather than showing raw uuids.
+    // An id the catalog no longer has (a hand-edited URL, or a link shared
+    // from a workspace with a different catalog) falls back to a count, so
+    // the chip is still removable instead of rendering a broken label.
+    const byId = new Map(ctx.offeringOptions.map((o) => [o.id, o.name]));
+    const names = filters.offeringIds
+      .map((id) => byId.get(id))
+      .filter((n): n is string => Boolean(n));
+    chips.push({
+      id: 'offerings',
+      keys: ['offering'],
+      label: `Offering: ${
+        names.length > 0
+          ? names.join(', ')
+          : `${filters.offeringIds.length} selected`
+      }`,
+    });
+  }
+  if (filters.uncategorized) {
+    chips.push({
+      id: 'uncategorized',
+      keys: ['uncategorized'],
+      label: `${UNCATEGORIZED_LABEL} only`,
     });
   }
 

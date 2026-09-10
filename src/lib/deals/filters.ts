@@ -22,6 +22,8 @@ import { type DealStage, DEAL_STAGES } from './schema';
  *   missing=next_step          — deals that OWE a completeness field at
  *                                their current stage and don't have it
  *   risk=high|elevated         — Phase 1 deal risk band and above
+ *   offering=<uuid1>,<uuid2>   — deals tagged with ANY of these offerings
+ *   uncategorized=1            — deals carrying NO offering tag at all
  *
  * Within a filter group the SQL is OR (e.g. `stage IN (...)`); between
  * groups it's AND. Multi-value keys are intentionally comma-joined
@@ -76,6 +78,29 @@ export type DealFilters = {
    * (the job has not run, or it is won/lost/hold) matches neither.
    */
   riskBand?: 'elevated' | 'high';
+  /**
+   * Deals tagged with ANY of these offerings (0066). OR within the group,
+   * like every other multi-id filter here — a rep looking at "SafeOps360 or
+   * AnytimeHire" wants both books, not their intersection, which for
+   * offerings would be the near-empty set of bundles carrying exactly both.
+   *
+   * Matches on ALL tags, not just the primary one: a deal that bundles a
+   * product with a service belongs in either filter. That is the same
+   * reading the funnel report uses, so a filtered list and a filtered funnel
+   * can't show different populations.
+   */
+  offeringIds?: string[];
+  /**
+   * Deals with no offering tag at all — the legacy backlog.
+   *
+   * This is the ONLY backfill mechanism the feature ships: no bulk action, no
+   * migration, no forced prompt. The team works the list down at its own pace
+   * and this filter is how they find what is left. It is deliberately
+   * MUTUALLY EXCLUSIVE in meaning with `offeringIds` (nothing can be both
+   * untagged and tagged with X); when both arrive the query ANDs them and
+   * correctly returns nothing, rather than silently dropping one.
+   */
+  uncategorized?: boolean;
 };
 
 /** Field keys the `missing=` filter accepts — the completeness spec's own. */
@@ -105,6 +130,8 @@ const URL_FILTER_KEYS = [
   'slipped',
   'missing',
   'risk',
+  'offering',
+  'uncategorized',
 ] as const;
 
 /**
@@ -155,6 +182,7 @@ export function parseDealFilters(
   // single-value alias kept so already-bookmarked URLs still parse.
   const companyIds = idList(raw.companyIds ?? raw.companyId);
   const ownerIds = idList(raw.owner);
+  const offeringIds = idList(raw.offering);
 
   return {
     stages: stages.length > 0 ? stages : undefined,
@@ -190,6 +218,8 @@ export function parseDealFilters(
         : undefined,
     riskBand:
       raw.risk === 'high' || raw.risk === 'elevated' ? raw.risk : undefined,
+    offeringIds: offeringIds.length > 0 ? offeringIds : undefined,
+    uncategorized: flag(raw.uncategorized),
   };
 }
 
@@ -233,6 +263,10 @@ export function dealFiltersToSearchParams(
   if (filters.slipped) out.set('slipped', '1');
   if (filters.missingField) out.set('missing', filters.missingField);
   if (filters.riskBand) out.set('risk', filters.riskBand);
+  if (filters.offeringIds && filters.offeringIds.length > 0) {
+    out.set('offering', filters.offeringIds.join(','));
+  }
+  if (filters.uncategorized) out.set('uncategorized', '1');
   return out;
 }
 
@@ -286,6 +320,8 @@ export function hasActiveDealFilters(filters: DealFilters): boolean {
       filters.revisitDue ||
       filters.slipped ||
       filters.missingField ||
-      filters.riskBand,
+      filters.riskBand ||
+      (filters.offeringIds && filters.offeringIds.length > 0) ||
+      filters.uncategorized,
   );
 }
