@@ -14,6 +14,7 @@ export * from './custom-fields';
 export * from './chart-views';
 export * from './dashboard-widgets';
 export * from './companies';
+export * from './company-rollups';
 export * from './contacts';
 export * from './deals';
 export * from './deal-contacts';

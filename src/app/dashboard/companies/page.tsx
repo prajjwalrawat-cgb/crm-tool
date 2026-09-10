@@ -1,8 +1,12 @@
 import { withTenantSession } from '@/lib/auth-guard';
-import { parseCompanyFilters } from '@/lib/companies/filters';
+import {
+  parseCompanyFilters,
+  parseCompanySort,
+} from '@/lib/companies/filters';
 import { listCompanies } from '@/lib/companies/queries';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { requireMembership } from '@/lib/membership';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
 import { personaOf } from '@/lib/personas';
 import { listTeammates } from '@/lib/teammates/queries';
@@ -31,23 +35,27 @@ export default async function CompaniesPage({
       typeof sp.size === 'string' ? sp.size : undefined,
     );
     const filters = parseCompanyFilters(sp);
+    const { sort, dir } = parseCompanySort(sp);
 
     const membership = await requireMembership();
     const persona = personaOf(membership.role);
     const restrictToOwnerOrUnassigned =
       persona === 'sales' ? userId : undefined;
 
-    const [page, teammates, customFieldDefs] = await Promise.all([
+    const [page, teammates, customFieldDefs, settings] = await Promise.all([
       listCompanies(tenant.id, {
         search,
         cursor,
         size,
         filters,
+        sort,
+        dir,
         currentUserId: userId,
         restrictToOwnerOrUnassigned,
       }),
       listTeammates(tenant.id, tenant.name),
       listCustomFieldDefs(tenant.id, 'company'),
+      getOrgSettings(tenant.id),
     ]);
 
     return (
@@ -68,6 +76,18 @@ export default async function CompaniesPage({
           nextCursor={page.nextCursor}
           pageSize={page.size}
           customFieldDefs={customFieldDefs}
+          sort={sort}
+          dir={dir}
+          // Money in the rollup columns is a sum of minor units across
+          // whatever currencies the account's deals carry, rendered in the
+          // tenant's currency + locale. Passing the context down (rather
+          // than formatting here) keeps the numbers formatted identically
+          // on the server pass and after hydration.
+          currencyContext={{
+            defaultCurrency: settings.defaultCurrency,
+            currencyLocale: settings.currencyLocale,
+            compactNumbers: settings.compactNumbers,
+          }}
         />
       </main>
     );

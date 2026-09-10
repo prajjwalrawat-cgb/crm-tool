@@ -1,7 +1,16 @@
 ﻿'use client';
 
-import { ExternalLink, Loader2, Pencil, Search, Trash2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsUpDown,
+  ExternalLink,
+  Loader2,
+  Pencil,
+  Search,
+  Trash2,
+} from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   useEffect,
   useOptimistic,
@@ -12,7 +21,26 @@ import {
 import { toast } from 'sonner';
 
 import type { Company, MembershipRole } from '@/db/schema';
+import {
+  type CompanySort,
+  COMPANY_SORT_URL_KEYS,
+  type SortDir,
+} from '@/lib/companies/filters';
+import {
+  type CompanyRollupFields,
+  EMPTY_COMPANY_ROLLUP,
+  formatCount,
+  hasOpenPipeline,
+  hasWonValue,
+} from '@/lib/companies/rollup';
+import {
+  formatCompactTenantCurrency,
+  formatTenantCurrency,
+  type TenantCurrencyContext,
+} from '@/lib/currency/format';
 import type { CustomFieldDef } from '@/lib/custom-fields/types';
+import { RelativeTime } from '@/lib/dates/relative-time';
+import { DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/schema';
 import type { PageSize } from '@/lib/pagination/page-size';
 import { canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
@@ -36,7 +64,27 @@ import { CreateCompanyForm } from './create-company-form';
 import { EditCompanyDrawer } from './edit-company-drawer';
 import { EmptyState } from './empty-state';
 
-type CompanyItem = Company & { __pending?: boolean };
+/**
+ * A row carries its rollup with it. `rollup` is never optional: a row
+ * without one would have to be rendered as "unknown" in six cells, and
+ * the only rows that legitimately have no rollup yet are optimistic ones,
+ * which get `EMPTY_COMPANY_ROLLUP` — a company created a moment ago
+ * genuinely has no deals, no contacts and no history.
+ */
+type CompanyItem = Company & {
+  rollup: CompanyRollupFields;
+  __pending?: boolean;
+};
+
+const STAGE_BADGE_STYLES: Record<DealStage, string> = {
+  lead: 'bg-slate-100 text-slate-600',
+  qualified: 'bg-blue-100 text-blue-700',
+  proposal: 'bg-indigo-100 text-indigo-700',
+  negotiation: 'bg-amber-100 text-amber-800',
+  hold: 'bg-orange-100 text-orange-700',
+  won: 'bg-emerald-100 text-emerald-700',
+  lost: 'bg-rose-100 text-rose-700',
+};
 
 type OptimisticOp =
   | { type: 'create'; draft: CompanyItem }
@@ -59,8 +107,11 @@ export function CompaniesView({
   nextCursor,
   pageSize,
   customFieldDefs,
+  sort,
+  dir,
+  currencyContext,
 }: {
-  initialItems: Company[];
+  initialItems: CompanyItem[];
   initialSearch: string;
   teammates: Teammate[];
   currentUserId: string;
@@ -68,10 +119,46 @@ export function CompaniesView({
   nextCursor: string | null;
   pageSize: PageSize;
   customFieldDefs: CustomFieldDef[];
+  sort: CompanySort;
+  dir: SortDir;
+  currencyContext: TenantCurrencyContext;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const canEdit = canManageCompanies(currentRole);
   const canDelete = canDeleteCompanies(currentRole);
+
+  /**
+   * Sorting is a URL mode, not component state — same rule the filter
+   * chips follow, and the same one the deals list settled on. A reload or
+   * a shared link reproduces the order, and paging keeps working because
+   * the server hands back a cursor for the mode it actually ordered by.
+   *
+   * Clicking the active column flips direction; clicking a different one
+   * starts it at that column's natural direction (descending — biggest
+   * pipeline, most recent activity, most deals first). Clicking the
+   * active column while already ascending returns to the default order
+   * rather than cycling forever through two states you cannot leave.
+   */
+  const pushSort = (next: CompanySort) => {
+    const merged = new URLSearchParams(searchParams.toString());
+    merged.delete('cursor');
+    if (sort === next) {
+      if (dir === 'desc') {
+        merged.set('sort', next);
+        merged.set('dir', 'asc');
+      } else {
+        for (const k of COMPANY_SORT_URL_KEYS) merged.delete(k);
+      }
+    } else {
+      merged.set('sort', next);
+      merged.delete('dir');
+    }
+    const qs = merged.toString();
+    router.replace(`/dashboard/companies${qs ? `?${qs}` : ''}`, {
+      scroll: false,
+    });
+  };
 
   const [search, setSearch] = useState(initialSearch);
   const [searchPending, startSearchTransition] = useTransition();
@@ -103,13 +190,25 @@ export function CompaniesView({
   const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string[]>>({});
   const [createResetKey, setCreateResetKey] = useState(0);
 
-  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [editingCompany, setEditingCompany] = useState<CompanyItem | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string[]>>({});
 
   const [actionError, setActionError] = useState<string | null>(null);
 
   const isFirstSearchRender = useRef(true);
+
+  /**
+   * Read through a ref, not a dependency. The debounced effect below must
+   * fire when the SEARCH TEXT changes and at no other time: if the live
+   * `searchParams` were a dependency, clicking "Next" would change the
+   * URL, re-run this effect, and the effect would strip the cursor it
+   * just gained — paging would snap back to page one.
+   */
+  const searchParamsRef = useRef(searchParams);
+  useEffect(() => {
+    searchParamsRef.current = searchParams;
+  }, [searchParams]);
 
   useEffect(() => {
     if (isFirstSearchRender.current) {
@@ -118,12 +217,17 @@ export function CompaniesView({
     }
     const handle = setTimeout(() => {
       startSearchTransition(() => {
-        const params = new URLSearchParams();
+        // Carry the rest of the URL through. Typing in the search box
+        // used to build a fresh query string, which silently dropped the
+        // active filter chips and (once sorting existed) the sort mode —
+        // the list would reorder itself under the user mid-keystroke.
+        const params = new URLSearchParams(searchParamsRef.current.toString());
         const trimmed = search.trim();
         if (trimmed) params.set('q', trimmed);
-        // Preserve page size, but reset cursor — a cursor anchored to
-        // the previous result set is meaningless after the filter
-        // changes.
+        else params.delete('q');
+        // Reset the cursor — a cursor anchored to the previous result set
+        // is meaningless once the search term changes.
+        params.delete('cursor');
         if (pageSize !== 50) params.set('size', String(pageSize));
         const qs = params.toString();
         router.replace(`/dashboard/companies${qs ? `?${qs}` : ''}`);
@@ -156,6 +260,11 @@ export function CompaniesView({
       normalizedName: null,
       mergedIntoId: null,
       dedupOverride: false,
+      // A company that does not exist yet has no deals, no contacts and no
+      // history. Zeroes here are the truth, not a placeholder — and they
+      // render as em dashes, so the optimistic row looks the way the real
+      // row will a moment later.
+      rollup: EMPTY_COMPANY_ROLLUP,
       __pending: true,
     };
 
@@ -354,15 +463,28 @@ export function CompaniesView({
           ) : null}
         </div>
 
+        {/*
+          Every chip below now filters on a column the table renders, so
+          the result set is checkable from the screen: "Has active deals"
+          leaves no row without a Stage badge, and Recently active / Stale
+          partition the same Last Activity value at the same threshold.
+          The titles say which column, because a chip whose rule you have
+          to guess is a chip you stop trusting.
+
+          `alsoClear` hands "Clear all" the sort keys too — a cleared
+          filter set that stayed sorted by pipeline is not the unfiltered
+          list the button promises.
+        */}
         <ToggleFilterBar
           basePath="/dashboard/companies"
+          alsoClear={[...COMPANY_SORT_URL_KEYS]}
           toggles={[
             { key: 'mine', label: 'My companies', title: 'Companies you own' },
             { key: 'unassigned', label: 'Unassigned', title: 'No owner assigned' },
-            { key: 'hasDeals', label: 'Has active deals', title: 'Companies with at least one open deal' },
-            { key: 'recentActivityDays', value: '14', label: 'Recently active', title: 'Activity in the last 14 days' },
+            { key: 'hasDeals', label: 'Has active deals', title: 'Deals column counts at least one open deal' },
+            { key: 'recentActivityDays', value: '14', label: 'Recently active', title: 'Last Activity within 14 days' },
             { key: 'createdWithinDays', value: '30', label: 'New (30d)', title: 'Created in the last 30 days' },
-            { key: 'stale', label: 'Stale', title: 'No activity for 30+ days' },
+            { key: 'stale', label: 'Stale', title: 'Last Activity older than 30 days (or never)' },
           ]}
         />
 
@@ -408,6 +530,10 @@ export function CompaniesView({
               onDelete={handleDelete}
               onPatchField={commitField}
               deletePending={deletePending}
+              sort={sort}
+              dir={dir}
+              onSort={pushSort}
+              currencyContext={currencyContext}
             />
             <PaginationControls
               basePath="/dashboard/companies"
@@ -449,6 +575,10 @@ function CompaniesTable({
   onDelete,
   onPatchField,
   deletePending,
+  sort,
+  dir,
+  onSort,
+  currencyContext,
 }: {
   items: CompanyItem[];
   canEdit: boolean;
@@ -458,19 +588,43 @@ function CompaniesTable({
   allSelected: boolean;
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: () => void;
-  onEdit: (company: Company) => void;
+  onEdit: (company: CompanyItem) => void;
   onDelete: (company: Company) => void;
   onPatchField: (company: CompanyItem, field: CompanyField, raw: string) => void;
   deletePending: boolean;
+  sort: CompanySort;
+  dir: SortDir;
+  onSort: (next: CompanySort) => void;
+  currencyContext: TenantCurrencyContext;
 }) {
   const showActions = canEdit || canDelete;
+  /**
+   * `aria-sort` belongs on the `th`, not on the button inside it, and only
+   * ONE column may carry it — that is how a screen reader announces which
+   * column the table is currently ordered by.
+   */
+  const ariaSortFor = (key: CompanySort) =>
+    sort === key ? (dir === 'asc' ? 'ascending' : 'descending') : undefined;
 
   return (
-    <div className="overflow-x-auto">
+    <HorizontalScroller>
       <table className="min-w-full divide-y divide-slate-100 text-[13px]">
-          <thead className="sticky top-0 z-10 bg-slate-50/95 text-[10px] uppercase tracking-[0.06em] text-slate-500 backdrop-blur">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] uppercase tracking-[0.06em] text-slate-500">
             <tr>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              {/*
+                The Name column is frozen. Eleven columns do not fit on one
+                screen, and a horizontally scrolled table whose identity
+                column has scrolled away is a grid of numbers with no
+                subjects — you can read "₹52,00,000 open" and have no way to
+                learn whose. z-20 puts it above the sticky header row it
+                crosses; the shadow (not a border) marks the seam, because
+                a border on a sticky cell disappears under
+                `border-collapse: collapse`.
+              */}
+              <th
+                scope="col"
+                className={cn(STICKY_NAME_CELL, 'z-20 bg-slate-50 px-3 py-2 text-left font-medium')}
+              >
                 <span className="flex items-center gap-2">
                   {selectable ? (
                     <input
@@ -490,17 +644,103 @@ function CompaniesTable({
               >
                 Domain
               </th>
+              {/*
+                Industry moved from `md` to `xl`. It is a static label; the
+                six rollup columns beside it are the reason someone opened
+                this page. When the viewport can only hold some of them,
+                the ones that change are worth more than the one that does
+                not.
+              */}
               <th
                 scope="col"
-                className="hidden px-3 py-2 text-left font-medium md:table-cell"
+                className="hidden px-3 py-2 text-left font-medium xl:table-cell"
               >
                 Industry
               </th>
               <th
                 scope="col"
-                className="hidden px-3 py-2 text-right font-medium sm:table-cell"
+                aria-sort={ariaSortFor('deals')}
+                className="hidden px-3 py-2 text-right font-medium lg:table-cell"
               >
-                Created
+                <SortButton
+                  label="Deals"
+                  active={sort === 'deals'}
+                  dir={dir}
+                  onClick={() => onSort('deals')}
+                />
+              </th>
+              {/*
+                Open Pipeline and Won share one column because eleven
+                columns do not fit and these two are read together: "what
+                is live here" over "what this account has ever been worth".
+                They stay two INDEPENDENT sort keys — hence two buttons,
+                stacked to mirror the two lines in the cell below.
+              */}
+              <th
+                scope="col"
+                aria-sort={ariaSortFor(
+                  sort === 'won' ? 'won' : 'pipeline',
+                )}
+                className="px-3 py-2 text-right font-medium"
+              >
+                <div className="flex flex-col items-end gap-0.5">
+                  <span>Value</span>
+                  <span className="flex items-center gap-1 normal-case tracking-normal">
+                    <SortButton
+                      label="open"
+                      active={sort === 'pipeline'}
+                      dir={dir}
+                      onClick={() => onSort('pipeline')}
+                      title="Sort by open pipeline"
+                    />
+                    <span aria-hidden className="text-slate-300">
+                      ·
+                    </span>
+                    <SortButton
+                      label="won"
+                      active={sort === 'won'}
+                      dir={dir}
+                      onClick={() => onSort('won')}
+                      title="Sort by won lifetime value"
+                    />
+                  </span>
+                </div>
+              </th>
+              <th
+                scope="col"
+                className="hidden px-3 py-2 text-left font-medium md:table-cell"
+              >
+                Stage
+              </th>
+              <th
+                scope="col"
+                className="hidden px-3 py-2 text-right font-medium xl:table-cell"
+              >
+                Contacts
+              </th>
+              <th
+                scope="col"
+                aria-sort={ariaSortFor('activity')}
+                className="hidden px-3 py-2 text-right font-medium md:table-cell"
+              >
+                <SortButton
+                  label="Last activity"
+                  active={sort === 'activity'}
+                  dir={dir}
+                  onClick={() => onSort('activity')}
+                />
+              </th>
+              <th
+                scope="col"
+                aria-sort={ariaSortFor('recent')}
+                className="hidden px-3 py-2 text-right font-medium lg:table-cell"
+              >
+                <SortButton
+                  label="Created"
+                  active={sort === 'recent'}
+                  dir={dir}
+                  onClick={() => onSort('recent')}
+                />
               </th>
               {showActions ? (
                 <th scope="col" className="px-3 py-2 text-right font-medium">
@@ -515,7 +755,7 @@ function CompaniesTable({
                 key={c.id}
                 className={cn('transition-opacity', c.__pending && 'opacity-60')}
               >
-                <td className="px-3 py-2 font-medium">
+                <td className={cn(STICKY_NAME_CELL, 'z-10 bg-white px-3 py-2 font-medium')}>
                   <div className="flex items-center gap-2">
                     {selectable && !c.id.startsWith('optimistic-') ? (
                       <input
@@ -562,7 +802,7 @@ function CompaniesTable({
                     onCommit={(v) => onPatchField(c, 'domain', v)}
                   />
                 </td>
-                <td className="hidden px-3 py-2 text-slate-600 md:table-cell">
+                <td className="hidden px-3 py-2 text-slate-600 xl:table-cell">
                   <InlineEditCell
                     ariaLabel="industry"
                     placeholder="—"
@@ -571,7 +811,50 @@ function CompaniesTable({
                     onCommit={(v) => onPatchField(c, 'industry', v)}
                   />
                 </td>
-                <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 sm:table-cell">
+                {/*
+                  Deals is the TOTAL, and the tooltip splits it. Showing
+                  only the open count would make the column disagree with
+                  the account's own Deals panel, which lists won and lost
+                  deals too; showing only the total would hide why an
+                  account with three deals shows no Stage badge.
+                */}
+                <td
+                  className="hidden whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700 lg:table-cell"
+                  title={dealsTitle(c.rollup)}
+                >
+                  {formatCount(c.rollup.dealCount)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-right">
+                  <ValueCell rollup={c.rollup} ctx={currencyContext} />
+                </td>
+                <td className="hidden px-3 py-2 md:table-cell">
+                  {c.rollup.topStage ? (
+                    <span
+                      className={cn(
+                        'inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium',
+                        STAGE_BADGE_STYLES[c.rollup.topStage],
+                      )}
+                      title="Stage of the most recently updated open deal"
+                    >
+                      {DEAL_STAGE_LABELS[c.rollup.topStage]}
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">—</span>
+                  )}
+                </td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700 xl:table-cell">
+                  {formatCount(c.rollup.contactCount)}
+                </td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 md:table-cell">
+                  {c.rollup.lastActivityAt ? (
+                    <RelativeTime date={c.rollup.lastActivityAt} />
+                  ) : (
+                    <span className="text-slate-300" title="Never touched">
+                      —
+                    </span>
+                  )}
+                </td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-right text-xs text-slate-500 lg:table-cell">
                   {dateFormatter.format(new Date(c.createdAt))}
                 </td>
                 {showActions ? (
@@ -589,7 +872,239 @@ function CompaniesTable({
             ))}
         </tbody>
       </table>
+    </HorizontalScroller>
+  );
+}
+
+/**
+ * Shared by the Name header cell and every Name body cell so the two
+ * cannot drift apart and leave the column half-frozen.
+ *
+ * The right edge is a `box-shadow`, not a `border-right`: under
+ * `border-collapse: collapse` a sticky cell's own borders are painted with
+ * the (non-sticky) table grid and slide away underneath it. A shadow is
+ * painted with the cell.
+ */
+const STICKY_NAME_CELL =
+  'sticky left-0 shadow-[1px_0_0_0_rgb(226_232_240)]';
+
+/**
+ * A horizontally scrollable region with a scrollbar at the TOP as well as
+ * the bottom.
+ *
+ * The problem it fixes: a wide table's only scrollbar sits under its last
+ * row, so reading the right-hand columns of row 3 of 50 means scrolling
+ * all the way down to find the bar, dragging it, and scrolling back up.
+ * The browser gives you no way to move a scrollbar, so the top bar is a
+ * second empty scroller of the same width with its scroll position bound
+ * to the real one.
+ *
+ * It renders only when the content actually overflows — a permanent
+ * scrollbar above a table that fits is furniture, not a control.
+ */
+function HorizontalScroller({ children }: { children: React.ReactNode }) {
+  const topRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [contentWidth, setContentWidth] = useState(0);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const measure = () => {
+      setContentWidth(body.scrollWidth);
+      // The 1px slack absorbs sub-pixel layout rounding, which otherwise
+      // flickers the bar in and out at the exact fitting width.
+      setOverflowing(body.scrollWidth > body.clientWidth + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    // The table itself, not just the viewport: a column that grows when a
+    // longer company name loads changes scrollWidth without resizing the
+    // scroll container.
+    for (const child of Array.from(body.children)) observer.observe(child);
+    return () => observer.disconnect();
+  }, [children]);
+
+  /**
+   * Mirror the scroll position both ways. The guard is what stops the two
+   * `onScroll` handlers from driving each other forever — one write per
+   * gesture, then the flag clears on the next frame.
+   *
+   * The moving strip is read off `event.currentTarget`, never off its own
+   * ref: only the strip being written to has to be looked up, which keeps
+   * these honest event handlers rather than functions that reach for a ref
+   * and could be called from anywhere.
+   */
+  const syncing = useRef(false);
+
+  function syncFromTop(event: React.UIEvent<HTMLDivElement>) {
+    if (syncing.current) return;
+    const body = bodyRef.current;
+    if (!body) return;
+    syncing.current = true;
+    body.scrollLeft = event.currentTarget.scrollLeft;
+    requestAnimationFrame(() => {
+      syncing.current = false;
+    });
+  }
+
+  function syncFromBody(event: React.UIEvent<HTMLDivElement>) {
+    if (syncing.current) return;
+    const top = topRef.current;
+    if (!top) return;
+    syncing.current = true;
+    top.scrollLeft = event.currentTarget.scrollLeft;
+    requestAnimationFrame(() => {
+      syncing.current = false;
+    });
+  }
+
+  return (
+    <div>
+      <div
+        ref={topRef}
+        onScroll={syncFromTop}
+        aria-hidden
+        className={cn(
+          'overflow-x-auto overflow-y-hidden',
+          overflowing ? 'block' : 'hidden',
+        )}
+      >
+        {/* Zero-height content of the table's width: enough for the
+            browser to give the strip a scrollbar, nothing to look at. */}
+        <div style={{ width: contentWidth, height: 1 }} />
+      </div>
+      <div ref={bodyRef} onScroll={syncFromBody} className="overflow-x-auto">
+        {children}
+      </div>
     </div>
+  );
+}
+
+/**
+ * A column header that sorts. Always a `<button>` inside the `<th>`, never
+ * a click handler on the `th` itself: the header has to be reachable and
+ * operable from the keyboard, and only a real button gives that for free.
+ *
+ * The icon states are three, not two, and the third is the point — an
+ * inactive column shows a neutral double chevron so it reads as "you can
+ * sort by this", where a blank header reads as "this column is decoration".
+ */
+function SortButton({
+  label,
+  active,
+  dir,
+  onClick,
+  title,
+}: {
+  label: string;
+  active: boolean;
+  dir: SortDir;
+  onClick: () => void;
+  title?: string;
+}) {
+  const Icon = !active ? ChevronsUpDown : dir === 'asc' ? ArrowUp : ArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={
+        title ??
+        (active
+          ? `Sorted ${dir === 'asc' ? 'ascending' : 'descending'} — click to ${dir === 'asc' ? 'reset' : 'reverse'}`
+          : `Sort by ${label.toLowerCase()}`)
+      }
+      className={cn(
+        'inline-flex items-center gap-1 rounded px-1 py-0.5 transition hover:bg-slate-200/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40',
+        active ? 'text-indigo-700' : 'text-slate-500',
+      )}
+    >
+      {label}
+      <Icon
+        className={cn('h-3 w-3', active ? 'opacity-100' : 'opacity-40')}
+        aria-hidden
+      />
+    </button>
+  );
+}
+
+/** Tooltip for the Deals cell: the total, and how it splits. */
+function dealsTitle(r: CompanyRollupFields): string {
+  if (r.dealCount === 0) return 'No deals';
+  const closedLost = r.dealCount - r.openDealCount - r.wonDealCount;
+  const parts = [`${r.openDealCount} open`, `${r.wonDealCount} won`];
+  if (closedLost > 0) parts.push(`${closedLost} lost`);
+  return `${r.dealCount} deal${r.dealCount === 1 ? '' : 's'} — ${parts.join(', ')}`;
+}
+
+/**
+ * Open pipeline over won lifetime value, in one column.
+ *
+ * The distinction the two lines exist to draw:
+ *
+ *   ₹4.2L open   an account being worked right now
+ *   ₹12L won     …that has also closed business before
+ *
+ *   — open       nothing live
+ *   ₹12L won     …but a real customer. Not a dead account.
+ *
+ *   — open
+ *   — won        a dead account, and it should look like one.
+ *
+ * A zero would collapse the second and third cases into the same
+ * grey row, which is precisely the row a rep needs to tell apart.
+ *
+ * `₹0 open` is a fourth, deliberate state: open deals exist and none of
+ * them carries an amount yet. That is a data-entry gap, not an empty
+ * account, and it is the only case where a zero is printed.
+ *
+ * Compact or not follows the workspace's own number preference; the
+ * tooltip always carries the exact figure, because a column that only
+ * ever says "₹12L" cannot be reconciled against anything.
+ */
+function ValueCell({
+  rollup,
+  ctx,
+}: {
+  rollup: CompanyRollupFields;
+  ctx: TenantCurrencyContext;
+}) {
+  const open = hasOpenPipeline(rollup);
+  const won = hasWonValue(rollup);
+  const exact = [
+    open
+      ? `${formatTenantCurrency(rollup.openPipelineValue, ctx)} open pipeline`
+      : 'No open deals',
+    won
+      ? `${formatTenantCurrency(rollup.wonLifetimeValue, ctx)} won lifetime`
+      : 'Nothing won',
+  ].join(' · ');
+
+  return (
+    <span className="inline-flex flex-col items-end leading-tight" title={exact}>
+      <span className="tabular-nums text-slate-800">
+        {open ? (
+          formatCompactTenantCurrency(rollup.openPipelineValue, ctx)
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+        <span className="ml-1 text-[10px] font-normal uppercase tracking-wide text-slate-400">
+          open
+        </span>
+      </span>
+      <span className="text-[11px] tabular-nums text-slate-500">
+        {won ? (
+          formatCompactTenantCurrency(rollup.wonLifetimeValue, ctx)
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+        <span className="ml-1 text-[10px] uppercase tracking-wide text-slate-400">
+          won
+        </span>
+      </span>
+    </span>
   );
 }
 
