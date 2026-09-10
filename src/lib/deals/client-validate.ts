@@ -7,6 +7,12 @@
  * the server does (`name`, `marginPct`, …); empty object = OK to submit.
  */
 import {
+  emptyOfferingMessage,
+  OFFERING_PRIMARY_REQUIRED_MESSAGE,
+  type OfferingRule,
+  validateOfferingSelection,
+} from '@/lib/offerings/types';
+import {
   MARGIN_REQUIRED_MESSAGE,
   marginRequiredForStage,
 } from '@/lib/deals/validation';
@@ -33,8 +39,43 @@ export type PreviousDealState = {
 export function validateDealForm(
   fd: FormData,
   previous?: PreviousDealState | null,
+  options: { offeringRule?: OfferingRule } = {},
 ): Record<string, string[]> {
   const errs: Record<string, string[]> = {};
+
+  /**
+   * Offerings (0066). The rule the caller passes encodes the deal's HISTORY,
+   * not which action is running — see `offeringRuleFor`:
+   *
+   *   'required'  a new deal: must carry at least one offering.
+   *   'keep'      an existing deal that already has tags: may be re-tagged,
+   *               may not be emptied.
+   *   undefined   an existing deal with no tags (the legacy backlog): never
+   *               blocked, so an untagged deal stays fully editable.
+   *
+   * The middle case is what makes the first one mean anything. Keying this on
+   * create-vs-update instead let a deal created under the mandatory rule be
+   * reopened and stripped of every tag, landing in the exact state creation
+   * had just refused.
+   */
+  if (options.offeringRule) {
+    const ids = String(fd.get('offeringIds') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const primary = String(fd.get('primaryOfferingId') ?? '').trim() || null;
+    const check = validateOfferingSelection({
+      offeringIds: ids,
+      primaryOfferingId: primary,
+    });
+    if (!check.ok) {
+      errs.offeringIds = [
+        ids.length === 0
+          ? emptyOfferingMessage(options.offeringRule)
+          : OFFERING_PRIMARY_REQUIRED_MESSAGE,
+      ];
+    }
+  }
 
   const name = String(fd.get('name') ?? '').trim();
   if (!name) errs.name = ['Name is required'];

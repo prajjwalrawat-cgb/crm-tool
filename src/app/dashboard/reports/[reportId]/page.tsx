@@ -22,6 +22,11 @@ import type {
   EmailEngagementExtras,
   EmailEngagementRow,
 } from '@/lib/reports/queries/email-engagement';
+import { parseFunnelScope } from '@/lib/reports/funnel-scope';
+import type {
+  FunnelByOfferingExtras,
+  FunnelByOfferingRow,
+} from '@/lib/reports/queries/funnel-by-offering';
 import type { PipelineByStageRow } from '@/lib/reports/queries/pipeline-by-stage';
 import type { RepPerformanceRow } from '@/lib/reports/queries/rep-performance';
 import type {
@@ -45,11 +50,14 @@ import type {
   OwnerScope,
   ReportFilter,
 } from '@/lib/reports/types';
+import { listOfferingOptions } from '@/lib/offerings/queries';
+import type { OfferingOption } from '@/lib/offerings/types';
 import { cn } from '@/lib/utils';
 
 import { CsvDownloadButton } from '../_components/csv-download-button';
 import { DealVelocitySection } from '../_components/deal-velocity-section';
 import { EmailEngagementSection } from '../_components/email-engagement-section';
+import { OfferingFunnelSection } from '../_components/offering-funnel-section';
 import { PipelineByStageChart } from '../_components/pipeline-by-stage-chart';
 import { RepPerformanceSection } from '../_components/rep-performance-section';
 import { ReportFilterBar } from '../_components/report-filter-bar';
@@ -94,18 +102,36 @@ export default async function ReportDetailPage({
       : 'amount';
   const rangePreset: DateRangePreset =
     parseDateRangePreset(sp.range) ??
-    (report.id === 'pipeline-by-stage' || report.id === 'stale-deals'
+    (report.id === 'pipeline-by-stage' ||
+    report.id === 'funnel-by-offering' ||
+    report.id === 'stale-deals'
       ? 'all_time'
       : 'last_90d');
+  // The funnel's own scope. Parsed with the same function the CSV action
+  // uses, so a download can't disagree with the screen it came from.
+  const funnelScope = parseFunnelScope({
+    offering: sp.offering,
+    category: sp.category,
+  });
 
   return await withTenantSession(async ({ tenant, userId }) => {
     const owner: OwnerScope =
       ownerParam === 'mine' ? { type: 'mine' } : { type: 'all' };
     const filter: ReportFilter = { range: rangePreset, owner };
 
-    const [result, settings] = await Promise.all([
-      report.runner(tenant.id, filter, { currentUserId: userId }),
+    const isFunnel = report.id === 'funnel-by-offering';
+    const [result, settings, offeringOptions] = await Promise.all([
+      report.runner(
+        tenant.id,
+        isFunnel ? { ...filter, scope: funnelScope } : filter,
+        { currentUserId: userId },
+      ),
       getOrgSettings(tenant.id),
+      // The scope dropdown lists RETIRED offerings too: they still hold
+      // historical deals, so their funnel is still a question worth asking.
+      isFunnel
+        ? listOfferingOptions(tenant.id, { activeOnly: false })
+        : Promise.resolve([] as OfferingOption[]),
     ]);
 
     return (
@@ -147,12 +173,27 @@ export default async function ReportDetailPage({
             currentRange={rangePreset}
             supportsOwnerScope={report.supportsOwnerScope}
             supportsMode={
-              report.id === 'pipeline-by-stage' || report.id === 'win-loss-rate'
+              report.id === 'pipeline-by-stage' ||
+              report.id === 'funnel-by-offering' ||
+              report.id === 'win-loss-rate'
             }
             supportsDateRange={report.supportsDateRange}
           />
           {report.supportsCsv ? (
-            <CsvDownloadButton reportId={report.id} owner={ownerParam} />
+            <CsvDownloadButton
+              reportId={report.id}
+              owner={ownerParam}
+              scopeParams={
+                isFunnel
+                  ? {
+                      offering:
+                        typeof sp.offering === 'string' ? sp.offering : undefined,
+                      category:
+                        typeof sp.category === 'string' ? sp.category : undefined,
+                    }
+                  : undefined
+              }
+            />
           ) : null}
         </section>
 
@@ -161,6 +202,7 @@ export default async function ReportDetailPage({
           result={result}
           mode={modeParam}
           currency={settings}
+          offeringOptions={offeringOptions}
         />
 
         <footer className="mt-4 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
@@ -193,13 +235,25 @@ function ReportBody({
   result,
   mode,
   currency,
+  offeringOptions,
 }: {
   reportId: ReportId;
   result: { rows: unknown[]; extras?: unknown };
   mode: 'count' | 'amount';
   currency: TenantCurrencyContext;
+  offeringOptions: OfferingOption[];
 }): React.ReactNode {
   switch (reportId) {
+    case 'funnel-by-offering':
+      return (
+        <OfferingFunnelSection
+          rows={result.rows as FunnelByOfferingRow[]}
+          extras={result.extras as FunnelByOfferingExtras}
+          offeringOptions={offeringOptions}
+          mode={mode}
+          currency={currency}
+        />
+      );
     case 'pipeline-by-stage':
       return (
         <>

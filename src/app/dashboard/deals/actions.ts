@@ -81,6 +81,16 @@ import {
   marginRequiredForStage,
   violatesLeadCloseDate,
 } from '@/lib/deals/validation';
+import {
+  insertDealOfferings,
+  OfferingSyncError,
+  resolveOfferingIds,
+  syncDealOfferings,
+} from '@/lib/offerings/queries';
+import {
+  OFFERINGS_REQUIRED_MESSAGE,
+  validateOfferingSelection,
+} from '@/lib/offerings/types';
 import { personaOf } from '@/lib/personas';
 import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
@@ -116,6 +126,33 @@ export type SimpleResult =
 
 /** Thrown when the edit form tries to enter Hold (Module 6) — needs the board. */
 class HoldEditError extends Error {}
+
+/**
+ * Thrown inside the create transaction when every offering the form sent has
+ * since been retired (or never belonged to this tenant). A throw rather than
+ * an early return because we are already inside `tenantTransaction` and the
+ * deal insert must roll back with it.
+ */
+class OfferingsUnavailableError extends Error {}
+
+/**
+ * Read the offerings picker's two hidden inputs. The field submits a
+ * comma-joined id list and a single primary id; see `OfferingsField` for why
+ * hidden inputs rather than a native multi-select.
+ */
+function parseOfferingSelection(formData: FormData): {
+  offeringIds: string[];
+  primaryOfferingId: string | null;
+} {
+  return {
+    offeringIds: String(formData.get('offeringIds') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    primaryOfferingId:
+      String(formData.get('primaryOfferingId') ?? '').trim() || null,
+  };
+}
 
 /**
  * R3 — thrown inside the update transaction when a save would blank an
@@ -359,6 +396,22 @@ export async function createDealAction(
         };
       }
 
+      // Offerings (0066) — mandatory on CREATE, and enforced here as well as
+      // in the form, because the form check is a courtesy (it saves a
+      // round-trip that would blank the Company/Contact selects) and this is
+      // the rule. Update has no equivalent block: legacy deals are untagged
+      // and must stay editable. See `validateOfferingSelection`.
+      const offeringSelection = validateOfferingSelection(
+        parseOfferingSelection(formData),
+      );
+      if (!offeringSelection.ok) {
+        return {
+          ok: false,
+          message: offeringSelection.message,
+          fieldErrors: { offeringIds: [offeringSelection.message] },
+        };
+      }
+
       // Per-unit pricing: when both are provided, Amount is derived server-side
       // (never trust the client's amount) and the unit price + qty are stored.
       let amountMinor: number;
@@ -451,6 +504,30 @@ export async function createDealAction(
           })
           .returning();
         if (!row) return null;
+
+        // Tags land in the SAME transaction as the deal. A deal that
+        // committed while its offerings failed would be exactly the untagged
+        // row the mandatory field exists to prevent — and it would be
+        // invisible, since nothing would ever prompt for it again.
+        //
+        // `resolveOfferingIds` re-checks the ids against this tenant and
+        // against `active`, so a stale form (an offering retired while the
+        // drawer was open) fails with a sentence instead of a raw FK error.
+        const offeringIds = await resolveOfferingIds(
+          tx,
+          tenant.id,
+          parseOfferingSelection(formData).offeringIds,
+        );
+        if (offeringIds.length === 0) {
+          throw new OfferingsUnavailableError(OFFERINGS_REQUIRED_MESSAGE);
+        }
+        await insertDealOfferings(tx, {
+          tenantId: tenant.id,
+          dealId: row.id,
+          offeringIds,
+          primaryOfferingId: offeringSelection.primaryOfferingId,
+        });
+
         await recordActivity(tx, {
           tenantId: tenant.id,
           actorUserId: membership.userId,
@@ -477,6 +554,13 @@ export async function createDealAction(
             blocked: true,
             failures: err.failures,
             toStage: err.toStage,
+          };
+        }
+        if (err instanceof OfferingsUnavailableError) {
+          return {
+            ok: false,
+            message: err.message,
+            fieldErrors: { offeringIds: [err.message] },
           };
         }
         throw err;
@@ -811,6 +895,20 @@ export async function updateDealAction(
         if (rollingBack) await clearStageChangeReason(tx);
         if (!updated) return null;
 
+        // Offerings (0066) — reconcile the drawer's selection in the same
+        // transaction as the deal write, and BEFORE the realtime payload is
+        // built, so subscribers get the row with its new tags rather than a
+        // card that reverts its chip until the next reload.
+        //
+        // `syncDealOfferings` owns the rules: a retired tag already on the
+        // deal survives, a tagged deal can't be emptied, an untagged legacy
+        // deal is left alone.
+        await syncDealOfferings(tx, {
+          tenantId: tenant.id,
+          dealId: updated.id,
+          ...parseOfferingSelection(formData),
+        });
+
         const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
 
         if (previous.stage !== updated.stage) {
@@ -892,6 +990,16 @@ export async function updateDealAction(
             ok: false,
             message: ROLLBACK_REASON_REQUIRED_MESSAGE,
             fieldErrors: { rollbackReason: [ROLLBACK_REASON_REQUIRED_MESSAGE] },
+          };
+        }
+        // Offerings (0066): emptied a tagged deal, or picked one that has
+        // since been retired. Filed against the picker so the drawer
+        // highlights it rather than showing a bare banner.
+        if (err instanceof OfferingSyncError) {
+          return {
+            ok: false,
+            message: err.message,
+            fieldErrors: { offeringIds: [err.message] },
           };
         }
         // The DB backstops both rules (0060). Reaching here means a path
@@ -2643,6 +2751,23 @@ export async function bulkUploadDealsAction(
             withValues.push(values);
           }
           if (withValues.length === 0) return 0;
+          // OFFERINGS (0066) ARE NOT REQUIRED ON THIS PATH, deliberately.
+          // Imported deals land Uncategorized.
+          //
+          // The mandatory rule is a rule about the create FORM, where a
+          // human is present to answer "what is this selling". A CSV has no
+          // offering column, so enforcing it here would reject every file
+          // the team already uses — turning an import into a data-entry
+          // session, which is the opposite of why anyone imports.
+          //
+          // The gap is not silent: imported rows are Uncategorized like any
+          // legacy deal, so they surface in the deals list's Uncategorized
+          // filter and in the funnel report's coverage total, and get tagged
+          // through the same one-at-a-time flow. If bulk tagging on import
+          // is ever wanted, the shape is an optional `Offering` column
+          // resolved by name — additive to BULK_UPLOAD_HEADERS, so old
+          // files keep working.
+          //
           // Single multi-row INSERT — fast, atomic, and we don't
           // bother emitting realtime events per row to avoid a
           // notification storm. The list/board pages revalidate

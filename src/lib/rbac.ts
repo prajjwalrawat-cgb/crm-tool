@@ -66,6 +66,17 @@ const PERMISSIONS = {
    * the forecast is a manager-owned view, but reps don't reclassify it.
    */
   manageForecast: ['owner', 'admin', 'manager'],
+  /**
+   * Editing the Offerings catalog (0066) — what the workspace sells. Admin
+   * tier, same as Stage gates and Custom fields: renaming or retiring an
+   * offering re-labels every deal tagged with it and moves numbers in every
+   * funnel, so it is a workspace-shape change, not a per-deal one.
+   *
+   * TAGGING a deal with an offering is NOT this permission — that rides on
+   * `manageDeals`, because a rep must be able to say what their own deal is
+   * selling.
+   */
+  manageOfferings: ['owner', 'admin'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -112,6 +123,8 @@ export const canManageTargets = (role: RoleArg) => can(role, 'manageTargets');
 export const canManageStageGates = (role: RoleArg) =>
   can(role, 'manageStageGates');
 export const canManageForecast = (role: RoleArg) => can(role, 'manageForecast');
+export const canManageOfferings = (role: RoleArg) =>
+  can(role, 'manageOfferings');
 
 export const canHardDeleteCompanies = (role: RoleArg) =>
   can(role, 'hardDeleteCompanies');

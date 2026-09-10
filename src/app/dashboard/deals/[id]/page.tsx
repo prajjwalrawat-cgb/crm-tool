@@ -19,6 +19,10 @@ import { getDealById } from '@/lib/deals/queries';
 import { getDealStageHistory } from '@/lib/deals/stage-history';
 import { getDealScoreWithHistory } from '@/lib/deals/scoring/service';
 import { getDealRisk } from '@/lib/deals/risk/queries';
+import {
+  listDealOfferings,
+  listOfferingOptions,
+} from '@/lib/offerings/queries';
 import { listDealValueSplit } from '@/lib/deals/value-split-queries';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
@@ -52,6 +56,7 @@ import { RelationshipHealthCard } from '../../_components/relationship-health-ca
 import { DealApprovalControls } from './_components/deal-approval-controls';
 import { DealCloseDateCard } from './_components/deal-close-date-card';
 import { DealContactsCard } from './_components/deal-contacts-card';
+import { DealOfferingsCard } from './_components/deal-offerings-card';
 import { DealDocumentsCard } from './_components/deal-documents-card';
 import { DealFieldEditor } from './_components/deal-field-editor';
 import { DealInlineHeader } from './_components/deal-inline-header';
@@ -106,6 +111,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       dealScore,
       valueSplitRows,
       dealRisk,
+      dealOfferingRows,
+      offeringOptions,
     ] = await Promise.all([
       requireMembership(),
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -133,6 +140,11 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       // Phase 1 risk score. A stored read — the nightly job writes it, this
       // page never computes it and never calls a model.
       getDealRisk(tenant.id, deal.id),
+      // Tags ON this deal: the full catalog, retired entries included — a
+      // retired offering must keep rendering where it already is.
+      listDealOfferings(tenant.id, deal.id),
+      // The ADD picker: active entries only.
+      listOfferingOptions(tenant.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -460,6 +472,15 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 currentUserId={userId}
                 teammates={assignableTeammates}
                 canEdit={canAssign}
+              />
+              {/* What this deal is selling (0066). Sits in Relationship
+                  rather than beside Stage: it answers "what is this", the
+                  same question as Company and Contact, not "where is it". */}
+              <DealOfferingsCard
+                dealId={deal.id}
+                initialOfferings={dealOfferingRows}
+                offeringOptions={offeringOptions}
+                canEdit={canEdit}
               />
               <DealContactsCard
                 dealId={deal.id}

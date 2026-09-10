@@ -9,6 +9,10 @@ import {
   type EmailEngagementRow,
 } from './queries/email-engagement';
 import {
+  funnelByOfferingRunner,
+  type FunnelByOfferingRow,
+} from './queries/funnel-by-offering';
+import {
   pipelineByStageRunner,
   type PipelineByStageRow,
 } from './queries/pipeline-by-stage';
@@ -29,9 +33,9 @@ import {
   type WinLossRateRow,
 } from './queries/win-loss-rate';
 import type {
+  AnyReportFilter,
   ChartHint,
   ReportCategory,
-  ReportFilter,
   ReportRunner,
 } from './types';
 
@@ -61,7 +65,7 @@ export type ReportRegistrationBase = {
   /** True if the report supports an owner scope. */
   supportsOwnerScope: boolean;
   /** The query function. Typed loosely here; narrowed at the call site. */
-  runner: ReportRunner<ReportFilter, unknown, unknown>;
+  runner: ReportRunner<AnyReportFilter, unknown, unknown>;
 };
 
 const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
@@ -74,7 +78,20 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsCsv: true,
     supportsDateRange: false,
     supportsOwnerScope: true,
-    runner: pipelineByStageRunner as ReportRunner<ReportFilter, unknown, unknown>,
+    runner: pipelineByStageRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
+  },
+  'funnel-by-offering': {
+    title: 'Funnel by offering',
+    description:
+      'Stage-by-stage count and value for a single offering, a category, or the whole book — plus the per-offering rollup and how much pipeline is still untagged.',
+    category: 'pipeline',
+    chart: 'stacked-bar',
+    supportsCsv: true,
+    // Live snapshot of current state, like Pipeline by stage — not a
+    // time-window aggregate, so the range picker would be a lie.
+    supportsDateRange: false,
+    supportsOwnerScope: true,
+    runner: funnelByOfferingRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
   'win-loss-rate': {
     title: 'Win / Loss rate',
@@ -85,7 +102,7 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsCsv: true,
     supportsDateRange: true,
     supportsOwnerScope: true,
-    runner: winLossRateRunner as ReportRunner<ReportFilter, unknown, unknown>,
+    runner: winLossRateRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
   'stale-deals': {
     title: 'Stale deals',
@@ -96,7 +113,7 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsCsv: true,
     supportsDateRange: false,
     supportsOwnerScope: true,
-    runner: staleDealsRunner as ReportRunner<ReportFilter, unknown, unknown>,
+    runner: staleDealsRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
   'rep-performance': {
     title: 'Rep performance',
@@ -107,7 +124,7 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsCsv: true,
     supportsDateRange: true,
     supportsOwnerScope: false,
-    runner: repPerformanceRunner as ReportRunner<ReportFilter, unknown, unknown>,
+    runner: repPerformanceRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
   'email-engagement': {
     title: 'Email engagement',
@@ -118,7 +135,7 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsCsv: true,
     supportsDateRange: true,
     supportsOwnerScope: false,
-    runner: emailEngagementRunner as ReportRunner<ReportFilter, unknown, unknown>,
+    runner: emailEngagementRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
   'revenue-forecast': {
     title: 'Revenue forecast',
@@ -129,7 +146,7 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsCsv: true,
     supportsDateRange: true,
     supportsOwnerScope: false,
-    runner: revenueForecastRunner as ReportRunner<ReportFilter, unknown, unknown>,
+    runner: revenueForecastRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
   'deal-velocity': {
     title: 'Deal velocity',
@@ -140,12 +157,13 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsCsv: true,
     supportsDateRange: true,
     supportsOwnerScope: true,
-    runner: dealVelocityRunner as ReportRunner<ReportFilter, unknown, unknown>,
+    runner: dealVelocityRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
 };
 
 export type ReportId =
   | 'pipeline-by-stage'
+  | 'funnel-by-offering'
   | 'win-loss-rate'
   | 'stale-deals'
   | 'rep-performance'
@@ -176,6 +194,7 @@ export function getReport(id: string): ReportRegistration | null {
  */
 export type ReportRowMap = {
   'pipeline-by-stage': PipelineByStageRow;
+  'funnel-by-offering': FunnelByOfferingRow;
   'win-loss-rate': WinLossRateRow;
   'stale-deals': StaleDealsRow;
   'rep-performance': RepPerformanceRow;

@@ -99,6 +99,17 @@ export const dealValueBillingType = pgEnum('deal_value_billing_type', [
   'recurring',
 ]);
 
+/**
+ * What an offering IS (0066). Two values, not a longer taxonomy: the split
+ * that changes how the business behaves is Product vs Service — different
+ * margins, different delivery, different people. Anything finer belongs in
+ * the `offerings` catalog rows themselves, which an admin can edit.
+ */
+export const offeringCategory = pgEnum('offering_category', [
+  'product',
+  'service',
+]);
+
 export const dealDocumentCategory = pgEnum('deal_document_category', [
   'proposal',
   'contract',
@@ -118,3 +129,4 @@ export type TaskRecurrence = (typeof taskRecurrence.enumValues)[number];
 export type DealContactRole = (typeof dealContactRole.enumValues)[number];
 export type DealDocumentCategory =
   (typeof dealDocumentCategory.enumValues)[number];
+export type OfferingCategory = (typeof offeringCategory.enumValues)[number];

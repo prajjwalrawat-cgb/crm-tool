@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import {
@@ -11,9 +11,13 @@ import {
   companies,
   type Contact,
   contacts,
+  dealOfferings,
   deals,
-  dealRiskScores,} from '@/db/schema';
+  dealRiskScores,
+  offerings,} from '@/db/schema';
 
+
+import type { DealOfferingTag } from '@/lib/offerings/types';
 
 import {
   type SerializedActivity,
@@ -126,6 +130,28 @@ export async function loadSerializedDeal(
       contactFirstName: contacts.firstName,
       contactLastName: contacts.lastName,
       contactEmail: contacts.email,
+      // Offerings (0066) — same shape and same reasoning as
+      // `DEALS_PROJECTION`: one correlated aggregate, correlated through the
+      // TABLE because a column reference inside a projection renders
+      // unqualified. A reconcile without it would blank the card's chip.
+      offerings: sql<DealOfferingTag[] | null>`(
+        SELECT coalesce(
+          jsonb_agg(
+            jsonb_build_object(
+              'id', o.id,
+              'name', o.name,
+              'category', o.category,
+              'active', o.active,
+              'isPrimary', dof.is_primary
+            )
+            ORDER BY dof.is_primary DESC, o.category, o.sort_order, o.name
+          ),
+          '[]'::jsonb
+        )
+        FROM ${dealOfferings} dof
+        JOIN ${offerings} o ON o.id = dof.offering_id
+        WHERE dof.tenant_id = ${deals}.tenant_id AND dof.deal_id = ${deals}.id
+      )`,
     })
     .from(deals)
     .leftJoin(companies, eq(deals.companyId, companies.id))
@@ -145,6 +171,7 @@ export async function loadSerializedDeal(
     contactName:
       rest.contactNameText ?? (nameParts.length ? nameParts.join(' ') : null),
     contactEmail: rest.contactEmailText ?? contactEmail,
+    offerings: rest.offerings ?? [],
   };
   return serializeDates(reshaped);
 }

@@ -18,6 +18,8 @@ export * from './company-rollups';
 export * from './contacts';
 export * from './deals';
 export * from './deal-contacts';
+export * from './offerings';
+export * from './deal-offerings';
 export * from './deal-value-splits';
 export * from './deal-stage-history';
 export * from './deal-date-changes';

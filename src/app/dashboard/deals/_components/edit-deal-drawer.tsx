@@ -21,6 +21,10 @@ import {
   DEAL_TYPE_LABELS,
   DEAL_TYPES,
 } from '@/lib/deals/schema';
+import {
+  offeringRuleFor,
+  type OfferingOption,
+} from '@/lib/offerings/types';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
@@ -29,6 +33,7 @@ import { Drawer } from '../../_components/drawer';
 import { OwnerFormField } from '../../_components/owner-form-field';
 import { DealAmountFields } from './deal-amount-fields';
 import { DealCompanyContactFields } from './deal-company-contact-fields';
+import { OfferingsField } from './offerings-field';
 import { RollbackReasonModal } from './rollback-reason-modal';
 
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
@@ -50,6 +55,8 @@ type Props = {
   currentRole: MembershipRole;
   customFieldDefs: CustomFieldDef[];
   unitPricingEnabled: boolean;
+  /** Active offerings only — a retired one can't be added to anything new. */
+  offeringOptions: OfferingOption[];
   onSubmit: (formData: FormData) => void;
   onDelete: () => void;
   pending: boolean;
@@ -70,6 +77,7 @@ export function EditDealDrawer({
   currentRole,
   customFieldDefs,
   unitPricingEnabled,
+  offeringOptions,
   onSubmit,
   onDelete,
   pending,
@@ -123,7 +131,15 @@ export function EditDealDrawer({
       fd.set('rollbackReason', rollback.reason);
       if (rollback.note) fd.set('rollbackNote', rollback.note);
     }
-    const found = validateDealForm(fd, previousState);
+    // The rule follows the DEAL's history, not the fact that this is an edit:
+    // a deal that already carries tags may be re-tagged but not emptied, while
+    // an untagged legacy deal is never blocked. See `offeringRuleFor`.
+    const found = validateDealForm(fd, previousState, {
+      offeringRule: offeringRuleFor({
+        isNewDeal: false,
+        existingTagCount: deal?.offerings.length ?? 0,
+      }),
+    });
     if (Object.keys(found).length > 0) {
       setClientErrors(found);
       setClientMsg('Please fix the highlighted fields.');
@@ -353,6 +369,23 @@ export function EditDealDrawer({
           defaultContactId={deal?.contactId ?? null}
           companyError={errs.companyId}
           contactError={errs.contactId}
+        />
+
+        {/* Offerings (0066). Editable here as well as on the detail page —
+            the drawer is where the list edits a deal, and a field reachable
+            from only one of the two reads as missing. `key` remounts the
+            picker when the drawer switches deals, the same reason the form
+            itself is keyed. */}
+        <OfferingsField
+          key={`off-${deal?.id ?? 'none'}`}
+          options={offeringOptions}
+          errors={errs.offeringIds}
+          required={(deal?.offerings.length ?? 0) > 0}
+          defaultSelectedIds={(deal?.offerings ?? []).map((o) => o.id)}
+          defaultPrimaryId={
+            (deal?.offerings ?? []).find((o) => o.isPrimary)?.id ?? null
+          }
+          extraOptions={deal?.offerings ?? []}
         />
 
         {canAssign ? (
