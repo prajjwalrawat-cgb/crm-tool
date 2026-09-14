@@ -12,6 +12,7 @@ import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
 import {
   getReport,
+  isReportEnabled,
   type ReportId,
 } from '@/lib/reports/registry';
 import type {
@@ -115,6 +116,11 @@ export default async function ReportDetailPage({
   });
 
   return await withTenantSession(async ({ tenant, userId }) => {
+    // A report tied to a switched-off workspace feature doesn't exist here —
+    // 404, the same answer as an unknown report id, rather than a page that
+    // renders a funnel for a feature this workspace doesn't use.
+    if (!(await isReportEnabled(tenant.id, report))) notFound();
+
     const owner: OwnerScope =
       ownerParam === 'mine' ? { type: 'mine' } : { type: 'all' };
     const filter: ReportFilter = { range: rangePreset, owner };

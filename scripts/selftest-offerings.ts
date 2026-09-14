@@ -35,6 +35,16 @@
  *      picker, keeps rendering on the deals that carry it, and keeps its
  *      funnel numbers. The FK must also refuse a hard delete outright.
  *
+ *   8. THE WORKSPACE SWITCH MEANS INVISIBLE AND INERT (0067). OFF by
+ *      default for a new workspace; OFF strips the offering filters so a
+ *      stale bookmark can't narrow a list invisibly; OFF makes the funnel
+ *      report not exist; and OFF deletes nothing - tags survive a round
+ *      trip. The create/update actions need an authenticated session a
+ *      script can't provide, so their gating is guarded at the source
+ *      level: the one regression that matters (a hidden drawer submitting
+ *      an empty selection into the tag sync, refusing every save of a
+ *      previously-tagged deal) is a missing `if (offeringsEnabled)`.
+ *
  *   7. THE ROLLUP EQUALS A HAND SUM. Computed against a fixture with
  *      known answers rather than against whatever the database holds — a
  *      rollup that is wrong in the same way as the query checking it
@@ -45,6 +55,9 @@
  * selftests. The database checks build their own tenant and drop it
  * afterwards, so the run is deterministic and leaves nothing behind.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { config } from 'dotenv';
 import { sql } from 'drizzle-orm';
 
@@ -61,7 +74,11 @@ import {
   validateOfferingSelection,
 } from '../src/lib/offerings/types';
 import { validateDealForm } from '../src/lib/deals/client-validate';
-import { parseDealFilters } from '../src/lib/deals/filters';
+import { OfferingsDisabledNotice } from '../src/app/dashboard/deals/_components/offerings-disabled-notice';
+import {
+  parseDealFilters,
+  withoutOfferingFilters,
+} from '../src/lib/deals/filters';
 import {
   funnelScopeToParams,
   parseFunnelScope,
@@ -276,6 +293,95 @@ for (const scope of [
 }
 
 /* ------------------------------------------------------------------ *
+ * 8a. The workspace switch - pure and source-level                    *
+ * ------------------------------------------------------------------ */
+
+const stripped = withoutOfferingFilters(
+  parseDealFilters({ offering: A, uncategorized: '1', stage: 'lead', mine: '1' }),
+);
+check(
+  'switch off: a stale ?offering= / ?uncategorized= link is ignored, not applied invisibly',
+  stripped.offeringIds === undefined && stripped.uncategorized === undefined,
+);
+check(
+  '...while every other filter in the same URL survives',
+  stripped.stages?.[0] === 'lead' && stripped.mine === true,
+);
+
+const src = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const dealActions = src('src', 'app', 'dashboard', 'deals', 'actions.ts');
+check(
+  'source: create only REQUIRES offerings when the workspace has them on',
+  /if \(offeringsEnabled\) \{\s*const offeringSelection = validateOfferingSelection\(/.test(
+    dealActions,
+  ),
+);
+check(
+  'source: create only WRITES tags when the workspace has them on',
+  /if \(offeringsEnabled\) \{\s*const offeringIds = await resolveOfferingIds\(/.test(
+    dealActions,
+  ),
+);
+// The regression this block exists for. With the switch off the drawer
+// renders no picker, the form submits no ids, and an ungated sync would try to
+// empty every previously-tagged deal - refusing the entire save.
+check(
+  'source: the edit drawer tag sync is skipped entirely when the switch is off',
+  /if \(offeringsEnabled\) \{\s*await syncDealOfferings\(/.test(dealActions) &&
+    (dealActions.match(/syncDealOfferings\(/g) ?? []).length === 1,
+);
+
+const offeringActions = src('src', 'app', 'dashboard', 'deals', '[id]', 'offering-actions.ts');
+const exportedActions = (offeringActions.match(/export async function \w+/g) ?? []).length;
+const gatedActions = (
+  offeringActions.match(/if \(!\(await isOfferingsEnabled\(tenant\.id\)\)\)/g) ?? []
+).length;
+check(
+  'source: every detail-card write action refuses when the switch is off',
+  exportedActions > 0 && gatedActions === exportedActions,
+  `${gatedActions} of ${exportedActions} gated`,
+);
+
+const registrySrc = src('src', 'lib', 'reports', 'registry.ts');
+check(
+  'source: the funnel report is registered behind the offerings flag',
+  /'funnel-by-offering':[\s\S]*?requiresFlag: 'offeringsEnabled'/.test(registrySrc),
+);
+for (const [label, file] of [
+  ['reports list', ['src', 'app', 'dashboard', 'reports', 'page.tsx']],
+  ['report detail', ['src', 'app', 'dashboard', 'reports', '[reportId]', 'page.tsx']],
+  ['report CSV', ['src', 'app', 'dashboard', 'reports', 'actions.ts']],
+] as const) {
+  check(
+    `source: the ${label} checks isReportEnabled`,
+    src(...file).includes('isReportEnabled('),
+  );
+}
+
+// A deal tagged BEFORE the switch went off must say so wherever its
+// offerings would have been, instead of the tags silently vanishing. The
+// notice renders nothing for an untagged deal - there is nothing to explain.
+const NOTICE_TAG = { id: A, name: 'SafeOps360', category: 'product' as const, active: true, isPrimary: true };
+check(
+  'switch off + untagged deal: no notice at all',
+  OfferingsDisabledNotice({ tags: [], canTurnOn: true }) === null,
+);
+check(
+  'switch off + tagged deal: the notice renders',
+  OfferingsDisabledNotice({ tags: [NOTICE_TAG], canTurnOn: false }) !== null,
+);
+const drawerSrc = src('src', 'app', 'dashboard', 'deals', '_components', 'edit-deal-drawer.tsx');
+const detailSrc = src('src', 'app', 'dashboard', 'deals', '[id]', 'page.tsx');
+check(
+  'source: the edit drawer shows the notice when the switch is off',
+  /\) : \(\s*(?:\/\/.*\s*)*<OfferingsDisabledNotice/.test(drawerSrc),
+);
+check(
+  'source: the deal page shows the notice in place of the card when off',
+  /\) : \(\s*<OfferingsDisabledNotice/.test(detailSrc),
+);
+
+/* ------------------------------------------------------------------ *
  * 3-7. Database-backed properties                                     *
  * ------------------------------------------------------------------ */
 
@@ -300,6 +406,13 @@ async function main() {
     syncDealOfferings,
   } = await import('../src/lib/offerings/queries');
   const { tenantTransaction } = await import('../src/lib/db-context');
+  const { isOfferingsEnabled } = await import('../src/lib/offerings/queries');
+  const { setWorkspaceFlags } = await import(
+    '../src/lib/workspace-settings/queries'
+  );
+  const { getReport, isReportEnabled } = await import(
+    '../src/lib/reports/registry'
+  );
   const { funnelByOfferingRunner } = await import(
     '../src/lib/reports/queries/funnel-by-offering'
   );
@@ -314,6 +427,35 @@ async function main() {
     `)) as unknown as Array<{ id: string }>;
     tenantId = t!.id;
     const tid = tenantId;
+
+    /* ---- 8b. the workspace switch, against a real row ---- */
+    const funnelReport = getReport('funnel-by-offering')!;
+    check(
+      'a brand-new workspace starts with offerings OFF',
+      (await runWithSystemContext(tid, () => isOfferingsEnabled(tid))) === false,
+    );
+    check(
+      '...so the funnel report does not exist for it',
+      (await runWithSystemContext(tid, () =>
+        isReportEnabled(tid, funnelReport),
+      )) === false,
+    );
+    check(
+      'reports with no flag are unaffected by the switch',
+      (await runWithSystemContext(tid, () =>
+        isReportEnabled(tid, getReport('pipeline-by-stage')!),
+      )) === true,
+    );
+    await runWithSystemContext(tid, () =>
+      setWorkspaceFlags(tid, { offeringsEnabled: true }),
+    );
+    check(
+      'switching it on is visible immediately, report included',
+      (await runWithSystemContext(tid, () => isOfferingsEnabled(tid))) &&
+        (await runWithSystemContext(tid, () =>
+          isReportEnabled(tid, funnelReport),
+        )),
+    );
 
     await runWithSystemContext(tid, () => seedDefaultOfferings(tid));
 
@@ -405,6 +547,31 @@ async function main() {
     await tag(d4, procureFlow, true);
 
     const ALL_VALUE = 3_10_000 + 11_30_000 + 7_70_000 + 5_50_000 + 9_90_000;
+
+    // OFF deletes nothing. A workspace that switches off for a quarter must get
+    // its tags - and so its funnel history - back intact.
+    const tagCount = async (): Promise<number> =>
+      Number(
+        (
+          (await db.execute(
+            sql`SELECT count(*)::int AS n FROM deal_offerings WHERE tenant_id = ${tid}::uuid`,
+          )) as unknown as Array<{ n: number }>
+        )[0]!.n,
+      );
+    const tagsBeforeOff = await tagCount();
+    await runWithSystemContext(tid, () =>
+      setWorkspaceFlags(tid, { offeringsEnabled: false }),
+    );
+    const tagsWhileOff = await tagCount();
+    await runWithSystemContext(tid, () =>
+      setWorkspaceFlags(tid, { offeringsEnabled: true }),
+    );
+    const tagsAfterOn = await tagCount();
+    check(
+      'switching offerings OFF deletes no tags, and ON brings them all back',
+      tagsBeforeOff === 6 && tagsWhileOff === 6 && tagsAfterOn === 6,
+      `${tagsBeforeOff} -> ${tagsWhileOff} -> ${tagsAfterOn}`,
+    );
 
     /* ---- 3. exactly one primary, enforced by the database ---- */
     let secondPrimaryRejected = false;

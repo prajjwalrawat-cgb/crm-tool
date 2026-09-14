@@ -31,6 +31,14 @@ export const workspaceSettings = pgTable('workspace_settings', {
   forecastsEnabled: boolean('forecasts_enabled').notNull().default(false),
   /** Module 5 — Duplicate Detection Guardrails. */
   dedupEnabled: boolean('dedup_enabled').notNull().default(false),
+  /**
+   * Offerings taxonomy (0066/0067) — the product/service catalog, the
+   * mandatory picker on new deals, the list column, the detail card and the
+   * Funnel by offering report. OFF hides and disables all of it WITHOUT
+   * deleting anything: catalog rows and deal tags survive, and turning it
+   * back on restores them exactly.
+   */
+  offeringsEnabled: boolean('offerings_enabled').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -53,12 +61,13 @@ export const workspaceSettingsRelations = relations(
 export type WorkspaceSettings = typeof workspaceSettings.$inferSelect;
 export type NewWorkspaceSettings = typeof workspaceSettings.$inferInsert;
 
-/** The five Phase-2 module flags, in declaration order. */
+/** Per-workspace feature flags, in declaration order. */
 export const WORKSPACE_FEATURE_FLAGS = [
   'stageGatesEnabled',
   'dealScoringEnabled',
   'emailSyncEnabled',
   'forecastsEnabled',
   'dedupEnabled',
+  'offeringsEnabled',
 ] as const;
 export type WorkspaceFeatureFlag = (typeof WORKSPACE_FEATURE_FLAGS)[number];

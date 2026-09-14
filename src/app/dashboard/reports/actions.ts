@@ -3,7 +3,11 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { rowsToCsv } from '@/lib/reports/csv';
 import { parseFunnelScope } from '@/lib/reports/funnel-scope';
-import { getReport, type ReportId } from '@/lib/reports/registry';
+import {
+  getReport,
+  isReportEnabled,
+  type ReportId,
+} from '@/lib/reports/registry';
 import type {
   OwnerScope,
   ReportFilter,
@@ -106,6 +110,9 @@ export async function buildReportCsvAction(input: {
   if (!report.supportsCsv) return { ok: false, message: 'CSV not supported for this report' };
 
   return await withTenantSession(async ({ tenant, userId }) => {
+    if (!(await isReportEnabled(tenant.id, report))) {
+      return { ok: false, message: 'Unknown report' };
+    }
     const owner: OwnerScope =
       input.filters.owner === 'mine'
         ? { type: 'mine' }

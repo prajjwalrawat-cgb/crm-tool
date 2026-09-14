@@ -2,9 +2,12 @@ import { withTenantSession } from '@/lib/auth-guard';
 import { listCompanyOptionsScoped } from '@/lib/companies/queries';
 import { listContactPickerOptions } from '@/lib/contacts/queries';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
-import { parseDealFilters } from '@/lib/deals/filters';
+import { parseDealFilters, withoutOfferingFilters } from '@/lib/deals/filters';
 import { listDealCompanyOptions, listDeals } from '@/lib/deals/queries';
-import { listOfferingOptions } from '@/lib/offerings/queries';
+import {
+  isOfferingsEnabled,
+  listOfferingOptions,
+} from '@/lib/offerings/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
@@ -30,7 +33,14 @@ export default async function DealsPage({
     const search = typeof sp.q === 'string' ? sp.q.trim() || undefined : undefined;
     const cursor = parseCursorParam(typeof sp.cursor === 'string' ? sp.cursor : undefined);
     const size = parsePageSize(typeof sp.size === 'string' ? sp.size : undefined);
-    const filters = parseDealFilters(sp);
+    // Offerings is a per-workspace switch (0067). Read it BEFORE the fetch:
+    // when it's off, the offering filters are stripped server-side so a stale
+    // bookmark can't narrow the list invisibly.
+    const offeringsEnabled = await isOfferingsEnabled(tenant.id);
+    const parsedFilters = parseDealFilters(sp);
+    const filters = offeringsEnabled
+      ? parsedFilters
+      : withoutOfferingFilters(parsedFilters);
     // `?sort=risk` orders by the nightly risk score instead of recency. It is
     // a distinct keyset mode, not a client-side re-sort of the page.
     const sort = sp.sort === 'risk' ? 'risk' : 'recent';
@@ -73,7 +83,7 @@ export default async function DealsPage({
       // ACTIVE only: the create form must not be able to tag a new deal with
       // a retired offering. The deal detail page loads the full catalog for
       // display, since a retired tag still has to render where it already is.
-      listOfferingOptions(tenant.id),
+      offeringsEnabled ? listOfferingOptions(tenant.id) : Promise.resolve([]),
     ]);
 
     return (
@@ -104,6 +114,7 @@ export default async function DealsPage({
           customFieldDefs={customFieldDefs}
           unitPricingEnabled={orgSettings.dealUnitPricingEnabled}
           offeringOptions={offeringOptions}
+          offeringsEnabled={offeringsEnabled}
         />
       </main>
     );

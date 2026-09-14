@@ -223,6 +223,24 @@ export function parseDealFilters(
   };
 }
 
+/**
+ * Drop the Offerings filters (0066) — for a workspace that has the feature
+ * switched off (0067).
+ *
+ * Not a cosmetic nicety. A bookmarked `?uncategorized=1` or `?offering=…`
+ * link still parses on a workspace that has since turned Offerings off, and
+ * with the chips and column hidden it would silently narrow the list with no
+ * visible reason — a list that is quietly missing rows is worse than one that
+ * ignores a filter it can no longer show.
+ */
+export function withoutOfferingFilters(filters: DealFilters): DealFilters {
+  const { offeringIds: _offeringIds, uncategorized: _uncategorized, ...rest } =
+    filters;
+  void _offeringIds;
+  void _uncategorized;
+  return rest;
+}
+
 export function dealFiltersToSearchParams(
   filters: DealFilters,
 ): URLSearchParams {

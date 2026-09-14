@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { dealOfferings, deals, offerings, type Offering } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
+import { isFeatureEnabled } from '@/lib/workspace-settings/queries';
 
 import {
   type DealOfferingRow,
@@ -16,6 +17,26 @@ import {
 } from './types';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Is the Offerings feature switched on for this workspace (0067)?
+ *
+ * EVERY Offerings surface must ask this, server-side, before it renders,
+ * requires or writes anything — the picker, the mandatory create rule, the
+ * edit-drawer sync, the list column and filters, the detail card and its
+ * actions, the report, the export columns. OFF means invisible AND inert.
+ *
+ * The one deliberate exception is the Settings catalog itself: an admin can
+ * shape the catalog while the feature is off, so a workspace can replace the
+ * seeded list with its own portfolio BEFORE the mandatory picker goes live
+ * for its reps, rather than after.
+ *
+ * Nothing here deletes data when the flag is off. Tags and catalog rows stay,
+ * and switching it back on restores them exactly.
+ */
+export async function isOfferingsEnabled(tenantId: string): Promise<boolean> {
+  return isFeatureEnabled(tenantId, 'offeringsEnabled');
+}
 
 /**
  * The portfolio this deployment ships with, mirroring the seed block in

@@ -117,6 +117,7 @@ export function DealsView({
   customFieldDefs,
   unitPricingEnabled,
   offeringOptions,
+  offeringsEnabled,
 }: {
   initialItems: DealRow[];
   initialSearch: string;
@@ -137,6 +138,11 @@ export function DealsView({
   unitPricingEnabled: boolean;
   /** Active offerings, for the create form's required picker and the column filter. */
   offeringOptions: OfferingOption[];
+  /**
+   * Workspace switch (0067). OFF hides the Offering column, its filter and
+   * chips, and removes the field from the create form and edit drawer.
+   */
+  offeringsEnabled: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -182,6 +188,7 @@ export function DealsView({
     teammates,
     currentUserId,
     offeringOptions,
+    offeringsEnabled,
   });
 
   const [search, setSearch] = useState(initialSearch);
@@ -852,6 +859,7 @@ export function DealsView({
                     customFieldDefs={customFieldDefs}
                     unitPricingEnabled={unitPricingEnabled}
                     offeringOptions={offeringOptions}
+                    offeringsEnabled={offeringsEnabled}
                   />
                 )}
               </CreateDrawer>
@@ -912,6 +920,7 @@ export function DealsView({
               filters={initialFilters}
               filterCompanyOptions={companyOptions}
               offeringOptions={offeringOptions}
+              offeringsEnabled={offeringsEnabled}
               onPushFilters={pushFilters}
               sort={sort}
               onPushSort={pushSort}
@@ -956,6 +965,7 @@ export function DealsView({
         customFieldDefs={customFieldDefs}
         unitPricingEnabled={unitPricingEnabled}
         offeringOptions={offeringOptions}
+        offeringsEnabled={offeringsEnabled}
         onSubmit={handleEditSubmit}
         onDelete={handleDeleteFromDrawer}
         pending={editPending}
@@ -1600,6 +1610,7 @@ function DealsTable({
   filters,
   filterCompanyOptions,
   offeringOptions,
+  offeringsEnabled,
   onPushFilters,
   sort,
   onPushSort,
@@ -1631,6 +1642,7 @@ function DealsTable({
   filters: DealFilters;
   filterCompanyOptions: CompanyOption[];
   offeringOptions: OfferingOption[];
+  offeringsEnabled: boolean;
   onPushFilters: (next: DealFilters) => void;
   sort: 'recent' | 'risk';
   onPushSort: (next: 'recent' | 'risk') => void;
@@ -1677,7 +1689,15 @@ function DealsTable({
       return next;
     });
   };
-  const vis = (key: string) => !hiddenCols.has(key);
+  // The Offering column doesn't exist for a workspace with Offerings off —
+  // not merely hidden. `headerHidden` also drops it from every header menu's
+  // "restore hidden columns" list, which would otherwise offer to bring back
+  // a column that can't render.
+  const vis = (key: string) =>
+    !hiddenCols.has(key) && (offeringsEnabled || key !== 'offering');
+  const headerHidden = offeringsEnabled
+    ? hiddenCols
+    : new Set([...hiddenCols].filter((k) => k !== 'offering'));
 
   return (
     <>
@@ -1731,7 +1751,7 @@ function DealsTable({
                   ) : (
                     <StageBadge stage={d.stage} />
                   )}
-                  <OfferingCell tags={d.offerings} />
+                  {offeringsEnabled ? <OfferingCell tags={d.offerings} /> : null}
                   <OwnerCell
                     ownerId={d.ownerId}
                     teammate={d.ownerId ? teammateById.get(d.ownerId) : undefined}
@@ -1774,7 +1794,7 @@ function DealsTable({
                   <HeaderMenu
                     colKey="name"
                     label="Name"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onShow={toggleColumn}
                   />
                 </span>
@@ -1785,7 +1805,7 @@ function DealsTable({
                     colKey="risk"
                     label="Risk"
                     align="right"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={
@@ -1804,7 +1824,7 @@ function DealsTable({
                   <HeaderMenu
                     colKey="stage"
                     label="Stage"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={<StageFilterBody filters={filters} onPush={onPushFilters} />}
@@ -1819,7 +1839,7 @@ function DealsTable({
                   <HeaderMenu
                     colKey="offering"
                     label="Offering"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={
@@ -1838,7 +1858,7 @@ function DealsTable({
                     colKey="amount"
                     label="Amount"
                     align="right"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={<AmountFilterBody filters={filters} onPush={onPushFilters} />}
@@ -1853,7 +1873,7 @@ function DealsTable({
                   <HeaderMenu
                     colKey="company"
                     label="Company"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={
@@ -1874,7 +1894,7 @@ function DealsTable({
                   <HeaderMenu
                     colKey="contact"
                     label="Contact"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                   />
@@ -1888,7 +1908,7 @@ function DealsTable({
                   <HeaderMenu
                     colKey="owner"
                     label="Owner"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={
@@ -1910,7 +1930,7 @@ function DealsTable({
                     colKey="closeDate"
                     label="Close date"
                     align="right"
-                    hidden={hiddenCols}
+                    hidden={headerHidden}
                     onHide={toggleColumn}
                     onShow={toggleColumn}
                     filter={<DateFilterBody filters={filters} onPush={onPushFilters} />}
@@ -2489,6 +2509,7 @@ function buildDealFilterChips(
     teammates: Teammate[];
     currentUserId: string;
     offeringOptions: OfferingOption[];
+    offeringsEnabled: boolean;
   },
 ): FilterChip[] {
   const chips: FilterChip[] = [];
@@ -2590,7 +2611,7 @@ function buildDealFilterChips(
         filters.riskBand === 'high' ? 'Risk: High' : 'Risk: Elevated and above',
     });
   }
-  if (filters.offeringIds && filters.offeringIds.length > 0) {
+  if (ctx.offeringsEnabled && filters.offeringIds && filters.offeringIds.length > 0) {
     // Resolve ids to names against the catalog rather than showing raw uuids.
     // An id the catalog no longer has (a hand-edited URL, or a link shared
     // from a workspace with a different catalog) falls back to a count, so
@@ -2609,7 +2630,7 @@ function buildDealFilterChips(
       }`,
     });
   }
-  if (filters.uncategorized) {
+  if (ctx.offeringsEnabled && filters.uncategorized) {
     chips.push({
       id: 'uncategorized',
       keys: ['uncategorized'],

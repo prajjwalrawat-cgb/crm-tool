@@ -83,6 +83,7 @@ import {
 } from '@/lib/deals/validation';
 import {
   insertDealOfferings,
+  isOfferingsEnabled,
   OfferingSyncError,
   resolveOfferingIds,
   syncDealOfferings,
@@ -401,15 +402,24 @@ export async function createDealAction(
       // round-trip that would blank the Company/Contact selects) and this is
       // the rule. Update has no equivalent block: legacy deals are untagged
       // and must stay editable. See `validateOfferingSelection`.
-      const offeringSelection = validateOfferingSelection(
-        parseOfferingSelection(formData),
-      );
-      if (!offeringSelection.ok) {
-        return {
-          ok: false,
-          message: offeringSelection.message,
-          fieldErrors: { offeringIds: [offeringSelection.message] },
-        };
+      //
+      // Only in a workspace that uses Offerings (0067). Off, the form has no
+      // field, so requiring one here would make it impossible to create a
+      // deal at all — the exact failure the switch exists to prevent.
+      const offeringsEnabled = await isOfferingsEnabled(tenant.id);
+      let primaryOfferingId: string | null = null;
+      if (offeringsEnabled) {
+        const offeringSelection = validateOfferingSelection(
+          parseOfferingSelection(formData),
+        );
+        if (!offeringSelection.ok) {
+          return {
+            ok: false,
+            message: offeringSelection.message,
+            fieldErrors: { offeringIds: [offeringSelection.message] },
+          };
+        }
+        primaryOfferingId = offeringSelection.primaryOfferingId;
       }
 
       // Per-unit pricing: when both are provided, Amount is derived server-side
@@ -513,20 +523,22 @@ export async function createDealAction(
         // `resolveOfferingIds` re-checks the ids against this tenant and
         // against `active`, so a stale form (an offering retired while the
         // drawer was open) fails with a sentence instead of a raw FK error.
-        const offeringIds = await resolveOfferingIds(
-          tx,
-          tenant.id,
-          parseOfferingSelection(formData).offeringIds,
-        );
-        if (offeringIds.length === 0) {
-          throw new OfferingsUnavailableError(OFFERINGS_REQUIRED_MESSAGE);
+        if (offeringsEnabled) {
+          const offeringIds = await resolveOfferingIds(
+            tx,
+            tenant.id,
+            parseOfferingSelection(formData).offeringIds,
+          );
+          if (offeringIds.length === 0) {
+            throw new OfferingsUnavailableError(OFFERINGS_REQUIRED_MESSAGE);
+          }
+          await insertDealOfferings(tx, {
+            tenantId: tenant.id,
+            dealId: row.id,
+            offeringIds,
+            primaryOfferingId,
+          });
         }
-        await insertDealOfferings(tx, {
-          tenantId: tenant.id,
-          dealId: row.id,
-          offeringIds,
-          primaryOfferingId: offeringSelection.primaryOfferingId,
-        });
 
         await recordActivity(tx, {
           tenantId: tenant.id,
@@ -743,6 +755,9 @@ export async function updateDealAction(
         ownerPatch = { ownerId: finalOwnerId };
       }
 
+      // Read OUTSIDE the transaction: the flag lookup opens its own.
+      const offeringsEnabled = await isOfferingsEnabled(tenant.id);
+
       let result: Deal | null;
       try {
         result = await tenantTransaction(async (tx) => {
@@ -903,11 +918,20 @@ export async function updateDealAction(
         // `syncDealOfferings` owns the rules: a retired tag already on the
         // deal survives, a tagged deal can't be emptied, an untagged legacy
         // deal is left alone.
-        await syncDealOfferings(tx, {
-          tenantId: tenant.id,
-          dealId: updated.id,
-          ...parseOfferingSelection(formData),
-        });
+        //
+        // SKIPPED ENTIRELY when the workspace has Offerings switched off
+        // (0067). The drawer renders no picker then, so the form submits no
+        // offering ids — and a sync fed an empty selection would try to strip
+        // every tag, which on a deal tagged before the switch means refusing
+        // the whole save ("can't be left with no offering"). Off must mean
+        // untouched, not emptied: the tags stay for when it's turned back on.
+        if (offeringsEnabled) {
+          await syncDealOfferings(tx, {
+            tenantId: tenant.id,
+            dealId: updated.id,
+            ...parseOfferingSelection(formData),
+          });
+        }
 
         const serialized = await loadSerializedDeal(tx, tenant.id, updated.id);
 

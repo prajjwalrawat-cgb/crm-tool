@@ -3,7 +3,11 @@ import Link from 'next/link';
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { requirePersonas } from '@/lib/personas/guards';
-import { REPORTS, type ReportRegistration } from '@/lib/reports/registry';
+import {
+  isReportEnabled,
+  REPORTS,
+  type ReportRegistration,
+} from '@/lib/reports/registry';
 import type { ReportCategory } from '@/lib/reports/types';
 import { cn } from '@/lib/utils';
 
@@ -33,8 +37,19 @@ const CATEGORY_META: Record<
 export default async function ReportsPage() {
   await requirePersonas(['manager', 'admin']);
   return await withTenantSession(async ({ tenant, userId }) => {
+    // Reports tied to a workspace feature that's switched off (e.g. Funnel
+    // by offering, 0067) are dropped BEFORE their runners fire — no tile, and
+    // no wasted query for a headline nobody will see.
+    const available = (
+      await Promise.all(
+        Object.values(REPORTS).map(async (report) =>
+          (await isReportEnabled(tenant.id, report)) ? report : null,
+        ),
+      )
+    ).filter((r): r is ReportRegistration => r !== null);
+
     const cards = await Promise.all(
-      Object.values(REPORTS).map(async (report) => {
+      available.map(async (report) => {
         let headline: string | null = null;
         try {
           const result = await report.runner(

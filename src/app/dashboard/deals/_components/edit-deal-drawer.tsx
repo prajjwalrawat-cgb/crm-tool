@@ -25,6 +25,7 @@ import {
   offeringRuleFor,
   type OfferingOption,
 } from '@/lib/offerings/types';
+import { canManageOfferings } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +34,7 @@ import { Drawer } from '../../_components/drawer';
 import { OwnerFormField } from '../../_components/owner-form-field';
 import { DealAmountFields } from './deal-amount-fields';
 import { DealCompanyContactFields } from './deal-company-contact-fields';
+import { OfferingsDisabledNotice } from './offerings-disabled-notice';
 import { OfferingsField } from './offerings-field';
 import { RollbackReasonModal } from './rollback-reason-modal';
 
@@ -57,6 +59,11 @@ type Props = {
   unitPricingEnabled: boolean;
   /** Active offerings only — a retired one can't be added to anything new. */
   offeringOptions: OfferingOption[];
+  /**
+   * Workspace switch (0067). OFF: no field, no rule — and the server skips
+   * the tag sync, so a deal tagged before the switch keeps its tags.
+   */
+  offeringsEnabled: boolean;
   onSubmit: (formData: FormData) => void;
   onDelete: () => void;
   pending: boolean;
@@ -78,6 +85,7 @@ export function EditDealDrawer({
   customFieldDefs,
   unitPricingEnabled,
   offeringOptions,
+  offeringsEnabled,
   onSubmit,
   onDelete,
   pending,
@@ -135,10 +143,12 @@ export function EditDealDrawer({
     // a deal that already carries tags may be re-tagged but not emptied, while
     // an untagged legacy deal is never blocked. See `offeringRuleFor`.
     const found = validateDealForm(fd, previousState, {
-      offeringRule: offeringRuleFor({
-        isNewDeal: false,
-        existingTagCount: deal?.offerings.length ?? 0,
-      }),
+      offeringRule: offeringsEnabled
+        ? offeringRuleFor({
+            isNewDeal: false,
+            existingTagCount: deal?.offerings.length ?? 0,
+          })
+        : undefined,
     });
     if (Object.keys(found).length > 0) {
       setClientErrors(found);
@@ -376,17 +386,27 @@ export function EditDealDrawer({
             from only one of the two reads as missing. `key` remounts the
             picker when the drawer switches deals, the same reason the form
             itself is keyed. */}
-        <OfferingsField
-          key={`off-${deal?.id ?? 'none'}`}
-          options={offeringOptions}
-          errors={errs.offeringIds}
-          required={(deal?.offerings.length ?? 0) > 0}
-          defaultSelectedIds={(deal?.offerings ?? []).map((o) => o.id)}
-          defaultPrimaryId={
-            (deal?.offerings ?? []).find((o) => o.isPrimary)?.id ?? null
-          }
-          extraOptions={deal?.offerings ?? []}
-        />
+        {offeringsEnabled ? (
+          <OfferingsField
+            key={`off-${deal?.id ?? 'none'}`}
+            options={offeringOptions}
+            errors={errs.offeringIds}
+            required={(deal?.offerings.length ?? 0) > 0}
+            defaultSelectedIds={(deal?.offerings ?? []).map((o) => o.id)}
+            defaultPrimaryId={
+              (deal?.offerings ?? []).find((o) => o.isPrimary)?.id ?? null
+            }
+            extraOptions={deal?.offerings ?? []}
+          />
+        ) : (
+          // Switch is off but this deal was tagged before it: say so, rather
+          // than letting the tags silently vanish. Non-blocking - the save
+          // leaves them untouched. Renders nothing for an untagged deal.
+          <OfferingsDisabledNotice
+            tags={deal?.offerings ?? []}
+            canTurnOn={canManageOfferings(currentRole)}
+          />
+        )}
 
         {canAssign ? (
           <OwnerFormField

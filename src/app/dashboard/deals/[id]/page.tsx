@@ -20,6 +20,7 @@ import { getDealStageHistory } from '@/lib/deals/stage-history';
 import { getDealScoreWithHistory } from '@/lib/deals/scoring/service';
 import { getDealRisk } from '@/lib/deals/risk/queries';
 import {
+  isOfferingsEnabled,
   listDealOfferings,
   listOfferingOptions,
 } from '@/lib/offerings/queries';
@@ -35,6 +36,7 @@ import {
   canAssignDeals,
   canManageDeals,
   canManageForecast,
+  canManageOfferings,
 } from '@/lib/rbac';
 import { listTasksForEntity } from '@/lib/tasks/queries';
 import { listTeammates } from '@/lib/teammates/queries';
@@ -57,6 +59,7 @@ import { DealApprovalControls } from './_components/deal-approval-controls';
 import { DealCloseDateCard } from './_components/deal-close-date-card';
 import { DealContactsCard } from './_components/deal-contacts-card';
 import { DealOfferingsCard } from './_components/deal-offerings-card';
+import { OfferingsDisabledNotice } from '../_components/offerings-disabled-notice';
 import { DealDocumentsCard } from './_components/deal-documents-card';
 import { DealFieldEditor } from './_components/deal-field-editor';
 import { DealInlineHeader } from './_components/deal-inline-header';
@@ -111,6 +114,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       dealScore,
       valueSplitRows,
       dealRisk,
+      offeringsEnabled,
       dealOfferingRows,
       offeringOptions,
     ] = await Promise.all([
@@ -140,6 +144,11 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       // Phase 1 risk score. A stored read — the nightly job writes it, this
       // page never computes it and never calls a model.
       getDealRisk(tenant.id, deal.id),
+      // Offerings (0067): a per-workspace switch. The two reads below run
+      // regardless — they're cheap, and gating them would mean awaiting the
+      // flag before the whole parallel batch — but the card only renders
+      // when the switch is on.
+      isOfferingsEnabled(tenant.id),
       // Tags ON this deal: the full catalog, retired entries included — a
       // retired offering must keep rendering where it already is.
       listDealOfferings(tenant.id, deal.id),
@@ -476,12 +485,20 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               {/* What this deal is selling (0066). Sits in Relationship
                   rather than beside Stage: it answers "what is this", the
                   same question as Company and Contact, not "where is it". */}
-              <DealOfferingsCard
-                dealId={deal.id}
-                initialOfferings={dealOfferingRows}
-                offeringOptions={offeringOptions}
-                canEdit={canEdit}
-              />
+              {offeringsEnabled ? (
+                <DealOfferingsCard
+                  dealId={deal.id}
+                  initialOfferings={dealOfferingRows}
+                  offeringOptions={offeringOptions}
+                  canEdit={canEdit}
+                />
+              ) : (
+                <OfferingsDisabledNotice
+                  tags={dealOfferingRows}
+                  canTurnOn={canManageOfferings(membership.role)}
+                  compact
+                />
+              )}
               <DealContactsCard
                 dealId={deal.id}
                 initialContacts={dealContactRows}
