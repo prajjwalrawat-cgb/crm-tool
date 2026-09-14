@@ -11,6 +11,7 @@ import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import {
   clearDealPrimary,
   countDealOfferings,
+  isOfferingsEnabled,
   resolveOfferingIds,
 } from '@/lib/offerings/queries';
 import { OFFERINGS_CANNOT_EMPTY_MESSAGE } from '@/lib/offerings/types';
@@ -23,6 +24,15 @@ export type DealOfferingResult = { ok: true } | { ok: false; message: string };
  * catalog those tags point at.
  */
 const PERMISSION = 'manageDeals' as const;
+
+/**
+ * The card is hidden when the workspace has Offerings switched off (0067),
+ * but hiding a button is not a permission check — a tab left open from before
+ * the switch, or a replayed request, still reaches these actions. Every write
+ * below refuses when the feature is off.
+ */
+const OFFERINGS_DISABLED_MESSAGE =
+  'Offerings have been turned off for this workspace by an admin, so this deal’s offerings can’t be changed right now. Its existing offerings are kept.';
 
 /** Cross-tenant guard, mirroring `contact-actions.ts`. */
 async function dealInTenant(
@@ -70,6 +80,9 @@ export async function addDealOfferingAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      if (!(await isOfferingsEnabled(tenant.id))) {
+        return { ok: false, message: OFFERINGS_DISABLED_MESSAGE };
+      }
       const deal = await dealInTenant(tenant.id, parsed.data.dealId);
       if (!deal) return { ok: false, message: 'Deal not found in this tenant.' };
 
@@ -151,6 +164,9 @@ export async function setPrimaryDealOfferingAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      if (!(await isOfferingsEnabled(tenant.id))) {
+        return { ok: false, message: OFFERINGS_DISABLED_MESSAGE };
+      }
       const updated = await tenantTransaction(async (tx) => {
         await clearDealPrimary(tx, tenant.id, parsed.data.dealId);
         const [row] = await tx
@@ -207,6 +223,9 @@ export async function removeDealOfferingAction(
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
+      if (!(await isOfferingsEnabled(tenant.id))) {
+        return { ok: false, message: OFFERINGS_DISABLED_MESSAGE };
+      }
       const refusal = await tenantTransaction(async (tx) => {
         // Count BEFORE deleting: "is this the last one" cannot be asked after
         // the row is gone, and asking outside the transaction would race a

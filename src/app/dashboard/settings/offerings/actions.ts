@@ -13,6 +13,7 @@ import {
   updateOffering,
 } from '@/lib/offerings/queries';
 import { OFFERING_CATEGORIES } from '@/lib/offerings/types';
+import { setWorkspaceFlags } from '@/lib/workspace-settings/queries';
 
 export type OfferingSettingsResult = { ok: true } | { ok: false; message: string };
 
@@ -30,7 +31,40 @@ function revalidateOfferingConsumers(): void {
   revalidatePath('/dashboard/settings/offerings');
   revalidatePath('/dashboard/deals');
   revalidatePath('/dashboard/deals/board');
+  revalidatePath('/dashboard/reports');
   revalidatePath('/dashboard/reports/funnel-by-offering');
+}
+
+/**
+ * Switch Offerings on or off for this workspace (0067).
+ *
+ * Gated on `manageOfferings` (owner + admin), the same tier that edits the
+ * catalog — the switch changes what every rep's create form demands, so it
+ * is a workspace-shape decision, not a personal preference.
+ *
+ * Switching OFF deletes nothing. Every tag and catalog row is kept, so a
+ * workspace that switches off by mistake — or turns it off for a quarter —
+ * gets its funnel history back intact when it switches on again.
+ *
+ * The deal DETAIL layout (`/dashboard/deals/[id]`) is revalidated too: its
+ * Offerings card appears and disappears with this flag.
+ */
+export async function setOfferingsEnabledAction(
+  enabled: boolean,
+): Promise<OfferingSettingsResult> {
+  const gate = await checkPermission('manageOfferings');
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const { tenant, membership } = gate;
+
+  return runWithTenantContext(
+    { tenantId: tenant.id, userId: membership.userId },
+    async () => {
+      await setWorkspaceFlags(tenant.id, { offeringsEnabled: Boolean(enabled) });
+      revalidateOfferingConsumers();
+      revalidatePath('/dashboard/deals/[id]', 'page');
+      return { ok: true };
+    },
+  );
 }
 
 const nameSchema = z

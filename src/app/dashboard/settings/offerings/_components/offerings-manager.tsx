@@ -27,6 +27,7 @@ import {
   createOfferingAction,
   reorderOfferingsAction,
   setOfferingActiveAction,
+  setOfferingsEnabledAction,
   updateOfferingAction,
 } from '../actions';
 
@@ -43,9 +44,37 @@ export type OfferingListItem = {
 const inputCls =
   'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13.5px] text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-[#2A2A2A] dark:bg-[#111111] dark:text-[#FAFAFA]';
 
-export function OfferingsManager({ initial }: { initial: OfferingListItem[] }) {
+export function OfferingsManager({
+  enabled: initialEnabled,
+  initial,
+}: {
+  enabled: boolean;
+  initial: OfferingListItem[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [enabled, setEnabled] = useState(initialEnabled);
+
+  // Optimistic flip, reverted on failure — same shape as the Stage Gates
+  // switch, so the two workspace kill-switches behave identically.
+  function toggleEnabled() {
+    const next = !enabled;
+    setEnabled(next);
+    startTransition(async () => {
+      const res = await setOfferingsEnabledAction(next);
+      if (!res.ok) {
+        setEnabled(!next);
+        toast.error(res.message);
+        return;
+      }
+      toast.success(
+        next
+          ? 'Offerings turned on — new deals now require one'
+          : 'Offerings turned off — hidden everywhere, nothing deleted',
+      );
+      router.refresh();
+    });
+  }
 
   // Add-form state.
   const [name, setName] = useState('');
@@ -103,6 +132,51 @@ export function OfferingsManager({ initial }: { initial: OfferingListItem[] }) {
 
   return (
     <div>
+      {/* -------- workspace switch -------- */}
+      <div className="mb-5 flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-[#262626] dark:bg-[#0F0F0F]">
+        <div>
+          <div className="text-[13px] font-medium text-slate-900 dark:text-[#FAFAFA]">
+            Use offerings in this workspace
+          </div>
+          <div className="text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+            {enabled
+              ? 'On: new deals must be tagged, and the Offering column, filters, deal card and funnel report are shown.'
+              : 'Off: hidden everywhere and never required. Existing tags and this catalog are kept, and come back when you turn it on.'}
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Use offerings in this workspace"
+          onClick={toggleEnabled}
+          disabled={pending}
+          className={cn(
+            'relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-60',
+            enabled ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-[#333]',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition',
+              enabled ? 'left-[22px]' : 'left-0.5',
+            )}
+          />
+        </button>
+      </div>
+
+      {/* Editable while OFF, on purpose: a workspace should be able to
+          replace the seeded list with its own portfolio BEFORE the mandatory
+          picker goes live for its reps, not after. Dimmed, not disabled. */}
+      {!enabled ? (
+        <p className="mb-3 text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+          You can set up the catalog below before turning offerings on —
+          retire anything this workspace doesn&apos;t sell and add what it
+          does.
+        </p>
+      ) : null}
+
+      <div className={cn(!enabled && 'opacity-70')}>
       {/* -------- add -------- */}
       <div className="mb-5 rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-[#2A2A2A] dark:bg-[#111111]">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -297,6 +371,7 @@ export function OfferingsManager({ initial }: { initial: OfferingListItem[] }) {
           </section>
         );
       })}
+      </div>
     </div>
   );
 }

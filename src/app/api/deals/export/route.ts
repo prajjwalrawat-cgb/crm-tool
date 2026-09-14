@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/server';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { fromMinorUnits } from '@/lib/deals/currency';
-import { parseDealFilters } from '@/lib/deals/filters';
+import { parseDealFilters, withoutOfferingFilters } from '@/lib/deals/filters';
+import { isOfferingsEnabled } from '@/lib/offerings/queries';
 import { decodeCursor, type Cursor } from '@/lib/pagination/cursor';
 import { listDeals, type DealRow } from '@/lib/deals/queries';
 import { DEAL_STAGE_LABELS } from '@/lib/deals/schema';
@@ -44,13 +45,20 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const raw = Object.fromEntries(url.searchParams.entries());
-  const filters = parseDealFilters(raw);
+  const parsedFilters = parseDealFilters(raw);
   const search = url.searchParams.get('q')?.trim() || undefined;
 
-  const { rows, splits } = await runWithTenantContext(
+  const { rows, splits, offeringsEnabled } = await runWithTenantContext(
     { tenantId: orgId, userId },
     async () => {
       const membership = await requireMembership();
+      // Same rule as the list page (0067): a workspace with Offerings off
+      // ignores the offering filters, so the file matches the screen it was
+      // exported from.
+      const offeringsEnabled = await isOfferingsEnabled(orgId);
+      const filters = offeringsEnabled
+        ? parsedFilters
+        : withoutOfferingFilters(parsedFilters);
       const restrictToOwnerOrUnassigned =
         personaOf(membership.role) === 'sales' ? userId : undefined;
 
@@ -80,7 +88,7 @@ export async function GET(req: NextRequest) {
           all.map((d) => d.id),
         ),
       );
-      return { rows: all, splits: byDeal };
+      return { rows: all, splits: byDeal, offeringsEnabled };
     },
   );
 
@@ -90,7 +98,7 @@ export async function GET(req: NextRequest) {
   );
   const ownerNames = await resolveAuthorLookup(ownerIds);
 
-  const csv = buildCsv(rows, ownerNames, splits);
+  const csv = buildCsv(rows, ownerNames, splits, offeringsEnabled);
   const date = new Date().toISOString().slice(0, 10);
   return new NextResponse(`﻿${csv}`, {
     headers: {
@@ -109,14 +117,6 @@ const COLUMNS = [
   'Company',
   'Contact',
   'Contact Email',
-  // The PRIMARY offering, matching the list's Offering column — and
-  // "Uncategorized" rather than a blank cell, so a spreadsheet filter can
-  // isolate the untagged backlog the same way the list's chip does. `Offering
-  // Count` is what stops the single name reading as the whole story on a
-  // bundle deal.
-  'Offering',
-  'Offering Category',
-  'Offering Count',
   'Owner',
   'Close Date',
   'Forecast Category',
@@ -130,11 +130,31 @@ const COLUMNS = [
   'Updated',
 ] as const;
 
+/**
+ * The Offerings columns (0066), inserted after Contact Email — only for a
+ * workspace that has the feature on (0067). A workspace with it off gets the
+ * sheet it always had, rather than three columns reading "Uncategorized" for a
+ * feature it doesn't use.
+ *
+ * The PRIMARY offering, matching the list's Offering column — and
+ * "Uncategorized" rather than a blank cell, so a spreadsheet filter can
+ * isolate the untagged backlog the same way the list's chip does. `Offering
+ * Count` is what stops the single name reading as the whole story on a bundle
+ * deal.
+ */
+const OFFERING_COLUMNS = ['Offering', 'Offering Category', 'Offering Count'] as const;
+const OFFERING_COLUMNS_AFTER = COLUMNS.indexOf('Contact Email') + 1;
+
 function buildCsv(
   rows: DealRow[],
   ownerNames: Record<string, string>,
   splits: Map<string, SplitRow[]>,
+  offeringsEnabled: boolean,
 ): string {
+  const baseColumns: string[] = [...COLUMNS];
+  if (offeringsEnabled) {
+    baseColumns.splice(OFFERING_COLUMNS_AFTER, 0, ...OFFERING_COLUMNS);
+  }
   // A breakdown is a grid of (element x year), so the number of stored rows is
   // a CELL count — the column width is the distinct YEAR count. Reading
   // `.length` here would over-count the years and, worse, `find`-ing one row
@@ -149,7 +169,7 @@ function buildCsv(
     0,
   );
   const header = [
-    ...COLUMNS,
+    ...baseColumns,
     ...(maxYears > 0
       ? [
           'Contract Start',
@@ -201,11 +221,7 @@ function buildCsv(
         r.companyName ?? '',
         r.contactName ?? '',
         r.contactEmail ?? '',
-        primaryOfferingOf(r.offerings)?.name ?? UNCATEGORIZED_LABEL,
-        primaryOfferingOf(r.offerings)
-          ? OFFERING_CATEGORY_LABELS[primaryOfferingOf(r.offerings)!.category]
-          : '',
-        String(r.offerings.length),
+        ...(offeringsEnabled ? offeringCells(r) : []),
         (r.ownerId && ownerNames[r.ownerId]) || r.ownerId || '',
         r.expectedCloseDate ?? '',
         r.forecastCategory
@@ -227,6 +243,16 @@ function buildCsv(
     );
   }
   return lines.join('\r\n');
+}
+
+/** The three Offering cells, in `OFFERING_COLUMNS` order. */
+function offeringCells(r: DealRow): string[] {
+  const primary = primaryOfferingOf(r.offerings);
+  return [
+    primary?.name ?? UNCATEGORIZED_LABEL,
+    primary ? OFFERING_CATEGORY_LABELS[primary.category] : '',
+    String(r.offerings.length),
+  ];
 }
 
 /** RFC-4180 CSV escaping: quote fields containing comma, quote, or newline. */

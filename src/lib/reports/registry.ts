@@ -32,6 +32,9 @@ import {
   winLossRateRunner,
   type WinLossRateRow,
 } from './queries/win-loss-rate';
+import type { WorkspaceFeatureFlag } from '@/db/schema';
+import { isFeatureEnabled } from '@/lib/workspace-settings/queries';
+
 import type {
   AnyReportFilter,
   ChartHint,
@@ -66,6 +69,14 @@ export type ReportRegistrationBase = {
   supportsOwnerScope: boolean;
   /** The query function. Typed loosely here; narrowed at the call site. */
   runner: ReportRunner<AnyReportFilter, unknown, unknown>;
+  /**
+   * A per-workspace feature flag this report belongs to. When the flag is off
+   * for a tenant, the report does not exist there: absent from the list, a
+   * 404 on its URL, refused for CSV. Check it with `isReportEnabled` —
+   * never by reading the flag directly at a call site, or a new consumer of
+   * the registry will forget it.
+   */
+  requiresFlag?: WorkspaceFeatureFlag;
 };
 
 const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
@@ -92,6 +103,9 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsDateRange: false,
     supportsOwnerScope: true,
     runner: funnelByOfferingRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
+    // Offerings is a per-workspace switch (0067); the funnel means nothing in
+    // a workspace that doesn't tag deals.
+    requiresFlag: 'offeringsEnabled',
   },
   'win-loss-rate': {
     title: 'Win / Loss rate',
@@ -185,6 +199,19 @@ export const REPORT_IDS = Object.keys(REPORTS) as ReportId[];
 
 export function getReport(id: string): ReportRegistration | null {
   return id in REPORTS ? REPORTS[id as ReportId] : null;
+}
+
+/**
+ * Does this report exist for this tenant? True unless it declares a
+ * `requiresFlag` that is off. Every registry consumer — the list page, the
+ * detail page, the CSV action — goes through here.
+ */
+export async function isReportEnabled(
+  tenantId: string,
+  report: ReportRegistration,
+): Promise<boolean> {
+  if (!report.requiresFlag) return true;
+  return isFeatureEnabled(tenantId, report.requiresFlag);
 }
 
 /**

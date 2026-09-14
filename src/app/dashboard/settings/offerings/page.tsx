@@ -1,5 +1,8 @@
 import { withTenantSession } from '@/lib/auth-guard';
-import { listOfferingsWithUsage } from '@/lib/offerings/queries';
+import {
+  isOfferingsEnabled,
+  listOfferingsWithUsage,
+} from '@/lib/offerings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
 
 import { OfferingsManager } from './_components/offerings-manager';
@@ -9,7 +12,10 @@ export const metadata = { title: 'Offerings · Settings' };
 export default async function OfferingsSettingsPage() {
   await requirePersonas(['admin']);
   return await withTenantSession(async ({ tenant }) => {
-    const rows = await listOfferingsWithUsage(tenant.id);
+    const [rows, enabled] = await Promise.all([
+      listOfferingsWithUsage(tenant.id),
+      isOfferingsEnabled(tenant.id),
+    ]);
 
     return (
       <main className="space-y-4">
@@ -29,6 +35,7 @@ export default async function OfferingsSettingsPage() {
           </p>
         </header>
         <OfferingsManager
+          enabled={enabled}
           initial={rows.map((o) => ({
             id: o.id,
             name: o.name,
