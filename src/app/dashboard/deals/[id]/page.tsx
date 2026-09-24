@@ -12,7 +12,11 @@ import { getDealSummaryInsight } from '@/lib/intelligence/runner';
 import { LiveDealSummaryCard } from '../../intelligence/_components/live-ai-card';
 import { listCommentsForEntity } from '@/lib/comments/queries';
 import { formatCurrency, KNOWN_CURRENCIES } from '@/lib/deals/currency';
-import { listContactOptions } from '@/lib/contacts/queries';
+import { listCompanyOptionsScoped } from '@/lib/companies/queries';
+import {
+  listContactOptions,
+  listContactPickerOptions,
+} from '@/lib/contacts/queries';
 import { listDealContacts } from '@/lib/deals/contacts';
 import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
@@ -30,6 +34,7 @@ import { PATH_STAGES } from '@/lib/stage-gates/types';
 import { DEAL_TYPE_LABELS, DEAL_TYPES } from '@/lib/deals/schema';
 import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
+import { personaOf } from '@/lib/personas';
 import { listNotesForEntity } from '@/lib/notes/queries';
 import {
   canApproveDeals,
@@ -96,6 +101,13 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     if (!deal) notFound();
 
     const aiMode = getAIMode();
+    // Picker scope for Company / Contact, same as the deals list: sales see
+    // records they own or unassigned. Chained off the (cached) membership
+    // read so the option loads still run inside the parallel batch below.
+    const membershipPromise = requireMembership();
+    const pickerScopePromise = membershipPromise.then((m) =>
+      personaOf(m.role) === 'sales' ? userId : undefined,
+    );
     const [
       membership,
       cachedSummary,
@@ -117,8 +129,10 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       offeringsEnabled,
       dealOfferingRows,
       offeringOptions,
+      companyPickerOptions,
+      contactPickerOptions,
     ] = await Promise.all([
-      requireMembership(),
+      membershipPromise,
       getCachedSummary(tenant.id, 'deal', deal.id),
       listNotesForEntity(tenant.id, 'deal', deal.id, { limit: 100 }),
       listCommentsForEntity(tenant.id, 'deal', deal.id, { limit: 200 }),
@@ -154,6 +168,9 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       listDealOfferings(tenant.id, deal.id),
       // The ADD picker: active entries only.
       listOfferingOptions(tenant.id),
+      // Company / Contact pickers in the Relationship section.
+      pickerScopePromise.then((scope) => listCompanyOptionsScoped(tenant.id, scope)),
+      pickerScopePromise.then((scope) => listContactPickerOptions(tenant.id, scope)),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -467,10 +484,61 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             </SidebarSection>
 
             <SidebarSection title="Relationship">
-              <DetailCard label="Company" value={deal.companyName ?? '—'} />
-              <DetailCard
+              {/* Changing the company clears the contact (contacts are
+                  company-scoped), same as the inline edit on the deals list. */}
+              <EditableDetailCard
+                dealId={deal.id}
+                label="Company"
+                display={deal.companyName ?? '—'}
+                canEdit={canEdit}
+                extraPayload={{ contactId: null }}
+                fields={[
+                  {
+                    key: 'companyId',
+                    type: 'select',
+                    value: deal.companyId ?? '',
+                    whenEmpty: 'null',
+                    options: withCurrent(
+                      [
+                        { value: '', label: '— No company —' },
+                        ...companyPickerOptions.map((c) => ({
+                          value: c.id,
+                          label: c.name,
+                        })),
+                      ],
+                      deal.companyId,
+                      deal.companyName,
+                    ),
+                  },
+                ]}
+              />
+              <EditableDetailCard
+                dealId={deal.id}
                 label="Contact"
-                value={deal.contactName ?? deal.contactEmail ?? '—'}
+                display={deal.contactName ?? deal.contactEmail ?? '—'}
+                canEdit={canEdit}
+                fields={[
+                  {
+                    key: 'contactId',
+                    type: 'select',
+                    value: deal.contactId ?? '',
+                    whenEmpty: 'null',
+                    options: withCurrent(
+                      [
+                        { value: '', label: '— No contact —' },
+                        // Within the deal's company; a deal with no company
+                        // can take any contact (an individual customer).
+                        ...contactPickerOptions
+                          .filter(
+                            (c) => !deal.companyId || c.companyId === deal.companyId,
+                          )
+                          .map((c) => ({ value: c.id, label: c.label })),
+                      ],
+                      deal.contactId,
+                      deal.contactName ?? deal.contactEmail,
+                    ),
+                  },
+                ]}
               />
               <DealOwnerPicker
                 dealId={deal.id}
@@ -718,6 +786,20 @@ export default async function DealDetailPage({ params }: { params: Params }) {
  * subtle divider, so the left column reads as three scannable sections
  * (Deal Info / Relationship / Context) rather than one flat stack.
  */
+/**
+ * Picker options plus the deal's current link when role scope hid it (a
+ * sales rep viewing a deal linked to someone else's record), so the select
+ * opens on the real value instead of silently showing the first option.
+ */
+function withCurrent(
+  options: Array<{ value: string; label: string }>,
+  currentId: string | null,
+  currentLabel: string | null,
+): Array<{ value: string; label: string }> {
+  if (!currentId || options.some((o) => o.value === currentId)) return options;
+  return [...options, { value: currentId, label: currentLabel ?? '(current)' }];
+}
+
 function SidebarSection({
   title,
   children,
