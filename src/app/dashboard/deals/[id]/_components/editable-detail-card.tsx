@@ -43,6 +43,7 @@ export function EditableDetailCard({
   fields,
   canEdit,
   hint,
+  extraPayload,
 }: {
   dealId: string;
   label: string;
@@ -52,6 +53,9 @@ export function EditableDetailCard({
   fields?: CardField[];
   canEdit: boolean;
   hint?: string;
+  /** Fixed keys sent alongside a changed value (e.g. clearing the contact
+   *  when the company changes). Plain data, so it can cross from the server. */
+  extraPayload?: Record<string, string | null>;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -89,7 +93,7 @@ export function EditableDetailCard({
     }
     // Field keys ARE the patch keys, so the payload is built here rather than
     // via a mapper prop — a function can't cross the server/client boundary.
-    const payload: Record<string, unknown> = { id: dealId };
+    const payload: Record<string, unknown> = { ...extraPayload, id: dealId };
     for (const f of fields) {
       const raw = values[f.key] ?? '';
       payload[f.key] =

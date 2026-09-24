@@ -2184,24 +2184,47 @@ export async function patchDealAction(
           : false;
 
       // Resolve linked company/contact (tenant + role scope) before the write.
-      let linkPatch: Record<string, unknown> = {};
+      // Only the side(s) actually sent are written: a contact-only edit (deal
+      // detail page) must not unlink the company, and vice versa.
+      const linkPatch: Record<string, unknown> = {};
       if (d.companyId !== undefined || d.contactId !== undefined) {
         const restrictToOwnerId =
           personaOf(membership.role) === 'sales' ? membership.userId : undefined;
+        // A contact sent alone is still checked against the deal's current
+        // company, so it can't be paired with another company's contact.
+        let companyForCheck = d.companyId ?? null;
+        if (d.companyId === undefined) {
+          const [current] = await tenantTransaction((tx) =>
+            tx
+              .select({ companyId: deals.companyId })
+              .from(deals)
+              .where(
+                and(
+                  eq(deals.id, d.id),
+                  eq(deals.tenantId, tenant.id),
+                  isNull(deals.deletedAt),
+                ),
+              )
+              .limit(1),
+          );
+          companyForCheck = current?.companyId ?? null;
+        }
         const links = await resolveDealLinks(
           tenant.id,
           restrictToOwnerId,
-          d.companyId ?? null,
+          companyForCheck,
           d.contactId ?? null,
         );
         if (!links.ok) return { ok: false, message: links.message };
-        linkPatch = {
-          companyId: links.companyId,
-          contactId: links.contactId,
-          companyNameText: null,
-          contactNameText: null,
-          contactEmailText: null,
-        };
+        if (d.companyId !== undefined) {
+          linkPatch.companyId = links.companyId;
+          linkPatch.companyNameText = null;
+        }
+        if (d.contactId !== undefined) {
+          linkPatch.contactId = links.contactId;
+          linkPatch.contactNameText = null;
+          linkPatch.contactEmailText = null;
+        }
       }
 
       let updated: typeof deals.$inferSelect | null;
