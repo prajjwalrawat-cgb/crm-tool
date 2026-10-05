@@ -101,6 +101,9 @@ export function InvoiceDetailDrawer({
               <span />
             )}
             <div className="flex items-center gap-2">
+              {/* Same rule as delete, and as updateInvoiceAction enforces:
+                  managers can open any PI to record payments, not edit it. */}
+              {canDelete ? (
               <button
                 type="button"
                 onClick={() => onEdit(data)}
@@ -109,6 +112,7 @@ export function InvoiceDetailDrawer({
                 <Pencil className="h-4 w-4" aria-hidden />
                 Edit
               </button>
+              ) : null}
               <DownloadPdfButton id={data.id} variant="button" />
             </div>
           </div>
