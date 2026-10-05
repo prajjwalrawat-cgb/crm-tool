@@ -89,6 +89,23 @@ const PERMISSIONS = {
    * matches who already sees every rep's targets.
    */
   viewTeamIncentives: ['owner', 'admin', 'manager'],
+  /**
+   * Collections diagnostic (0069). Signing off a credit period longer than
+   * the workspace standard — the "sales head / finance" approval. Same tier
+   * as approving a Won deal.
+   */
+  approveCreditTerms: ['owner', 'admin', 'manager'],
+  /**
+   * Recording (and correcting) payments received against an invoice. Not the
+   * rep: a payment is what the report — and later, payouts — trust as cash in,
+   * so it is entered by the people who sign off deals, not by the person whose
+   * number it moves.
+   */
+  recordPayments: ['owner', 'admin', 'manager'],
+  /** The Credit Period vs Achievement report. Team view, like Targets. */
+  viewCollections: ['owner', 'admin', 'manager'],
+  /** The workspace standard credit period. Admin tier. */
+  manageCollectionSettings: ['owner', 'admin'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

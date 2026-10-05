@@ -2,6 +2,7 @@ import { relations } from 'drizzle-orm';
 import {
   bigint,
   index,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -55,6 +56,15 @@ export const proformaInvoices = pgTable(
     consignee: jsonb('consignee').$type<InvoiceParty | null>(),
 
     paymentTerms: text('payment_terms'),
+    /**
+     * The deal this PI bills (0069). Optional; links the invoice to the deal's
+     * owner for the collections report. Unlinked invoices count in company
+     * totals but are attributed to nobody. FK is declared in the migration
+     * (ON DELETE SET NULL) rather than here, to avoid a schema import cycle.
+     */
+    dealId: uuid('deal_id'),
+    /** Per-invoice credit-days override (0069). Null = the deal's terms, else the standard. */
+    creditDays: integer('credit_days'),
     deliveryTerms: text('delivery_terms'),
     notes: text('notes'),
 

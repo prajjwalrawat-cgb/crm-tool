@@ -8,6 +8,7 @@ export * from './password-reset-tokens';
 export * from './org-invitations';
 export * from './sales-targets';
 export * from './incentives';
+export * from './collections';
 export * from './proforma-invoices';
 export * from './proforma-invoice-items';
 export * from './invoice-seller-profiles';

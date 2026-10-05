@@ -13,6 +13,9 @@ import { InvoiceForm, type SellerProfileOption } from './invoice-form';
 import type { InvoiceListRow } from '@/lib/invoices/queries';
 import { formatMoneyMinor } from '@/lib/invoices/money';
 import type { InvoicePdfData } from '@/lib/invoices/types';
+import type { InvoiceStatus } from '@/lib/collections/diagnostic';
+
+import { InvoiceStatusBadge } from './invoice-status-badge';
 
 const dateFmt = new Intl.DateTimeFormat('en-IN', {
   day: '2-digit',
@@ -32,6 +35,7 @@ export function InvoicesView({
   sellerProfiles,
   defaultPaymentTerms,
   defaultDeliveryTerms,
+  statuses,
 }: {
   rows: InvoiceListRow[];
   total: number;
@@ -44,6 +48,8 @@ export function InvoicesView({
   sellerProfiles: SellerProfileOption[];
   defaultPaymentTerms: string;
   defaultDeliveryTerms: string;
+  /** Collection status per invoice id (0069). */
+  statuses: Record<string, InvoiceStatus>;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
@@ -133,6 +139,7 @@ export function InvoicesView({
                   <th className="px-4 py-2.5 text-left font-medium">Date</th>
                   <th className="px-4 py-2.5 text-left font-medium">Buyer</th>
                   <th className="px-4 py-2.5 text-right font-medium">Total</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
@@ -148,6 +155,9 @@ export function InvoicesView({
                     <td className="px-4 py-2.5 text-slate-700">{r.buyerName}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-slate-900">
                       {formatMoneyMinor(r.totalMinor, r.currency)}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {statuses[r.id] ? <InvoiceStatusBadge status={statuses[r.id]!} /> : null}
                     </td>
                     <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <DownloadPdfButton id={r.id} />

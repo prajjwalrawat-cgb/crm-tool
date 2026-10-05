@@ -1,4 +1,5 @@
 import { withTenantSession } from '@/lib/auth-guard';
+import { invoiceStatusesFor } from '@/lib/collections/queries';
 import { listInvoices } from '@/lib/invoices/queries';
 import { listSellerProfiles } from '@/lib/invoices/seller-profiles';
 import { getInvoiceSettings } from '@/lib/invoices/settings';
@@ -40,6 +41,11 @@ export default async function InvoicesPage({
       listSellerProfiles(tenant.id),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / size));
+    const statuses = await invoiceStatusesFor(
+      tenant.id,
+      rows.map((r) => r.id),
+      new Date().toISOString().slice(0, 10),
+    );
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -62,6 +68,7 @@ export default async function InvoicesPage({
           sellerProfiles={sellerProfiles}
           defaultPaymentTerms={settings.paymentTerms}
           defaultDeliveryTerms={settings.deliveryTerms}
+          statuses={Object.fromEntries(statuses)}
         />
       </main>
     );

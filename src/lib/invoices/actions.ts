@@ -15,6 +15,8 @@ import {
   getInvoiceWithItems,
   updateInvoice,
 } from './queries';
+import { invoiceHasPayments } from '@/lib/collections/queries';
+
 import { createInvoiceSchema } from './schema';
 import { getInvoiceSettings } from './settings';
 import type { InvoicePdfData } from './types';
@@ -151,6 +153,16 @@ export async function deleteInvoiceAction(
     const isCreator = data.invoice.createdBy === userId;
     if (!isManager && !isCreator) {
       return { ok: false, error: 'You can only delete invoices you created.' };
+    }
+
+    // Deleting a PI cascades to its payments (0069). Those are finance's
+    // record of cash received, so a PI with payments can't be deleted until
+    // whoever recorded them removes them.
+    if (await invoiceHasPayments(tenantId, id)) {
+      return {
+        ok: false,
+        error: 'This invoice has payments recorded against it. Remove the payments first (manager or admin).',
+      };
     }
 
     await deleteInvoice(tenantId, id);

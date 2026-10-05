@@ -86,29 +86,29 @@ export default async function IncentiveSettingsPage({
           <table className="w-full text-[13px]">
             <thead className="text-left text-[11px] uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
               <tr>
-                <th className="py-1.5 font-medium">Resource</th>
-                <th className="py-1.5 font-medium">Status</th>
-                <th className="py-1.5 text-right font-medium">Fixed CTC</th>
-                <th className="py-1.5 text-right font-medium">Target variable</th>
-                <th className="py-1.5 font-medium">Actuals</th>
-                <th className="py-1.5" />
+                <th className="px-3 py-1.5 font-medium">Resource</th>
+                <th className="px-3 py-1.5 font-medium">Status</th>
+                <th className="px-3 py-1.5 text-right font-medium">Fixed CTC</th>
+                <th className="px-3 py-1.5 text-right font-medium">Target variable</th>
+                <th className="px-3 py-1.5 font-medium">Actuals</th>
+                <th className="px-3 py-1.5" />
               </tr>
             </thead>
             <tbody>
               {resources.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-slate-500">No team members yet.</td>
+                  <td colSpan={6} className="px-3 py-6 text-center text-slate-500">No team members yet.</td>
                 </tr>
               ) : (
                 resources.map((t) => {
                   const p = planByUser.get(t.id);
                   return (
                     <tr key={t.id} className="border-t border-slate-100 dark:border-[#1F1F1F]">
-                      <td className="py-2">
+                      <td className="px-3 py-2">
                         <div className="font-medium text-slate-800 dark:text-[#FAFAFA]">{t.displayName}</div>
                         {t.role ? <div className="text-[11px] capitalize text-slate-400">{t.role}</div> : null}
                       </td>
-                      <td className="py-2">
+                      <td className="px-3 py-2">
                         {p ? (
                           <span
                             className={cn(
@@ -124,10 +124,10 @@ export default async function IncentiveSettingsPage({
                           <span className="text-[12px] text-slate-400">No plan</span>
                         )}
                       </td>
-                      <td className="py-2 text-right tabular-nums">{p ? fmtL(Number(p.fixedCtc)) : '—'}</td>
-                      <td className="py-2 text-right tabular-nums">{p ? fmtL(Number(p.targetVariable)) : '—'}</td>
-                      <td className="py-2 text-[12px] text-slate-500">{p ? p.actualsSource : '—'}</td>
-                      <td className="py-2 text-right">
+                      <td className="px-3 py-2 text-right tabular-nums">{p ? fmtL(Number(p.fixedCtc)) : '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{p ? fmtL(Number(p.targetVariable)) : '—'}</td>
+                      <td className="px-3 py-2 text-[12px] text-slate-500">{p ? p.actualsSource : '—'}</td>
+                      <td className="px-3 py-2 text-right">
                         <Link
                           href={
                             p

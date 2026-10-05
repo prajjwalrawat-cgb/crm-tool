@@ -1,6 +1,7 @@
 'use client';
 
 import { Loader2, Pencil, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
@@ -13,6 +14,7 @@ import type { InvoicePdfData, PdfParty } from '@/lib/invoices/types';
 
 import { Drawer } from '../../_components/drawer';
 import { DownloadPdfButton } from './download-pdf-button';
+import { InvoiceCollectionPanel } from './invoice-collection-panel';
 
 export function InvoiceDetailDrawer({
   invoiceId,
@@ -29,6 +31,7 @@ export function InvoiceDetailDrawer({
   currentUserId: string;
   canManageAll: boolean;
 }) {
+  const router = useRouter();
   const [data, setData] = useState<InvoicePdfData | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleting, startDelete] = useTransition();
@@ -119,7 +122,10 @@ export function InvoiceDetailDrawer({
       ) : !data ? (
         <p className="text-sm text-slate-500">Invoice not found.</p>
       ) : (
-        <DetailBody data={data} />
+        <div className="space-y-5">
+          <DetailBody data={data} />
+          <InvoiceCollectionPanel invoiceId={data.id} onChanged={() => router.refresh()} />
+        </div>
       )}
     </Drawer>
   );

@@ -20,6 +20,7 @@ import {
 import { listDealContacts } from '@/lib/deals/contacts';
 import { listDealDocuments } from '@/lib/deals/documents';
 import { getDealById } from '@/lib/deals/queries';
+import { getCollectionSettings, getDealCreditTerms } from '@/lib/collections/queries';
 import { getDealStageHistory } from '@/lib/deals/stage-history';
 import { getDealScoreWithHistory } from '@/lib/deals/scoring/service';
 import { getDealRisk } from '@/lib/deals/risk/queries';
@@ -37,6 +38,7 @@ import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
 import { listNotesForEntity } from '@/lib/notes/queries';
 import {
+  can,
   canApproveDeals,
   canAssignDeals,
   canManageDeals,
@@ -63,6 +65,7 @@ import { RelationshipHealthCard } from '../../_components/relationship-health-ca
 import { DealApprovalControls } from './_components/deal-approval-controls';
 import { DealCloseDateCard } from './_components/deal-close-date-card';
 import { DealContactsCard } from './_components/deal-contacts-card';
+import { DealCreditTermsCard } from './_components/deal-credit-terms-card';
 import { DealOfferingsCard } from './_components/deal-offerings-card';
 import { OfferingsDisabledNotice } from '../_components/offerings-disabled-notice';
 import { DealDocumentsCard } from './_components/deal-documents-card';
@@ -131,6 +134,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       offeringOptions,
       companyPickerOptions,
       contactPickerOptions,
+      creditTerms,
+      collectionSettings,
     ] = await Promise.all([
       membershipPromise,
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -171,6 +176,9 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       // Company / Contact pickers in the Relationship section.
       pickerScopePromise.then((scope) => listCompanyOptionsScoped(tenant.id, scope)),
       pickerScopePromise.then((scope) => listContactPickerOptions(tenant.id, scope)),
+      // Credit terms (0069) and the standard they're measured against.
+      getDealCreditTerms(tenant.id, deal.id),
+      getCollectionSettings(tenant.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -436,6 +444,27 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 totalSlipDays={deal.totalSlipDays}
                 stage={deal.stage}
                 canEdit={canEdit}
+              />
+              <DealCreditTermsCard
+                dealId={deal.id}
+                standardDays={collectionSettings.standardCreditDays}
+                terms={
+                  creditTerms
+                    ? {
+                        days: creditTerms.agreedCreditDays,
+                        note: creditTerms.note,
+                        setByName: creditTerms.setBy
+                          ? (teammates.find((t) => t.id === creditTerms.setBy)?.displayName ?? creditTerms.setBy)
+                          : null,
+                        approvedByName: creditTerms.approvedBy
+                          ? (teammates.find((t) => t.id === creditTerms.approvedBy)?.displayName ?? creditTerms.approvedBy)
+                          : null,
+                        approvedAt: creditTerms.approvedAt ? creditTerms.approvedAt.toISOString() : null,
+                      }
+                    : null
+                }
+                canEdit={canEdit}
+                canApprove={can(membership.role, 'approveCreditTerms')}
               />
               <ForecastCategorySelect
                 dealId={deal.id}
