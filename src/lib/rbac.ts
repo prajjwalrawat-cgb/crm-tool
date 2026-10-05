@@ -77,6 +77,18 @@ const PERMISSIONS = {
    * selling.
    */
   manageOfferings: ['owner', 'admin'],
+  /**
+   * Creating and editing per-resource incentive plans, the tenant template,
+   * bulk rate changes, and switching a plan's actuals source. Admin tier,
+   * same as `manageTargets` — these set what people get paid.
+   */
+  manageIncentives: ['owner', 'admin'],
+  /**
+   * Reading OTHER people's incentive plans and the roll-up. Everyone may read
+   * their own (see `lib/incentives/access`); this is the team view, and
+   * matches who already sees every rep's targets.
+   */
+  viewTeamIncentives: ['owner', 'admin', 'manager'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -125,6 +137,8 @@ export const canManageStageGates = (role: RoleArg) =>
 export const canManageForecast = (role: RoleArg) => can(role, 'manageForecast');
 export const canManageOfferings = (role: RoleArg) =>
   can(role, 'manageOfferings');
+export const canManageIncentives = (role: RoleArg) =>
+  can(role, 'manageIncentives');
 
 export const canHardDeleteCompanies = (role: RoleArg) =>
   can(role, 'hardDeleteCompanies');

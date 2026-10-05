@@ -23,6 +23,7 @@ import {
   Trash2,
   UserCog,
   UsersRound,
+  Wallet,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
@@ -90,6 +91,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
         icon: AlertTriangle,
       },
       { href: '/dashboard/targets', label: 'Targets', icon: Target },
+      { href: '/dashboard/incentives', label: 'Incentives', icon: Wallet },
       {
         href: '/dashboard/team-performance',
         label: 'Team Performance',
@@ -159,6 +161,9 @@ const MANAGER_NAV: readonly NavGroup[] = [
         icon: AlertTriangle,
       },
       { href: '/dashboard/targets', label: 'Targets', icon: Target },
+      { href: '/dashboard/incentives', label: 'Incentives', icon: Wallet },
+      // Managers often carry a plan of their own.
+      { href: '/dashboard/my-incentive', label: 'My Incentive', icon: Wallet },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
       { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
     ],
@@ -226,6 +231,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
         icon: Target,
       },
       { href: '/dashboard/targets', label: 'My Targets', icon: Gauge },
+      { href: '/dashboard/my-incentive', label: 'My Incentive', icon: Wallet },
     ],
   },
   {

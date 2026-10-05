@@ -15,6 +15,7 @@ import {
   Palette,
   Target,
   User,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -53,6 +54,7 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/pipeline', label: 'Pipeline', icon: GitBranch, visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/currency', label: 'Currency & Locale', icon: Banknote, visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/targets', label: 'Sales targets', icon: Target, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/incentives', label: 'Incentives', icon: Wallet, visibility: 'adminOnly' },
   { href: '/dashboard/settings/offerings', label: 'Offerings', icon: Package, visibility: 'adminOnly' },
   { href: '/dashboard/settings/custom-fields', label: 'Custom fields', icon: ListPlus, visibility: 'adminOnly' },
   { href: '/dashboard/settings/stage-gates', label: 'Stage gates', icon: ShieldCheck, visibility: 'adminOnly' },
