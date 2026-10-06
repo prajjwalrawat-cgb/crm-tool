@@ -23,6 +23,7 @@ import {
   Trash2,
   UserCog,
   UsersRound,
+  HandCoins,
   Wallet,
   Workflow,
   type LucideIcon,
@@ -92,6 +93,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
       },
       { href: '/dashboard/targets', label: 'Targets', icon: Target },
       { href: '/dashboard/incentives', label: 'Incentives', icon: Wallet },
+      { href: '/dashboard/collections', label: 'Collections', icon: HandCoins },
       {
         href: '/dashboard/team-performance',
         label: 'Team Performance',
@@ -107,6 +109,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
       { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
+      { href: '/dashboard/invoices', label: 'Invoices', icon: FileText },
     ],
   },
   {
@@ -162,6 +165,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
       },
       { href: '/dashboard/targets', label: 'Targets', icon: Target },
       { href: '/dashboard/incentives', label: 'Incentives', icon: Wallet },
+      { href: '/dashboard/collections', label: 'Collections', icon: HandCoins },
       // Managers often carry a plan of their own.
       { href: '/dashboard/my-incentive', label: 'My Incentive', icon: Wallet },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
@@ -174,6 +178,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
       { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
+      { href: '/dashboard/invoices', label: 'Invoices', icon: FileText },
     ],
   },
   {

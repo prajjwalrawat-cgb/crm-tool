@@ -1,8 +1,10 @@
 import { withTenantSession } from '@/lib/auth-guard';
+import { invoiceStatusesFor } from '@/lib/collections/queries';
 import { listInvoices } from '@/lib/invoices/queries';
 import { listSellerProfiles } from '@/lib/invoices/seller-profiles';
 import { getInvoiceSettings } from '@/lib/invoices/settings';
 import { isAdmin, requireMembership } from '@/lib/membership';
+import { can } from '@/lib/rbac';
 import { parsePageSize } from '@/lib/pagination/page-size';
 
 import { InvoicesView } from './_components/invoices-view';
@@ -27,19 +29,28 @@ export default async function InvoicesPage({
 
   return await withTenantSession(async ({ tenant, userId }) => {
     const membership = await requireMembership();
-    // Members see only their own PIs; owners/admins see all.
+    // Members see only their own PIs; owners/admins see all. Whoever records
+    // payments (managers too, 0069) must also see all — they collect against
+    // reps' invoices. Seeing is not editing: edit/delete stay owner/admin or
+    // the creator, enforced in the actions.
     const canManageAll = isAdmin(membership);
+    const canSeeAll = canManageAll || can(membership.role, 'recordPayments');
     const [{ rows, total }, settings, sellerProfiles] = await Promise.all([
       listInvoices(tenant.id, {
         page,
         size,
         search,
-        restrictToCreatedBy: canManageAll ? undefined : userId,
+        restrictToCreatedBy: canSeeAll ? undefined : userId,
       }),
       getInvoiceSettings(tenant.id),
       listSellerProfiles(tenant.id),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / size));
+    const statuses = await invoiceStatusesFor(
+      tenant.id,
+      rows.map((r) => r.id),
+      new Date().toISOString().slice(0, 10),
+    );
 
     return (
       <main className="mx-auto w-full max-w-[88rem] px-4 py-6 sm:px-5 lg:px-6">
@@ -62,6 +73,7 @@ export default async function InvoicesPage({
           sellerProfiles={sellerProfiles}
           defaultPaymentTerms={settings.paymentTerms}
           defaultDeliveryTerms={settings.deliveryTerms}
+          statuses={Object.fromEntries(statuses)}
         />
       </main>
     );
