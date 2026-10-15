@@ -15,8 +15,10 @@ import {
   contractYearPeriods,
   elementsToRows,
   generateElementAmounts,
+  isMonthlyProrated,
   MAX_CONTRACT_YEARS,
   MAX_ELEMENTS,
+  proratedFiscalYearSplit,
   rowsToElements,
   type SplitElement,
   type SplitRow,
@@ -26,6 +28,7 @@ import {
   type ValueComponent,
   validateSplit,
 } from '@/lib/deals/value-split';
+import { fiscalYearLabel } from '@/lib/targets/fiscal';
 import { cn } from '@/lib/utils';
 
 /**
@@ -95,6 +98,96 @@ function draftTotal(d: DraftElement): number {
   return d.amountsMajor.reduce((acc, v) => acc + toMinor(v), 0);
 }
 
+/**
+ * Support and AMC are earned monthly, so their contract-year value is
+ * prorated into financial years: Yr 1 / 12 a month, the months up to the FY
+ * end in the current FY and the rest in the next.
+ */
+function FiscalYearSplit({
+  elements,
+  startISO,
+  fiscalStartMonth,
+  currency,
+}: {
+  elements: SplitElement[];
+  startISO: string;
+  fiscalStartMonth: number;
+  currency: string;
+}) {
+  const prorated = elements.filter(
+    (el) => isMonthlyProrated(el.component) && el.amountsMinor.some((a) => a > 0),
+  );
+  if (!startISO || prorated.length === 0) return null;
+
+  const lines = prorated.map((el) => ({
+    el,
+    byFy: new Map(
+      proratedFiscalYearSplit(el.amountsMinor, startISO, fiscalStartMonth).map(
+        (s) => [s.fiscalYear, s] as const,
+      ),
+    ),
+  }));
+  const fiscalYears = [...new Set(lines.flatMap((l) => [...l.byFy.keys()]))].sort(
+    (a, b) => a - b,
+  );
+
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        Financial year split · Support &amp; AMC
+      </p>
+      <table className="w-full min-w-lg text-[13px]">
+        <thead>
+          <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+            <th className="pb-1 pr-3 font-medium">Element</th>
+            <th className="pb-1 pl-3 text-right font-medium">Monthly</th>
+            {fiscalYears.map((fy) => (
+              <th key={fy} className="pb-1 pl-3 text-right font-medium">
+                {fiscalYearLabel(fiscalStartMonth, fy)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map(({ el, byFy }) => (
+            <tr
+              key={el.elementIndex}
+              className="border-t border-slate-100 dark:border-[#1F1F1F]"
+            >
+              <td className="py-1.5 pr-3 text-slate-700 dark:text-[#FAFAFA]">
+                {componentDisplayName(el.component, el.componentLabel)}
+              </td>
+              <td className="py-1.5 pl-3 text-right font-mono text-slate-600 dark:text-[#A1A1AA]">
+                {formatCurrency(Math.round((el.amountsMinor[0] ?? 0) / 12), currency)}
+              </td>
+              {fiscalYears.map((fy) => {
+                const s = byFy.get(fy);
+                return (
+                  <td
+                    key={fy}
+                    className="py-1.5 pl-3 text-right font-mono text-slate-900 dark:text-[#FAFAFA]"
+                  >
+                    {s ? (
+                      <>
+                        {formatCurrency(s.amountMinor, currency)}
+                        <span className="block text-[10.5px] text-slate-400">
+                          {s.months} {s.months === 1 ? 'month' : 'months'}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-slate-300 dark:text-[#3F3F46]">—</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function DealValueSplitCard({
   dealId,
   amountMinor,
@@ -102,8 +195,11 @@ export function DealValueSplitCard({
   expectedCloseDate,
   initialRows,
   canEdit,
+  fiscalStartMonth,
 }: {
   dealId: string;
+  /** Workspace FY start month (1–12) for the Support/AMC FY split. */
+  fiscalStartMonth: number;
   /** The deal's TCV. The breakdown must sum to exactly this. */
   amountMinor: number;
   currency: string;
@@ -348,6 +444,12 @@ export function DealValueSplitCard({
                 </tbody>
               </table>
             </div>
+            <FiscalYearSplit
+              elements={initialElements}
+              startISO={initialRows[0]?.periodStart ?? ''}
+              fiscalStartMonth={fiscalStartMonth}
+              currency={currency}
+            />
             {initialRows.length > 0 ? (
               <p className="mt-2 text-[11px] leading-tight text-slate-400">
                 {fmtPeriod(
@@ -555,6 +657,15 @@ export function DealValueSplitCard({
                 </tbody>
               </table>
             </div>
+          ) : null}
+
+          {term > 0 ? (
+            <FiscalYearSplit
+              elements={draftToElements(elements)}
+              startISO={startISO}
+              fiscalStartMonth={fiscalStartMonth}
+              currency={currency}
+            />
           ) : null}
 
           {term > 0 ? (

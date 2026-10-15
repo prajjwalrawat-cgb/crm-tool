@@ -30,6 +30,7 @@ import {
   listOfferingOptions,
 } from '@/lib/offerings/queries';
 import { listDealValueSplit } from '@/lib/deals/value-split-queries';
+import { getOrgSettings } from '@/lib/org-settings/queries';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
 import { DEAL_TYPE_LABELS, DEAL_TYPES } from '@/lib/deals/schema';
@@ -136,6 +137,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       contactPickerOptions,
       creditTerms,
       collectionSettings,
+      orgSettings,
     ] = await Promise.all([
       membershipPromise,
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -179,6 +181,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       // Credit terms (0069) and the standard they're measured against.
       getDealCreditTerms(tenant.id, deal.id),
       getCollectionSettings(tenant.id),
+      // FY start month for the Support/AMC financial-year split.
+      getOrgSettings(tenant.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -775,6 +779,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               expectedCloseDate={deal.expectedCloseDate ?? null}
               initialRows={valueSplitRows}
               canEdit={canEdit}
+              fiscalStartMonth={orgSettings.fiscalYearStartMonth ?? 1}
             />
 
             <DealDocumentsCard
