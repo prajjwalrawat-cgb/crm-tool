@@ -32,8 +32,38 @@ async function main() {
     validateSplit,
     splitSummary,
     yearTotals,
+    isMonthlyProrated,
+    proratedFiscalYearSplit,
   } = await import('../src/lib/deals/value-split');
   type SplitElement = import('../src/lib/deals/value-split').SplitElement;
+
+  /* ---------- Support / AMC financial-year proration ---------- */
+
+  check(
+    'support and AMC are prorated monthly; licence is not',
+    isMonthlyProrated('support') && isMonthlyProrated('amc') && !isMonthlyProrated('license'),
+  );
+  const amcFy = proratedFiscalYearSplit([108_000_000], '2026-11-01', 4);
+  check(
+    'a Nov start with an April FY puts 5 months in the current FY, 7 in the next',
+    amcFy.length === 2 &&
+      amcFy[0]!.fiscalYear === 2026 && amcFy[0]!.months === 5 && amcFy[0]!.amountMinor === 45_000_000 &&
+      amcFy[1]!.fiscalYear === 2027 && amcFy[1]!.months === 7 && amcFy[1]!.amountMinor === 63_000_000,
+    JSON.stringify(amcFy),
+  );
+  const aprFy = proratedFiscalYearSplit([1_200_000], '2026-04-01', 4);
+  check(
+    'a contract year starting on the FY start stays in one FY',
+    aprFy.length === 1 && aprFy[0]!.months === 12 && aprFy[0]!.amountMinor === 1_200_000,
+  );
+  const multiFy = proratedFiscalYearSplit([1_000_001, 2_000_000, 0], '2026-11-15', 4);
+  check(
+    'multi-year proration covers every FY touched and sums exactly',
+    multiFy.map((s) => s.fiscalYear).join(',') === '2026,2027,2028,2029' &&
+      multiFy.reduce((a, s) => a + s.amountMinor, 0) === 3_000_001 &&
+      multiFy.reduce((a, s) => a + s.months, 0) === 36,
+    JSON.stringify(multiFy),
+  );
 
   /* ---------- contract years ---------- */
 

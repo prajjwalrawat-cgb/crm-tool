@@ -425,6 +425,74 @@ export function validateSplit(
   return { ok: true };
 }
 
+/**
+ * Elements earned month by month over the contract year. Their value is
+ * prorated into financial years rather than landing whole in the FY the
+ * contract year starts in.
+ */
+export const MONTHLY_PRORATED_COMPONENTS: readonly ValueComponent[] = [
+  'support',
+  'amc',
+];
+
+export function isMonthlyProrated(component: ValueComponent): boolean {
+  return MONTHLY_PRORATED_COMPONENTS.includes(component);
+}
+
+/**
+ * Prorate an element's contract-year amounts into financial years.
+ *
+ * Each contract year's amount is a monthly value (amount / 12) times twelve
+ * contract months; each month counts toward the FY it starts in. A contract
+ * year from 1 Nov 2026 with an April FY puts Nov–Mar (5 months) in FY2026–27
+ * and Apr–Oct (7 months) in FY2027–28.
+ *
+ * Shares are rounded to whole minor units and the last FY a contract year
+ * touches takes the remainder, so the FY totals always sum to the element's
+ * total exactly.
+ *
+ * `fiscalStartMonth` is 1–12; the returned `fiscalYear` is the FY's STARTING
+ * calendar year (as in `@/lib/targets/fiscal`). Sorted oldest first.
+ */
+export function proratedFiscalYearSplit(
+  amountsMinor: number[],
+  startISO: string,
+  fiscalStartMonth: number,
+): { fiscalYear: number; months: number; amountMinor: number }[] {
+  if (!ISO_DATE.test(startISO)) {
+    throw new Error('Contract start must be YYYY-MM-DD');
+  }
+  const [startYear, startMonth] = startISO.split('-').map(Number) as [number, number];
+  const byFy = new Map<number, { months: number; amountMinor: number }>();
+
+  amountsMinor.forEach((amount, yearIdx) => {
+    // Months of this contract year, grouped by the FY each one starts in.
+    const monthsByFy = new Map<number, number>();
+    for (let k = 0; k < 12; k++) {
+      const offset = startMonth - 1 + yearIdx * 12 + k;
+      const year = startYear + Math.floor(offset / 12);
+      const month = (offset % 12) + 1;
+      const fy = month >= fiscalStartMonth ? year : year - 1;
+      monthsByFy.set(fy, (monthsByFy.get(fy) ?? 0) + 1);
+    }
+    const entries = [...monthsByFy.entries()].sort((a, b) => a[0] - b[0]);
+    let allocated = 0;
+    entries.forEach(([fy, months], i) => {
+      const share =
+        i === entries.length - 1 ? amount - allocated : Math.round((amount * months) / 12);
+      allocated += share;
+      const bucket = byFy.get(fy) ?? { months: 0, amountMinor: 0 };
+      bucket.months += months;
+      bucket.amountMinor += share;
+      byFy.set(fy, bucket);
+    });
+  });
+
+  return [...byFy.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([fiscalYear, b]) => ({ fiscalYear, ...b }));
+}
+
 /** Contract start = year 1's start; term = distinct years; elements = distinct lines. */
 export function splitSummary(
   rows: SplitRow[],
