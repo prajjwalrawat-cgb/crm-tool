@@ -103,6 +103,9 @@ export const getCurrentMembership = cache(async (): Promise<Membership | null> =
           and(
             eq(memberships.tenantId, tenant.id),
             eq(memberships.userId, userId),
+            // A suspended member (one who left the company, switched off
+            // from AskMira) has no access, though their records stay.
+            eq(memberships.status, 'active'),
           ),
         )
         .limit(1);

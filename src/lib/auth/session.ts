@@ -2,6 +2,7 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 
+import { actingAs } from './acting-as';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -18,6 +19,9 @@ import {
  */
 
 export async function getSessionClaims(): Promise<SessionClaims | null> {
+  // A request AskMira makes for one person runs as them (acting-as.ts).
+  const acting = actingAs();
+  if (acting) return acting;
   const store = await cookies();
   return verifySession(store.get(SESSION_COOKIE)?.value);
 }

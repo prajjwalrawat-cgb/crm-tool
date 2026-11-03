@@ -36,7 +36,8 @@ export const listUserWorkspaces = cache(
       })
       .from(memberships)
       .innerJoin(tenants, eq(memberships.tenantId, tenants.id))
-      .where(eq(memberships.userId, userId))
+      // A suspended membership is no way into that workspace.
+      .where(and(eq(memberships.userId, userId), eq(memberships.status, 'active')))
       .orderBy(asc(tenants.createdAt));
   },
 );
