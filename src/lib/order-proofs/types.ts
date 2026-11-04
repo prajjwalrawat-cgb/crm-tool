@@ -13,8 +13,13 @@ export const ORDER_PROOF_TYPES = [
 ] as const;
 export type OrderProofType = (typeof ORDER_PROOF_TYPES)[number];
 
-/** What the AI read off the document, before the rep confirmed or corrected it. */
+/**
+ * What was read off the document automatically, before the rep confirmed or
+ * corrected it. Stored in `deal_order_proofs.ai_read` (named before the
+ * reader moved from an AI model to the PDF's own text).
+ */
 export type OrderProofAiRead = {
+  /** Which reader produced it, e.g. 'pdf-text-v1'. */
   model: string;
   referenceNo: string | null;
   issuedOn: string | null;

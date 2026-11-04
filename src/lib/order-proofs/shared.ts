@@ -22,7 +22,7 @@ export const ORDER_PROOF_TYPE_LABELS: Record<OrderProofType, string> = {
   other: 'Other order proof',
 };
 
-/** File types a proof may be: what the AI can read, and what a scan comes as. */
+/** File types a proof may be: PDFs (read automatically) and scans or photos (typed in). */
 export const ORDER_PROOF_FILE_TYPES = [
   'application/pdf',
   'image/jpeg',

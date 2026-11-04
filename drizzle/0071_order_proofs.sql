@@ -15,7 +15,7 @@
 --   * deal_order_proofs — one row per proof document. The file itself is a
 --     deal_documents row (category 'purchase_order'); this row holds what the
 --     document says: reference number, date, buyer, pre-tax value, tax, total.
---     `ai_read` keeps what the AI read off the document, so a value the rep
+--     `ai_read` keeps what was read off the document automatically, so a value the rep
 --     corrected stays visible next to the one they submitted.
 --   * trg_deal_order_proof_check — the database backstop, same pattern as
 --     0060: the server actions check first and give the user a clear message;

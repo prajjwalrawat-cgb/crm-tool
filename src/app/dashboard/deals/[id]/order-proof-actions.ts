@@ -15,7 +15,7 @@ import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { formatCurrency, KNOWN_CURRENCIES, toMinorUnits } from '@/lib/deals/currency';
-import { extractOrderProof, openSealedRead } from '@/lib/order-proofs/extract';
+import { openSealedRead, readOrderProof } from '@/lib/order-proofs/read';
 import {
   ORDER_PROOF_FILE_TYPES,
   ORDER_PROOF_MAX_BYTES,
@@ -29,8 +29,8 @@ import {
 
 /**
  * The client's order confirmation on a deal (0071). Two steps, like the card:
- *   1. `readOrderProofAction` — the AI reads the uploaded PO and the form is
- *      pre-filled. Nothing is stored yet.
+ *   1. `readOrderProofAction` — the PO's text is read on this server and the
+ *      form is pre-filled. Nothing is stored yet.
  *   2. `submitOrderProofAction` — the rep confirms or corrects the values and
  *      submits; the file and what it says are stored together.
  * A proof is never edited in place; `removeOrderProofAction` takes it off a
@@ -52,7 +52,7 @@ export type ReadOrderProofResult =
   | { ok: true; read: OrderProofAiRead | null; seal: string | null; notice: string | null }
   | Fail;
 
-/** Step 1: read the document. A failed or switched-off read still lets the rep type it in. */
+/** Step 1: read the document. A scan or an unreadable PDF still lets the rep type it in. */
 export async function readOrderProofAction(formData: FormData): Promise<ReadOrderProofResult> {
   const dealId = z.uuid().safeParse(formData.get('dealId'));
   if (!dealId.success) return { ok: false, message: 'Invalid deal.' };
@@ -73,13 +73,9 @@ export async function readOrderProofAction(formData: FormData): Promise<ReadOrde
     );
     if (!deal) return { ok: false, message: 'Deal not found in this tenant.' };
 
-    const result = await extractOrderProof({
-      tenantId: tenant.id,
-      actorUserId: membership.userId,
-      dealId: deal.id,
+    const result = await readOrderProof({
       bytes: new Uint8Array(await file.arrayBuffer()),
       contentType: file.type,
-      fileName: file.name,
     });
     if (!result.ok) return { ok: true, read: null, seal: null, notice: result.message };
     return { ok: true, read: result.read, seal: result.seal, notice: null };
@@ -157,7 +153,7 @@ export async function submitOrderProofAction(formData: FormData): Promise<Submit
   const { tenant, membership } = gate;
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  // Only a reading the AI genuinely made of THIS file is kept as its reading.
+  // Only a reading genuinely made of THIS file is kept as the file's reading.
   const aiRead = openSealedRead(formData.get('seal'), bytes);
   const reference = d.referenceNo.trim();
 
@@ -283,7 +279,7 @@ export async function submitOrderProofAction(formData: FormData): Promise<Submit
             referenceNo: reference,
             subtotalMinor,
             currency: d.currency,
-            readByAi: Boolean(aiRead),
+            readFromFile: Boolean(aiRead),
           },
         });
       });

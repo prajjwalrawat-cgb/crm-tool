@@ -2,7 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { aiFeaturesEnabled, aiLive, getAIMode } from '@/lib/ai/config';
+import { aiFeaturesEnabled, getAIMode } from '@/lib/ai/config';
 import { getCachedSummary } from '@/lib/ai/summary-queries';
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
@@ -801,7 +801,6 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 fileUrl: p.fileUrl,
               }))}
               canEdit={canEdit}
-              aiReads={aiLive()}
               authorLookup={authorLookup}
             />
 

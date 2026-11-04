@@ -10,8 +10,6 @@ export const AI_MODELS = {
   embed: 'text-embedding-3-small',
   chat: 'gpt-4o-mini',
   summary: 'gpt-4o-mini',
-  /** Reading a client PO / order confirmation (PDF or image). */
-  extract: 'gpt-4o-mini',
 } as const;
 
 /** Vector dimensionality of `text-embedding-3-small`. Must match the column. */

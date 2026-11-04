@@ -74,7 +74,7 @@ type Draft = {
 /**
  * The client's order confirmation on a deal (0071). A deal is Won only on a
  * PO (or other order proof) whose value before tax equals the deal value; this
- * card is where the rep attaches it, checks what the AI read off it, and sees
+ * card is where the rep attaches it, checks what was read off it, and sees
  * — before anyone tries to win the deal — whether the numbers agree.
  */
 export function DealOrderProofCard({
@@ -85,7 +85,6 @@ export function DealOrderProofCard({
   amountDerived,
   proofs,
   canEdit,
-  aiReads,
   authorLookup,
 }: {
   dealId: string;
@@ -96,8 +95,6 @@ export function DealOrderProofCard({
   amountDerived: boolean;
   proofs: OrderProofView[];
   canEdit: boolean;
-  /** The AI reads uploaded POs on this workspace. */
-  aiReads: boolean;
   authorLookup: Record<string, string>;
 }) {
   const router = useRouter();
@@ -179,7 +176,6 @@ export function DealOrderProofCard({
             dealId={dealId}
             deal={deal}
             existingMinor={proofs.reduce((s, p) => s + p.subtotalMinor, 0)}
-            aiReads={aiReads}
             onDone={() => {
               setAdding(false);
               router.refresh();
@@ -334,15 +330,15 @@ function ProofRow({
   onRemove: () => void;
 }) {
   const ai = proof.aiRead;
-  // Where the rep's figures differ from what the AI read off the document.
+  // Where the rep's figures differ from what was read off the document.
   const corrected: string[] = [];
   if (ai) {
     const aiSubtotal = ai.subtotal == null ? null : toMinorUnits(ai.subtotal, proof.currency);
     if (aiSubtotal != null && aiSubtotal !== proof.subtotalMinor) {
-      corrected.push(`value before tax (AI read ${formatCurrency(aiSubtotal, proof.currency)})`);
+      corrected.push(`value before tax (PDF read ${formatCurrency(aiSubtotal, proof.currency)})`);
     }
     if (ai.referenceNo && ai.referenceNo.trim() !== proof.referenceNo.trim()) {
-      corrected.push(`PO number (AI read ${ai.referenceNo})`);
+      corrected.push(`PO number (PDF read ${ai.referenceNo})`);
     }
   }
   return (
@@ -371,7 +367,7 @@ function ProofRow({
           <span>· {submittedBy}</span>
           {ai ? (
             <span className="inline-flex items-center gap-0.5 rounded bg-violet-50 px-1 font-medium text-violet-700">
-              <Sparkles className="h-2.5 w-2.5" aria-hidden /> AI-read
+              <Sparkles className="h-2.5 w-2.5" aria-hidden /> Read from PDF
             </span>
           ) : (
             <span className="rounded bg-slate-100 px-1 font-medium text-slate-500">Entered by hand</span>
@@ -402,14 +398,12 @@ function AddProofForm({
   dealId,
   deal,
   existingMinor,
-  aiReads,
   onDone,
   onCancel,
 }: {
   dealId: string;
   deal: { amountMinor: number; currency: string };
   existingMinor: number;
-  aiReads: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -447,7 +441,6 @@ function AddProofForm({
     setRead(null);
     setSeal(null);
     setNotice(null);
-    if (!aiReads) return;
     setReading(true);
     try {
       const fd = new FormData();
@@ -568,9 +561,6 @@ function AddProofForm({
         </div>
       ) : null}
       {notice ? <p className="mt-2 text-[11.5px] text-slate-500">{notice}</p> : null}
-      {!aiReads && file ? (
-        <p className="mt-2 text-[11.5px] text-slate-500">Enter the details as printed on the PO.</p>
-      ) : null}
 
       {file && !reading ? (
         <>
@@ -596,7 +586,7 @@ function AddProofForm({
             <Field
               label="Value before tax *"
               error={errors.subtotal}
-              hint={subtotalFromAi && read?.subtotal != null ? `AI read ${read.subtotal}` : undefined}
+              hint={subtotalFromAi && read?.subtotal != null ? `PDF says ${read.subtotal}` : undefined}
             >
               <input inputMode="decimal" value={draft.subtotal} onChange={(e) => set('subtotal')(e.target.value)} className={inputCls} />
             </Field>

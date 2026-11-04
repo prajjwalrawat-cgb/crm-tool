@@ -68,6 +68,7 @@
     "resend": "^6.12.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
+    "unpdf": "1.8.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
