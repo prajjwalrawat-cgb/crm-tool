@@ -115,6 +115,8 @@ export const dealDocumentCategory = pgEnum('deal_document_category', [
   'contract',
   'pricing',
   'other',
+  // 0071 — the client's order confirmation; see deal_order_proofs.
+  'purchase_order',
 ]);
 
 export type DealApprovalStatus = (typeof dealApprovalStatus.enumValues)[number];

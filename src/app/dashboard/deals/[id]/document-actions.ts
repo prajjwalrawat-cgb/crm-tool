@@ -4,7 +4,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { dealDocuments, deals, type DealDocument } from '@/db/schema';
+import { dealDocuments, dealOrderProofs, deals, type DealDocument } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
@@ -174,6 +174,19 @@ export async function deleteDealDocumentAction(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
       const removed = await tenantTransaction(async (tx) => {
+        // A PO backing the deal's order confirmation is removed from that
+        // card, which knows whether the deal is Won (0071).
+        const [proof] = await tx
+          .select({ id: dealOrderProofs.id })
+          .from(dealOrderProofs)
+          .where(
+            and(
+              eq(dealOrderProofs.documentId, parsed.data.id),
+              eq(dealOrderProofs.tenantId, tenant.id),
+            ),
+          )
+          .limit(1);
+        if (proof) return 'order_proof' as const;
         const [row] = await tx
           .delete(dealDocuments)
           .where(
@@ -187,6 +200,13 @@ export async function deleteDealDocumentAction(
         return row ?? null;
       });
 
+      if (removed === 'order_proof') {
+        return {
+          ok: false,
+          message:
+            'This file is the deal’s order confirmation. Remove it from the Order confirmation card.',
+        };
+      }
       if (removed?.storagePath) {
         await deleteDealDocument(removed.storagePath);
       }

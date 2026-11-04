@@ -21,7 +21,6 @@ import {
 } from '@/lib/db-context';
 import {
   approvalForTransition,
-  approvalOnEnterWon,
   marginPctToBps,
 } from '@/lib/deals/approval';
 import { KNOWN_CURRENCIES, toMinorUnits } from '@/lib/deals/currency';
@@ -92,6 +91,12 @@ import {
   OFFERINGS_REQUIRED_MESSAGE,
   validateOfferingSelection,
 } from '@/lib/offerings/types';
+import {
+  isOrderProofRequiredError,
+  ORDER_PROOF_FALLBACK_MESSAGE,
+  orderProofFailure,
+  OrderProofMismatchError,
+} from '@/lib/order-proofs/check';
 import { personaOf } from '@/lib/personas';
 import { canApproveDeals } from '@/lib/rbac';
 import { loadSerializedDeal } from '@/lib/realtime/payloads';
@@ -349,6 +354,14 @@ export async function createDealAction(
         };
       }
 
+      // 0071 — Won rests on the client's order confirmation, which can only
+      // be attached to a deal that exists. Create it, attach the PO, then win.
+      if (parsed.data.stage === 'won') {
+        const message =
+          "A deal can't be created straight at Won. Create it at an earlier stage, attach the client's PO, then move it to Won.";
+        return { ok: false, message, fieldErrors: { stage: [message] } };
+      }
+
       // Validate the Company/Contact links against tenant + role scope.
       const restrictToOwnerId =
         personaOf(membership.role) === 'sales' ? membership.userId : undefined;
@@ -444,16 +457,9 @@ export async function createDealAction(
         parsed.data.stage === 'lost'
           ? String(formData.get('lostReason') ?? '').trim().slice(0, 1000) || null
           : null;
-      const closedAt =
-        parsed.data.stage === 'won' || parsed.data.stage === 'lost'
-          ? new Date()
-          : null;
-      // A deal created directly at Won needs an approval state; anywhere else
-      // it's 'none' (schema default). Manager/admin/owner → auto-approved.
-      const approval =
-        parsed.data.stage === 'won'
-          ? approvalOnEnterWon(membership.role, membership.userId, new Date())
-          : null;
+      // Won is refused above (0071), so Lost is the only closed stage a deal
+      // can be born in, and no new deal needs an approval state.
+      const closedAt = parsed.data.stage === 'lost' ? new Date() : null;
 
       let created: Deal | null;
       try {
@@ -498,11 +504,6 @@ export async function createDealAction(
             quantity,
             marginBps,
             lostReason,
-            ...(approval && {
-              approvalStatus: approval.approvalStatus,
-              approvedBy: approval.approvedBy,
-              approvedAt: approval.approvedAt,
-            }),
             currency: parsed.data.currency,
             expectedCloseDate: parsed.data.expectedCloseDate,
             closedAt,
@@ -769,6 +770,8 @@ export async function updateDealAction(
             closedAt: deals.closedAt,
             expectedCloseDate: deals.expectedCloseDate,
             forecastCategoryOverridden: deals.forecastCategoryOverridden,
+            amountMinor: deals.amountMinor,
+            currency: deals.currency,
           })
           .from(deals)
           .where(
@@ -840,6 +843,26 @@ export async function updateDealAction(
               customFields: customResult.values,
             },
           });
+        }
+
+        // 0071 — Won rests on the client's order confirmation, at its value:
+        // checked on entering Won, and when a Won deal's value changes.
+        if (
+          parsed.data.stage === 'won' &&
+          (previous.stage !== 'won' ||
+            previous.amountMinor !== amountMinor ||
+            previous.currency !== parsed.data.currency)
+        ) {
+          const poFailure = await orderProofFailure(tx, {
+            id: previous.id,
+            tenantId: tenant.id,
+            amountMinor,
+            currency: parsed.data.currency,
+          });
+          if (poFailure) {
+            if (previous.stage !== 'won') throw new GateBlockedError('won', [poFailure]);
+            throw new OrderProofMismatchError(poFailure.message);
+          }
         }
 
         let nextClosedAt: Date | null = previous.closedAt;
@@ -999,6 +1022,13 @@ export async function updateDealAction(
             message:
               'Put a deal on Hold from the pipeline board — it needs a reason and a revisit date.',
           };
+        }
+        // 0071 — a Won deal's value edited away from its PO.
+        if (err instanceof OrderProofMismatchError) {
+          return { ok: false, message: err.message, fieldErrors: { amount: [err.message] } };
+        }
+        if (isOrderProofRequiredError(err)) {
+          return { ok: false, message: ORDER_PROOF_FALLBACK_MESSAGE };
         }
         // R3 — filed against the date input the user emptied.
         if (err instanceof CloseDateClearError) {
@@ -1211,6 +1241,8 @@ export async function updateDealStageAction(
             marginBps: deals.marginBps,
             expectedCloseDate: deals.expectedCloseDate,
             forecastCategoryOverridden: deals.forecastCategoryOverridden,
+            amountMinor: deals.amountMinor,
+            currency: deals.currency,
           })
           .from(deals)
           .where(
@@ -1329,6 +1361,30 @@ export async function updateDealStageAction(
               toStage: parsed.data.stage,
             },
           };
+        }
+
+        // 0071 — Won rests on the client's order confirmation, at the value
+        // it states. Same shape as a gate, so the board's slide-over (and
+        // AskMira) say exactly what is missing.
+        if (parsed.data.stage === 'won') {
+          const poFailure = await orderProofFailure(tx, {
+            id: previous.id,
+            tenantId: tenant.id,
+            amountMinor: previous.amountMinor,
+            currency: previous.currency,
+          });
+          if (poFailure) {
+            return {
+              row: null,
+              changed: false,
+              previousStage: previous.stage,
+              blocked: {
+                message: blockMessage('won', [poFailure]),
+                failures: [poFailure],
+                toStage: 'won' as const,
+              },
+            };
+          }
         }
 
         let nextClosedAt: Date | null = previous.closedAt;
@@ -2293,6 +2349,21 @@ export async function patchDealAction(
         // lib/deals/patch-columns.ts.
         const patch = buildDealColumnPatch(d, previous, linkPatch);
         if (Object.keys(patch).length === 0) return previous;
+
+        // 0071 — a Won deal's value stays the value of its PO.
+        if (previous.stage === 'won') {
+          const nextAmount = (patch.amountMinor as number | undefined) ?? previous.amountMinor;
+          const nextCurrency = (patch.currency as string | undefined) ?? previous.currency;
+          if (nextAmount !== previous.amountMinor || nextCurrency !== previous.currency) {
+            const poFailure = await orderProofFailure(tx, {
+              id: previous.id,
+              tenantId: tenant.id,
+              amountMinor: nextAmount,
+              currency: nextCurrency,
+            });
+            if (poFailure) throw new OrderProofMismatchError(poFailure.message);
+          }
+        }
         patch.updatedBy = membership.userId;
 
         // A rep's note about why the date moved. Handed to the pushback trigger
@@ -2350,6 +2421,12 @@ export async function patchDealAction(
         return row;
         });
       } catch (err) {
+        if (err instanceof OrderProofMismatchError) {
+          return { ok: false, message: err.message };
+        }
+        if (isOrderProofRequiredError(err)) {
+          return { ok: false, message: ORDER_PROOF_FALLBACK_MESSAGE };
+        }
         if (err instanceof Error && err.message === 'AMOUNT_DERIVED') {
           return {
             ok: false,
@@ -2738,6 +2815,17 @@ export async function bulkUploadDealsAction(
           continue;
         }
         const lostReason = stage === 'lost' ? lostReasonCell.slice(0, 1000) : null;
+
+        // 0071 — Won needs the client's PO attached to the deal, which an
+        // import can't carry. Import it at an earlier stage, then win it.
+        if (stage === 'won') {
+          errors.push({
+            row: i + 1,
+            message:
+              'Can\'t import at "won" — a Won deal needs the client\'s PO attached. Import it at an earlier stage, attach the PO, then move it to Won.',
+          });
+          continue;
+        }
 
         toInsert.push({
           tenantId: tenant.id,

@@ -289,6 +289,9 @@ async function options({ me }: QueryArgs) {
         lead_has_no_close_date: true,
         hold_needs_reason_and_revisit_date: true,
         member_won_needs_approval: true,
+        // 0071 — the client's PO is attached in Saleinx, never through AskMira.
+        won_needs_client_po_matching_value: true,
+        create_at_won_refused: true,
       },
     };
   });

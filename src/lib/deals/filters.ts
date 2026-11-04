@@ -24,6 +24,8 @@ import { type DealStage, DEAL_STAGES } from './schema';
  *   risk=high|elevated         — Phase 1 deal risk band and above
  *   offering=<uuid1>,<uuid2>   — deals tagged with ANY of these offerings
  *   uncategorized=1            — deals carrying NO offering tag at all
+ *   po=missing                 — Won deals whose client PO is missing or
+ *                                doesn't match the deal value (0071)
  *
  * Within a filter group the SQL is OR (e.g. `stage IN (...)`); between
  * groups it's AND. Multi-value keys are intentionally comma-joined
@@ -101,6 +103,12 @@ export type DealFilters = {
    * correctly returns nothing, rather than silently dropping one.
    */
   uncategorized?: boolean;
+  /**
+   * Won deals whose order confirmation (client PO, 0071) is missing or does
+   * not add up to the deal value — mostly deals won before the rule. The
+   * backfill list, the same way `uncategorized` is for offerings.
+   */
+  poMissing?: boolean;
 };
 
 /** Field keys the `missing=` filter accepts — the completeness spec's own. */
@@ -132,6 +140,7 @@ const URL_FILTER_KEYS = [
   'risk',
   'offering',
   'uncategorized',
+  'po',
 ] as const;
 
 /**
@@ -220,6 +229,7 @@ export function parseDealFilters(
       raw.risk === 'high' || raw.risk === 'elevated' ? raw.risk : undefined,
     offeringIds: offeringIds.length > 0 ? offeringIds : undefined,
     uncategorized: flag(raw.uncategorized),
+    poMissing: raw.po === 'missing',
   };
 }
 
@@ -285,6 +295,7 @@ export function dealFiltersToSearchParams(
     out.set('offering', filters.offeringIds.join(','));
   }
   if (filters.uncategorized) out.set('uncategorized', '1');
+  if (filters.poMissing) out.set('po', 'missing');
   return out;
 }
 

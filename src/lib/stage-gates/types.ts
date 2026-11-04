@@ -85,7 +85,7 @@ export type CustomNoteConfig = { prompt: string };
  */
 export type GateCta = {
   label: string;
-  kind: 'field' | 'stakeholder' | 'activity' | 'task' | 'note';
+  kind: 'field' | 'stakeholder' | 'activity' | 'task' | 'note' | 'order_proof';
   /** For kind:'field' — the deal field to focus (e.g. 'amount', 'contact_id'). */
   field?: string;
 };
@@ -103,7 +103,12 @@ export type GateRuleResult = {
 
 /** A single failed rule, in the shape the enforcement API returns to the client. */
 export type GateFailure = {
-  rule_type: GateRuleType;
+  /**
+   * `order_proof` is the built-in Won rule (src/lib/order-proofs), reported
+   * in the same shape so the board's slide-over and AskMira render it like
+   * any other gate. It is not an admin-configurable rule type.
+   */
+  rule_type: GateRuleType | 'order_proof';
   severity: GateSeverity;
   message: string;
   cta: GateCta | null;
