@@ -46,6 +46,7 @@ import {
 import { type DealFilters } from '@/lib/deals/filters';
 import { type DealStage } from '@/lib/deals/schema';
 import { type DealOfferingTag } from '@/lib/offerings/types';
+import { ORDER_PROOF_ROUNDING_MINOR } from '@/lib/order-proofs/shared';
 
 // Re-export so existing imports of `DealFilters` from this module keep
 // working — but the canonical home for filter helpers is
@@ -482,6 +483,19 @@ export async function listDeals(
       )`,
     );
   }
+  // `po=missing` (0071) — Won deals whose proofs don't add up to the deal
+  // value in its currency, within the same ₹1 rounding the Won rule allows.
+  if (f.poMissing) {
+    conditions.push(
+      sql`${deals.stage} = 'won' AND NOT EXISTS (
+        SELECT 1 FROM deal_order_proofs p
+        WHERE p.tenant_id = ${deals.tenantId} AND p.deal_id = ${deals.id}
+        GROUP BY p.deal_id
+        HAVING bool_and(p.currency = ${deals.currency})
+          AND abs(sum(p.subtotal_minor) - ${deals.amountMinor}) <= ${ORDER_PROOF_ROUNDING_MINOR}
+      )`,
+    );
+  }
   // `risk=<band>` — the nightly Phase 1 score. A deal with no scored row
   // matches nothing: absence of a score is not evidence of low risk.
   if (f.riskBand) {
@@ -809,6 +823,19 @@ function boardSharedConditions(
   if (f.missingField) {
     const spec = DEAL_FIELD_SPECS.find((s) => s.key === f.missingField);
     if (spec) conds.push(sql.raw(fieldMissingSql(spec, 'deals')));
+  }
+  // `po=missing` (0071) — Won deals whose proofs don't add up to the deal
+  // value in its currency, within the same ₹1 rounding the Won rule allows.
+  if (f.poMissing) {
+    conds.push(
+      sql`${deals.stage} = 'won' AND NOT EXISTS (
+        SELECT 1 FROM deal_order_proofs p
+        WHERE p.tenant_id = ${deals.tenantId} AND p.deal_id = ${deals.id}
+        GROUP BY p.deal_id
+        HAVING bool_and(p.currency = ${deals.currency})
+          AND abs(sum(p.subtotal_minor) - ${deals.amountMinor}) <= ${ORDER_PROOF_ROUNDING_MINOR}
+      )`,
+    );
   }
   // `risk=<band>` — same rule as the list. An EXISTS here because this
   // builder is shared by callers that do not carry the risk join.

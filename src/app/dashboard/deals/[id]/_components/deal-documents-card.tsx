@@ -25,6 +25,7 @@ const CATEGORY_LABEL: Record<DealDocumentCategory, string> = {
   contract: 'Contract',
   pricing: 'Pricing',
   other: 'Other',
+  purchase_order: 'Client PO',
 };
 
 const CATEGORY_BADGE: Record<DealDocumentCategory, string> = {
@@ -32,6 +33,7 @@ const CATEGORY_BADGE: Record<DealDocumentCategory, string> = {
   contract: 'bg-emerald-100 text-emerald-700',
   pricing: 'bg-amber-100 text-amber-800',
   other: 'bg-slate-100 text-slate-600',
+  purchase_order: 'bg-teal-100 text-teal-800',
 };
 
 const CATEGORIES: DealDocumentCategory[] = [
@@ -229,7 +231,7 @@ export function DealDocumentsCard({
                     <span>{formatDate(doc.createdAt)}</span>
                   </div>
                 </div>
-                {canEdit ? (
+                {canEdit && doc.category !== 'purchase_order' ? (
                   <button
                     type="button"
                     onClick={() => remove(doc)}

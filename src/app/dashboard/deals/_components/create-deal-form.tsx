@@ -150,7 +150,8 @@ export function CreateDealForm({
         defaultValue="lead"
         onChange={setStageValue}
       >
-        {DEAL_STAGES.map((stage) => (
+        {/* No Won: a deal is won on the client's PO, attached once it exists (0071). */}
+        {DEAL_STAGES.filter((stage) => stage !== 'won').map((stage) => (
           <option key={stage} value={stage}>
             {DEAL_STAGE_LABELS[stage]}
           </option>

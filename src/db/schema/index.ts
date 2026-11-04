@@ -58,3 +58,4 @@ export * from './gmail-connections';
 export * from './forecast-snapshots';
 export * from './merge-audit';
 export * from './askmira';
+export * from './deal-order-proofs';

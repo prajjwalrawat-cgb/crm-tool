@@ -16,6 +16,8 @@ export const AI_INVOCATION_KINDS = [
   'chat',
   'search',
   'summary',
+  // Reading a client PO / order confirmation (src/lib/order-proofs/extract.ts).
+  'extract',
 ] as const;
 export type AiInvocationKind = (typeof AI_INVOCATION_KINDS)[number];
 

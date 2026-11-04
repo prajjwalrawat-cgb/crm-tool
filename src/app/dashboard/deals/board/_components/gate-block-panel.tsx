@@ -114,7 +114,7 @@ function FailureItem({
         </p>
         {failure.cta ? (
           <Link
-            href={`/dashboard/deals/${dealId}`}
+            href={`/dashboard/deals/${dealId}${failure.cta.kind === 'order_proof' ? '#order-confirmation' : ''}`}
             className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-300"
           >
             {failure.cta.label}

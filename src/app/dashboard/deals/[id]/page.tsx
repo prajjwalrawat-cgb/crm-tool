@@ -2,7 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { aiFeaturesEnabled, getAIMode } from '@/lib/ai/config';
+import { aiFeaturesEnabled, aiLive, getAIMode } from '@/lib/ai/config';
 import { getCachedSummary } from '@/lib/ai/summary-queries';
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
@@ -38,6 +38,7 @@ import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
 import { listNotesForEntity } from '@/lib/notes/queries';
+import { listDealOrderProofs } from '@/lib/order-proofs/queries';
 import {
   can,
   canApproveDeals,
@@ -75,6 +76,7 @@ import { DealInlineHeader } from './_components/deal-inline-header';
 import { DealStageCard } from './_components/deal-stage-card';
 import { DealValueSplitCard } from './_components/deal-value-split-card';
 import { EditableDetailCard } from './_components/editable-detail-card';
+import { DealOrderProofCard } from './_components/deal-order-proof-card';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { StageHistoryCard } from './_components/stage-history-card';
 import { DealAuditCard } from './_components/deal-audit-card';
@@ -138,6 +140,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       creditTerms,
       collectionSettings,
       orgSettings,
+      orderProofRows,
     ] = await Promise.all([
       membershipPromise,
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -183,6 +186,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       getCollectionSettings(tenant.id),
       // FY start month for the Support/AMC financial-year split.
       getOrgSettings(tenant.id),
+      // The client's order confirmation (0071) — what Won rests on.
+      listDealOrderProofs(tenant.id, deal.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -227,6 +232,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
     if (deal.ownerId) authorIds.add(deal.ownerId);
     if (deal.updatedBy) authorIds.add(deal.updatedBy);
     for (const d of dealDocumentRows) authorIds.add(d.uploadedBy);
+    for (const p of orderProofRows) authorIds.add(p.submittedBy);
     const authorLookup = await resolveAuthorLookup(Array.from(authorIds));
 
     // A deal carrying unit price + qty derives its Amount from that pair, so
@@ -769,6 +775,35 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 />
               </>
             ) : null}
+
+            {/* The client's PO: a deal is Won only on one whose value before
+                tax matches the deal value (0071). */}
+            <DealOrderProofCard
+              dealId={deal.id}
+              stage={deal.stage}
+              amountMinor={deal.amountMinor}
+              currency={deal.currency}
+              amountDerived={amountDerived}
+              proofs={orderProofRows.map((p) => ({
+                id: p.id,
+                proofType: p.proofType,
+                referenceNo: p.referenceNo,
+                issuedOn: p.issuedOn,
+                buyerName: p.buyerName,
+                currency: p.currency,
+                subtotalMinor: p.subtotalMinor,
+                taxMinor: p.taxMinor,
+                totalMinor: p.totalMinor,
+                aiRead: p.aiRead,
+                submittedBy: p.submittedBy,
+                createdAt: p.createdAt.toISOString(),
+                fileName: p.fileName,
+                fileUrl: p.fileUrl,
+              }))}
+              canEdit={canEdit}
+              aiReads={aiLive()}
+              authorLookup={authorLookup}
+            />
 
             {/* Multi-year TCV. Record-and-report only: the deal still counts
                 once, at its full amount, everywhere else. */}
