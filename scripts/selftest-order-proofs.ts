@@ -205,4 +205,14 @@ check('quotation', codes({ read: { ...read, kind: 'other' } }).includes('not_an_
 check('figures don\'t add up', codes({ totalMinor: 1_300_000 }).includes('totals_mismatch'));
 check('total left blank: not a mismatch', !codes({ totalMinor: null }).includes('totals_mismatch'));
 
+const severityOf = (p: Partial<ProofUnderCheck>, code: string) =>
+  proofWarnings({ ...proof, ...p }, ctx, today).find((w) => w.code === code)?.severity;
+check('date missing blocks', severityOf({ issuedOn: null }, 'date_missing') === 'block');
+check('future date blocks', severityOf({ issuedOn: '2026-12-01' }, 'date_future') === 'block');
+check('stale date blocks', severityOf({ issuedOn: '2026-03-01' }, 'date_stale') === 'block');
+check('date before the deal blocks', severityOf({ issuedOn: '2026-09-15' }, 'date_before_deal') === 'block');
+check('other buyer only warns', severityOf({ buyerName: 'Acme Test Industries' }, 'buyer_mismatch') === 'warn');
+check('figures only warn', severityOf({ totalMinor: 1_300_000 }, 'totals_mismatch') === 'warn');
+check('a PO dated today passes', codes({ issuedOn: today }).length === 0, codes({ issuedOn: today }));
+
 process.exit(exitCode);

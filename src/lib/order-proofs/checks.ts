@@ -2,14 +2,18 @@ import type { OrderProofAiRead } from './types';
 
 /**
  * Sanity checks on a client PO beyond the amount (0071). The amount match is
- * the hard rule that gates Won (shared.ts); these are WARNINGS: things a
- * person should look at — a PO from another company, addressed to another
- * vendor, dated oddly, that is really a quotation, or whose figures don't add
- * up. The rep must confirm each one to submit the PO, and the confirmation
- * is recorded in the deal's activity.
+ * the rule that gates Won (shared.ts). Of these:
+ *   * the DATE checks BLOCK: a PO with no date, a future date, one older than
+ *     six months or older than the deal can't be submitted at all. Proofs are
+ *     never edited, so every saved PO has passed them;
+ *   * the rest WARN: a PO from another company, addressed to another vendor,
+ *     that is really a quotation, or whose figures don't add up. The rep must
+ *     confirm each to submit, and the confirmation is recorded in the deal's
+ *     activity.
  *
  * Client- and server-safe: the form shows them live, and the server
- * recomputes them on submit and refuses an unconfirmed one.
+ * recomputes them on submit, refusing a block outright and a warning the rep
+ * didn't confirm.
  */
 
 export type ProofWarningCode =
@@ -23,7 +27,22 @@ export type ProofWarningCode =
   | 'not_an_order'
   | 'totals_mismatch';
 
-export type ProofWarning = { code: ProofWarningCode; message: string };
+export type ProofWarning = {
+  code: ProofWarningCode;
+  message: string;
+  /** 'block': the PO can't be submitted. 'warn': it can, once the rep confirms. */
+  severity: 'block' | 'warn';
+};
+
+/** Codes that stop a PO being submitted, whatever the rep confirms. */
+const BLOCKING: ReadonlySet<ProofWarningCode> = new Set([
+  'date_missing',
+  'date_future',
+  'date_stale',
+  'date_before_deal',
+]);
+
+export const isBlocking = (w: ProofWarning) => w.severity === 'block';
 
 /** What a PO is checked against — the deal and this workspace's own identity. */
 export type ProofCheckContext = {
@@ -104,7 +123,8 @@ export function proofWarnings(
   ctx: ProofCheckContext,
   today: string = todayIso(),
 ): ProofWarning[] {
-  const out: ProofWarning[] = [];
+  const found: Array<Omit<ProofWarning, 'severity'>> = [];
+  const out = { push: (w: Omit<ProofWarning, 'severity'>) => found.push(w) };
   const buyer = proof.buyerName?.trim() || null;
 
   // The client: the PO must come from the company the deal is with.
@@ -146,7 +166,7 @@ export function proofWarnings(
 
   // The date.
   if (!proof.issuedOn) {
-    out.push({ code: 'date_missing', message: 'The PO date isn\'t filled in.' });
+    out.push({ code: 'date_missing', message: 'Enter the PO date as printed on the PO.' });
   } else if (proof.issuedOn > today) {
     out.push({ code: 'date_future', message: `The PO is dated ${proof.issuedOn}, which is in the future.` });
   } else {
@@ -180,5 +200,5 @@ export function proofWarnings(
     });
   }
 
-  return out;
+  return found.map((w) => ({ ...w, severity: BLOCKING.has(w.code) ? 'block' : 'warn' }));
 }

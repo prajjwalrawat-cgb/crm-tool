@@ -27,6 +27,7 @@ import {
   toMinorUnits,
 } from '@/lib/deals/currency';
 import {
+  isBlocking,
   proofWarnings,
   type ProofCheckContext,
   type ProofWarning,
@@ -567,10 +568,13 @@ function AddProofForm({
           checkContext,
         )
       : [];
-  const warnings = [
+  const all = [
     ...liveWarnings,
     ...serverWarnings.filter((w) => !liveWarnings.some((l) => l.code === w.code)),
   ];
+  // Date problems block outright; the rest need the rep's confirmation.
+  const blocks = all.filter(isBlocking);
+  const warnings = all.filter((w) => !isBlocking(w));
   const warningKey = warnings.map((w) => w.code).sort().join(',');
   const confirmed = warnings.length > 0 && confirmedKey === warningKey;
 
@@ -637,7 +641,7 @@ function AddProofForm({
             <Field label="PO / order number *" error={errors.referenceNo}>
               <input value={draft.referenceNo} onChange={(e) => set('referenceNo')(e.target.value)} className={inputCls} />
             </Field>
-            <Field label="PO date" error={errors.issuedOn}>
+            <Field label="PO date *" error={blocks.length > 0 ? blocks.map((b) => b.message) : errors.issuedOn}>
               <input type="date" value={draft.issuedOn} onChange={(e) => set('issuedOn')(e.target.value)} className={inputCls} />
             </Field>
             <Field label="Client (buyer)" error={errors.buyerName}>
@@ -692,6 +696,20 @@ function AddProofForm({
             </p>
           ) : null}
 
+          {blocks.length > 0 ? (
+            <div className="mt-3 rounded-md border border-rose-200 bg-rose-50/70 px-3 py-2">
+              <p className="text-[12px] font-medium text-rose-900">This PO can&apos;t be submitted:</p>
+              <ul className="mt-1 space-y-0.5 text-[12px] text-rose-900">
+                {blocks.map((w) => (
+                  <li key={w.code} className="flex items-start gap-1.5">
+                    <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-600" aria-hidden />
+                    {w.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {warnings.length > 0 ? (
             <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2">
               <p className="text-[12px] font-medium text-amber-900">Check these against the PO before submitting:</p>
@@ -722,6 +740,7 @@ function AddProofForm({
                 submitting ||
                 !draft.referenceNo.trim() ||
                 !draft.subtotal ||
+                blocks.length > 0 ||
                 (warnings.length > 0 && !confirmed)
               }
               className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50"

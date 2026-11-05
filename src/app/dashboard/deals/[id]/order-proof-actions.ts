@@ -15,7 +15,7 @@ import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { formatCurrency, KNOWN_CURRENCIES, toMinorUnits } from '@/lib/deals/currency';
-import { proofWarnings, type ProofWarning } from '@/lib/order-proofs/checks';
+import { isBlocking, proofWarnings, type ProofWarning } from '@/lib/order-proofs/checks';
 import { proofCheckContext } from '@/lib/order-proofs/context';
 import { openSealedRead, readOrderProof } from '@/lib/order-proofs/read';
 import {
@@ -245,6 +245,16 @@ export async function submitOrderProofAction(formData: FormData): Promise<Submit
           ctx,
         )
       : [];
+    // A bad date is never confirmed away: the PO can't be submitted.
+    const blocks = warnings.filter(isBlocking);
+    if (blocks.length > 0) {
+      return {
+        ok: false,
+        message: blocks.map((w) => w.message).join(' '),
+        fieldErrors: { issuedOn: blocks.map((w) => w.message) },
+        warnings,
+      };
+    }
     const acknowledged = new Set(String(formData.get('acknowledged') ?? '').split(','));
     if (warnings.some((w) => !acknowledged.has(w.code))) {
       return {
