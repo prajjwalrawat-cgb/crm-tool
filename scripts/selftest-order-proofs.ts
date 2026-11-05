@@ -7,6 +7,12 @@
  *
  *   npx tsx scripts/selftest-order-proofs.ts
  */
+import {
+  proofWarnings,
+  sameCompany,
+  type ProofCheckContext,
+  type ProofUnderCheck,
+} from '../src/lib/order-proofs/checks';
 import { dateIn, parseOrderText, type TextLine } from '../src/lib/order-proofs/parse';
 import {
   matchOrderProofs,
@@ -142,5 +148,61 @@ check('date: 03-11-2026 is 3 Nov (day first)', dateIn('03-11-2026') === '2026-11
 check('date: 05/23/2026 can only be US order', dateIn('05/23/2026') === '2026-05-23');
 check('date: "Nov 3, 2026"', dateIn('Nov 3, 2026') === '2026-11-03');
 check('date: 31/02/2026 is not a date', dateIn('31/02/2026') === null);
+
+// Who the PO is addressed to, and the GSTINs on it.
+read = parseOrderText(
+  page(
+    [[40, 'Kaveri Steel Works Ltd.'], [360, 'GSTIN: 29ABCDE1234F1Z5']],
+    [[40, 'PURCHASE ORDER No: KSW/77']],
+    [[40, 'To,']],
+    [[40, 'M/s CGB Solutions Pvt Ltd'], [360, 'GSTIN: 07AAACC1234D1Z9']],
+    [[40, 'Sub Total'], [480, '10,000.00']],
+  ),
+);
+check('supplier under "To," with M/s stripped', read.supplierName === 'CGB Solutions Pvt Ltd', read);
+check('buyer is the letterhead, not the supplier', read.buyerName === 'Kaveri Steel Works Ltd.', read);
+check('both GSTINs found', read.gstins?.length === 2 && read.gstins.includes('07AAACC1234D1Z9'), read);
+check('kind: order', read.kind === 'order', read);
+
+/* ── Checks beyond the amount ────────────────────────────── */
+
+const ctx: ProofCheckContext = {
+  dealCompany: 'Kaveri Steel Works Private Limited',
+  dealCreatedOn: '2026-10-01',
+  sellerNames: ['CGB Solutions'],
+  sellerGstins: ['07AAACC1234D1Z9'],
+};
+const today = '2026-11-05';
+const proof: ProofUnderCheck = {
+  buyerName: 'KAVERI STEEL WORKS LTD',
+  issuedOn: '2026-11-03',
+  subtotalMinor: 1_000_000,
+  taxMinor: 180_000,
+  totalMinor: 1_180_000,
+  read,
+};
+const codes = (p: Partial<typeof proof>, c: Partial<ProofCheckContext> = {}) =>
+  proofWarnings({ ...proof, ...p }, { ...ctx, ...c }, today).map((w) => w.code);
+
+check('clean PO: no warnings', codes({}).length === 0, codes({}));
+check('names: legal suffixes and case ignored', sameCompany('Acme Test Industries Pvt. Ltd.', 'ACME TEST INDUSTRIES PRIVATE LIMITED'));
+check('names: different companies differ', !sameCompany('Acme Test Industries', 'Kaveri Steel Works'));
+check('buyer from another company', codes({ buyerName: 'Acme Test Industries' }).includes('buyer_mismatch'));
+check('buyer left empty', codes({ buyerName: null }).includes('buyer_missing'));
+check('deal with no company: buyer not checked', codes({ buyerName: null }, { dealCompany: null }).length === 0);
+check('addressed to another vendor (name)', codes({ read: { ...read, supplierName: 'Globex Systems', gstins: [] } }).includes('supplier_mismatch'));
+check(
+  'addressed to another vendor (GSTINs, none ours)',
+  codes({ read: { ...read, supplierName: null, gstins: ['29ABCDE1234F1Z5', '27ZZZZZ9999Z1Z1'] } }).includes('supplier_mismatch'),
+);
+check('our GSTIN on it: supplier fine', !codes({ read: { ...read, supplierName: 'Someone Else' } }).includes('supplier_mismatch'));
+check('typed-in photo: supplier not checked', !codes({ read: null }).includes('supplier_mismatch'));
+check('no date', codes({ issuedOn: null }).includes('date_missing'));
+check('future date', codes({ issuedOn: '2026-12-01' }).includes('date_future'));
+check('older than 6 months', codes({ issuedOn: '2026-03-01' }).includes('date_stale'));
+check('older than the deal', codes({ issuedOn: '2026-09-15' }).includes('date_before_deal'));
+check('quotation', codes({ read: { ...read, kind: 'other' } }).includes('not_an_order'));
+check('figures don\'t add up', codes({ totalMinor: 1_300_000 }).includes('totals_mismatch'));
+check('total left blank: not a mismatch', !codes({ totalMinor: null }).includes('totals_mismatch'));
 
 process.exit(exitCode);

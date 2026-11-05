@@ -27,6 +27,11 @@ import {
   toMinorUnits,
 } from '@/lib/deals/currency';
 import {
+  proofWarnings,
+  type ProofCheckContext,
+  type ProofWarning,
+} from '@/lib/order-proofs/checks';
+import {
   matchOrderProofs,
   ORDER_PROOF_FILE_TYPES,
   ORDER_PROOF_MAX_BYTES,
@@ -86,6 +91,7 @@ export function DealOrderProofCard({
   proofs,
   canEdit,
   authorLookup,
+  checkContext,
 }: {
   dealId: string;
   stage: string;
@@ -96,6 +102,8 @@ export function DealOrderProofCard({
   proofs: OrderProofView[];
   canEdit: boolean;
   authorLookup: Record<string, string>;
+  /** What POs are checked against beyond the amount (the deal's client, us, dates). */
+  checkContext: ProofCheckContext | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -162,6 +170,21 @@ export function DealOrderProofCard({
               key={p.id}
               proof={p}
               submittedBy={authorLookup[p.submittedBy] ?? 'Someone'}
+              warnings={
+                checkContext
+                  ? proofWarnings(
+                      {
+                        buyerName: p.buyerName,
+                        issuedOn: p.issuedOn,
+                        subtotalMinor: p.subtotalMinor,
+                        taxMinor: p.taxMinor,
+                        totalMinor: p.totalMinor,
+                        read: p.aiRead,
+                      },
+                      checkContext,
+                    )
+                  : []
+              }
               canRemove={canEdit && !isWon}
               pending={pending}
               onRemove={() => remove(p)}
@@ -176,6 +199,7 @@ export function DealOrderProofCard({
             dealId={dealId}
             deal={deal}
             existingMinor={proofs.reduce((s, p) => s + p.subtotalMinor, 0)}
+            checkContext={checkContext}
             onDone={() => {
               setAdding(false);
               router.refresh();
@@ -319,12 +343,14 @@ function MatchSummary({
 function ProofRow({
   proof,
   submittedBy,
+  warnings,
   canRemove,
   pending,
   onRemove,
 }: {
   proof: OrderProofView;
   submittedBy: string;
+  warnings: ProofWarning[];
   canRemove: boolean;
   pending: boolean;
   onRemove: () => void;
@@ -376,6 +402,16 @@ function ProofRow({
         {corrected.length > 0 ? (
           <p className="mt-1 text-[11px] text-amber-700">Corrected by {submittedBy}: {corrected.join('; ')}.</p>
         ) : null}
+        {warnings.length > 0 ? (
+          <ul className="mt-1 space-y-0.5 text-[11px] text-amber-800">
+            {warnings.map((w) => (
+              <li key={w.code} className="flex items-start gap-1">
+                <AlertTriangle className="mt-px h-3 w-3 shrink-0 text-amber-500" aria-hidden />
+                {w.message}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       {canRemove ? (
         <button
@@ -398,12 +434,14 @@ function AddProofForm({
   dealId,
   deal,
   existingMinor,
+  checkContext,
   onDone,
   onCancel,
 }: {
   dealId: string;
   deal: { amountMinor: number; currency: string };
   existingMinor: number;
+  checkContext: ProofCheckContext | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -414,6 +452,10 @@ function AddProofForm({
   const [seal, setSeal] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
+  // Warnings the server raised on the last submit, and which set of warnings
+  // the rep ticked "checked" for — a changed set needs a fresh tick.
+  const [serverWarnings, setServerWarnings] = useState<ProofWarning[]>([]);
+  const [confirmedKey, setConfirmedKey] = useState('');
   const [submitting, startSubmit] = useTransition();
   const [draft, setDraft] = useState<Draft>({
     proofType: 'purchase_order',
@@ -480,9 +522,11 @@ function AddProofForm({
       fd.set('file', file);
       for (const [k, v] of Object.entries(draft)) fd.set(k, v);
       if (seal) fd.set('seal', seal);
+      if (confirmed) fd.set('acknowledged', warningKey);
       const result = await submitOrderProofAction(fd);
       if (!result.ok) {
         setErrors(result.fieldErrors ?? {});
+        if (result.warnings) setServerWarnings(result.warnings);
         toast.error(result.message);
         return;
       }
@@ -504,6 +548,31 @@ function AddProofForm({
           ])
       : null;
   const subtotalFromAi = read?.subtotal != null && Number(draft.subtotal) !== read.subtotal;
+
+  // Beyond the amount: buyer, supplier, date, kind of document, figures —
+  // live as the rep types, plus anything the server raised on submit.
+  const taxNum = Number(draft.tax) || 0;
+  const totalNum = Number(draft.total);
+  const liveWarnings =
+    checkContext && Number.isFinite(subtotalNum) && subtotalNum > 0
+      ? proofWarnings(
+          {
+            buyerName: draft.buyerName,
+            issuedOn: draft.issuedOn || null,
+            subtotalMinor: toMinorUnits(subtotalNum, draft.currency),
+            taxMinor: toMinorUnits(taxNum, draft.currency),
+            totalMinor: draft.total && Number.isFinite(totalNum) ? toMinorUnits(totalNum, draft.currency) : null,
+            read,
+          },
+          checkContext,
+        )
+      : [];
+  const warnings = [
+    ...liveWarnings,
+    ...serverWarnings.filter((w) => !liveWarnings.some((l) => l.code === w.code)),
+  ];
+  const warningKey = warnings.map((w) => w.code).sort().join(',');
+  const confirmed = warnings.length > 0 && confirmedKey === warningKey;
 
   return (
     <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/60 p-3">
@@ -623,11 +692,38 @@ function AddProofForm({
             </p>
           ) : null}
 
+          {warnings.length > 0 ? (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2">
+              <p className="text-[12px] font-medium text-amber-900">Check these against the PO before submitting:</p>
+              <ul className="mt-1 space-y-0.5 text-[12px] text-amber-900">
+                {warnings.map((w) => (
+                  <li key={w.code} className="flex items-start gap-1.5">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />
+                    {w.message}
+                  </li>
+                ))}
+              </ul>
+              <label className="mt-2 flex items-center gap-1.5 text-[12px] text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  onChange={(e) => setConfirmedKey(e.target.checked ? warningKey : '')}
+                />
+                I&apos;ve checked these against the PO and it is correct.
+              </label>
+            </div>
+          ) : null}
+
           <div className="mt-3 flex items-center gap-2">
             <button
               type="button"
               onClick={submit}
-              disabled={submitting || !draft.referenceNo.trim() || !draft.subtotal}
+              disabled={
+                submitting ||
+                !draft.referenceNo.trim() ||
+                !draft.subtotal ||
+                (warnings.length > 0 && !confirmed)
+              }
               className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}

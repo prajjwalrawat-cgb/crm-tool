@@ -38,6 +38,7 @@ import { marginBpsToPct, marginMinor } from '@/lib/deals/approval';
 import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
 import { listNotesForEntity } from '@/lib/notes/queries';
+import { loadProofCheckContext } from '@/lib/order-proofs/context';
 import { listDealOrderProofs } from '@/lib/order-proofs/queries';
 import {
   can,
@@ -141,6 +142,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       collectionSettings,
       orgSettings,
       orderProofRows,
+      proofCheckContext,
     ] = await Promise.all([
       membershipPromise,
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -188,6 +190,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       getOrgSettings(tenant.id),
       // The client's order confirmation (0071) — what Won rests on.
       listDealOrderProofs(tenant.id, deal.id),
+      // …and what those POs are checked against beyond the amount.
+      loadProofCheckContext(tenant.id, deal.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -802,6 +806,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               }))}
               canEdit={canEdit}
               authorLookup={authorLookup}
+              checkContext={proofCheckContext}
             />
 
             {/* Multi-year TCV. Record-and-report only: the deal still counts
