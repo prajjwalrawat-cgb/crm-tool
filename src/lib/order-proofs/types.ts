@@ -30,4 +30,10 @@ export type OrderProofAiRead = {
   total: number | null;
   confidence: 'high' | 'medium' | 'low';
   notes: string | null;
+  /** Who the PO is addressed to (should be us). Absent on early readings. */
+  supplierName?: string | null;
+  /** Every GSTIN printed on the document. */
+  gstins?: string[];
+  /** 'order' = PO / work order / contract; 'other' = reads like a quotation or invoice. */
+  kind?: 'order' | 'other' | 'unknown';
 };

@@ -117,6 +117,9 @@ const NOT_PO_DATE_RE = /deliver|due|dispatch|expir|valid|invoice|quotation|quote
 
 const BUYER_LABEL_RE =
   /\b(?:buyer|bill(?:ed)?\s+to|purchaser|customer|client|issued\s+by|invoice\s+to)\b[^:]*:?\s*/i;
+const SUPPLIER_LABEL_RE =
+  /\b(?:supplier|vendor|seller)\b(?:\s+(?:name|details|address))?[^:]*:?\s*|^\s*to\s*[:,]?\s*(?=$|m\/s)|^\s*m\/s\.?\s*/i;
+const GSTIN_RE = /\b\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]\b/g;
 const COMPANY_RE =
   /\b(?:ltd|limited|llp|inc|pvt|private|corp(?:oration)?|company|co\.|industries|enterprises|technologies|solutions|group|gmbh|plc)\b/i;
 
@@ -204,18 +207,34 @@ function poDateIn(lines: TextLine[]): string | null {
   });
 }
 
-function buyerIn(lines: TextLine[]): string | null {
-  const labelled = eachSegment(lines, (text, li, si, x) => {
-    const m = BUYER_LABEL_RE.exec(text);
+/** The name after or under a label matched by `re`. */
+function labelledName(lines: TextLine[], re: RegExp): string | null {
+  return eachSegment(lines, (text, li, si, x) => {
+    const m = re.exec(text);
     if (!m) return null;
     const after = text.slice(m.index + m[0].length).trim();
     const value = after && /[a-z]{2,}/i.test(after) ? after : valueBelow(lines, li, x);
-    return value && /[a-z]{2,}/i.test(value) ? value.slice(0, 200) : null;
+    const name = value.replace(/^m\/s\.?\s*/i, '').trim();
+    return name && /[a-z]{2,}/i.test(name) ? name.slice(0, 200) : null;
   });
+}
+
+/** Who the PO is addressed to: "Supplier:", "Vendor:", "To," / "M/s …". */
+function supplierIn(lines: TextLine[]): string | null {
+  return labelledName(lines, SUPPLIER_LABEL_RE);
+}
+
+function buyerIn(lines: TextLine[], supplier: string | null): string | null {
+  const labelled = labelledName(lines, BUYER_LABEL_RE);
   if (labelled) return labelled;
   // POs are printed on the buyer's letterhead: the first company name at the top.
   for (const line of lines.slice(0, 8)) {
-    const seg = line.segments.find((s) => COMPANY_RE.test(s.text) && !/supplier|vendor|to:/i.test(s.text));
+    const seg = line.segments.find(
+      (s) =>
+        COMPANY_RE.test(s.text) &&
+        !/supplier|vendor|to:/i.test(s.text) &&
+        s.text.trim() !== supplier,
+    );
     if (seg) return seg.text.trim().slice(0, 200);
   }
   return null;
@@ -311,16 +330,20 @@ export function parseOrderText(lines: TextLine[]): OrderProofAiRead {
           ? 'medium'
           : 'low';
 
+  const supplierName = supplierIn(lines);
   return {
     model: PDF_READER_ID,
     referenceNo,
     issuedOn: poDateIn(lines),
-    buyerName: buyerIn(lines),
+    buyerName: buyerIn(lines, supplierName),
     currency: currencyIn(all),
     subtotal: sub,
     tax,
     total: tot,
     confidence,
     notes: notes.length > 0 ? notes.join('. ') : null,
+    supplierName,
+    gstins: [...new Set(all.toUpperCase().match(GSTIN_RE) ?? [])],
+    kind: isOrder ? 'order' : looksOther ? 'other' : 'unknown',
   };
 }

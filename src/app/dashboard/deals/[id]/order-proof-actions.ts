@@ -15,6 +15,8 @@ import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { formatCurrency, KNOWN_CURRENCIES, toMinorUnits } from '@/lib/deals/currency';
+import { isBlocking, proofWarnings, type ProofWarning } from '@/lib/order-proofs/checks';
+import { proofCheckContext } from '@/lib/order-proofs/context';
 import { openSealedRead, readOrderProof } from '@/lib/order-proofs/read';
 import {
   ORDER_PROOF_FILE_TYPES,
@@ -103,7 +105,11 @@ const submitSchema = z.object({
 
 export type SubmitOrderProofResult =
   | { ok: true }
-  | (Fail & { fieldErrors?: Record<string, string[]> });
+  | (Fail & {
+      fieldErrors?: Record<string, string[]>;
+      /** Checks the rep hasn't confirmed yet; resubmit with them in `acknowledged`. */
+      warnings?: ProofWarning[];
+    });
 
 /** Step 2: store the file and what it says, as confirmed by the rep. */
 export async function submitOrderProofAction(formData: FormData): Promise<SubmitOrderProofResult> {
@@ -138,8 +144,9 @@ export async function submitOrderProofAction(formData: FormData): Promise<Submit
   const d = parsed.data;
   const subtotalMinor = toMinorUnits(d.subtotal, d.currency);
   const taxMinor = toMinorUnits(d.tax, d.currency);
-  const totalMinor =
-    d.total === undefined || d.total === '' ? subtotalMinor + taxMinor : toMinorUnits(d.total, d.currency);
+  const enteredTotalMinor =
+    d.total === undefined || d.total === '' ? null : toMinorUnits(d.total, d.currency);
+  const totalMinor = enteredTotalMinor ?? subtotalMinor + taxMinor;
   if (totalMinor < subtotalMinor) {
     return {
       ok: false,
@@ -221,6 +228,42 @@ export async function submitOrderProofAction(formData: FormData): Promise<Submit
     });
     if (clash) return { ok: false, message: clash, fieldErrors: { referenceNo: [clash] } };
 
+    // Beyond the amount: the PO's buyer, supplier, date, kind and figures.
+    // Each warning must be confirmed by the rep; the form resubmits with the
+    // codes they confirmed.
+    const ctx = await tenantTransaction((tx) => proofCheckContext(tx, tenant.id, deal.id));
+    const warnings = ctx
+      ? proofWarnings(
+          {
+            buyerName: d.buyerName?.trim() || null,
+            issuedOn: d.issuedOn || null,
+            subtotalMinor,
+            taxMinor,
+            totalMinor: enteredTotalMinor,
+            read: aiRead,
+          },
+          ctx,
+        )
+      : [];
+    // A bad date is never confirmed away: the PO can't be submitted.
+    const blocks = warnings.filter(isBlocking);
+    if (blocks.length > 0) {
+      return {
+        ok: false,
+        message: blocks.map((w) => w.message).join(' '),
+        fieldErrors: { issuedOn: blocks.map((w) => w.message) },
+        warnings,
+      };
+    }
+    const acknowledged = new Set(String(formData.get('acknowledged') ?? '').split(','));
+    if (warnings.some((w) => !acknowledged.has(w.code))) {
+      return {
+        ok: false,
+        message: 'Check the points below against the PO, then confirm to submit it.',
+        warnings,
+      };
+    }
+
     let uploaded: { url: string; path: string };
     try {
       uploaded = await uploadDealDocument({
@@ -279,6 +322,9 @@ export async function submitOrderProofAction(formData: FormData): Promise<Submit
             referenceNo: reference,
             subtotalMinor,
             currency: d.currency,
+            ...(warnings.length > 0 && {
+              confirmedWarnings: warnings.map((w) => ({ code: w.code, message: w.message })),
+            }),
             readFromFile: Boolean(aiRead),
           },
         });
