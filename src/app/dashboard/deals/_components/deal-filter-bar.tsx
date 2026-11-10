@@ -140,6 +140,10 @@ export function DealFilterBar({
       pushFilters({ ...initialFilters, score: next }),
     [initialFilters, pushFilters],
   );
+  const setPoMissing = useCallback(
+    (next: boolean) => pushFilters({ ...initialFilters, poMissing: next }),
+    [initialFilters, pushFilters],
+  );
   const setRevisitDue = useCallback(
     (next: boolean) => pushFilters({ ...initialFilters, revisitDue: next }),
     [initialFilters, pushFilters],
@@ -201,6 +205,12 @@ export function DealFilterBar({
           label="Approved"
           active={!!initialFilters.approvedOnly}
           onClick={() => setApprovedOnly(!initialFilters.approvedOnly)}
+        />
+        <ToggleChip
+          label="Won · PO missing"
+          title="Won deals whose client PO is missing or doesn't match the deal value"
+          active={!!initialFilters.poMissing}
+          onClick={() => setPoMissing(!initialFilters.poMissing)}
         />
         <ScorePopover selected={initialFilters.score} onChange={setScore} />
         <ToggleChip
