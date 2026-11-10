@@ -95,7 +95,7 @@ export function RepPerformanceSection({
                   return item?.fullName ?? '';
                 }}
               />
-              <Bar dataKey="revenue" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="revenue" fill="#7d0712" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

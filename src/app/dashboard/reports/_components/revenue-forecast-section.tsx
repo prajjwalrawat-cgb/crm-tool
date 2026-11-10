@@ -146,7 +146,7 @@ export function RevenueForecastSection({
                 type="monotone"
                 dataKey="likely"
                 name="Likely"
-                stroke="#4f46e5"
+                stroke="#7d0712"
                 strokeWidth={2.5}
                 dot={{ r: 3 }}
               />

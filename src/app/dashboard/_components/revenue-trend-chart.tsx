@@ -447,7 +447,7 @@ function shapeForMetric(
         {
           key: 'seriesB',
           label: 'New deals',
-          color: '#6366f1',
+          color: '#7d0712',
           dotClass: 'bg-indigo-500',
         },
         {
@@ -525,7 +525,7 @@ function shapeForMetric(
         {
           key: 'seriesB',
           label: 'New pipeline',
-          color: '#6366f1',
+          color: '#7d0712',
           dotClass: 'bg-indigo-500',
         },
         {
@@ -937,7 +937,7 @@ function WeeklyBody({
       <Bar
         yAxisId="pipeline"
         dataKey="newPipelinePlot"
-        fill="#6366f1"
+        fill="#7d0712"
         fillOpacity={0.75}
         shape={<CappedBar />}
         isAnimationActive={display.animated}

@@ -28,22 +28,122 @@
  * don't auto-set that class anymore (see providers.tsx).
  */
 :root {
-  --background: #f8fafc;            /* slate-50, calm cool gray */
-  --foreground: #0f172a;            /* slate-900, sharp body text */
+  /* AskMira palette: cream page, warm ink text, maroon accent. */
+  --background: #fef8f4;            /* cream */
+  --foreground: #1a1110;            /* ink */
   --surface: #ffffff;
-  --surface-muted: #f1f5f9;         /* slate-100, hover/strip rows */
-  --border: #e2e8f0;                /* slate-200 */
-  --border-strong: #cbd5e1;         /* slate-300, used on focus */
-  --accent: #6366f1;                /* indigo-500, primary CTA + active */
+  --surface-muted: #f9efe8;         /* cream-100, hover/strip rows */
+  --border: #f0e2d8;                /* cream-200 */
+  --border-strong: #e3cfc1;         /* cream-300, used on focus */
+  --accent: #7d0712;                /* AskMira maroon, primary CTA + active */
   --accent-fg: #ffffff;
-  --accent-soft: #eef2ff;           /* indigo-50, active nav surface */
-  --accent-soft-fg: #4338ca;        /* indigo-700, active nav text */
+  --accent-soft: #f6eceb;           /* maroon-50 */
+  --accent-soft-fg: #7d0712;
+}
+
+/*
+ * AskMira re-theme. The screens use Tailwind's slate (neutrals) and indigo
+ * (accent) classes directly, so those families are redefined here: slate and
+ * zinc become AskMira's warm cream-to-ink ramp, indigo/violet/purple the
+ * maroon, blue/sky the muted AskMira info blue. Status greens, ambers and
+ * reds keep their meaning and are untouched.
+ */
+@theme {
+  --color-slate-50: #fef8f4;
+  --color-slate-100: #f9efe8;
+  --color-slate-200: #f0e2d8;
+  --color-slate-300: #e3cfc1;
+  --color-slate-400: #a89c98;
+  --color-slate-500: #7a6e68;
+  --color-slate-600: #645853;
+  --color-slate-700: #4b403c;
+  --color-slate-800: #271e1c;
+  --color-slate-900: #1a1110;
+  --color-slate-950: #100404;
+  --color-zinc-50: #fef8f4;
+  --color-zinc-100: #f9efe8;
+  --color-zinc-200: #f0e2d8;
+  --color-zinc-300: #e3cfc1;
+  --color-zinc-400: #a89c98;
+  --color-zinc-500: #7a6e68;
+  --color-zinc-600: #645853;
+  --color-zinc-700: #4b403c;
+  --color-zinc-800: #271e1c;
+  --color-zinc-900: #1a1110;
+  --color-zinc-950: #100404;
+  --color-indigo-50: #f6eceb;
+  --color-indigo-100: #eedcda;
+  --color-indigo-200: #ddbcb9;
+  --color-indigo-300: #c4908c;
+  --color-indigo-400: #a3585b;
+  --color-indigo-500: #7d0712;
+  --color-indigo-600: #6b0710;
+  --color-indigo-700: #5c0a11;
+  --color-indigo-800: #48080e;
+  --color-indigo-900: #34040a;
+  --color-indigo-950: #1c0306;
+  --color-violet-50: #f6eceb;
+  --color-violet-100: #eedcda;
+  --color-violet-200: #ddbcb9;
+  --color-violet-300: #c4908c;
+  --color-violet-400: #a3585b;
+  --color-violet-500: #7d0712;
+  --color-violet-600: #6b0710;
+  --color-violet-700: #5c0a11;
+  --color-violet-800: #48080e;
+  --color-violet-900: #34040a;
+  --color-violet-950: #1c0306;
+  --color-purple-50: #f6eceb;
+  --color-purple-100: #eedcda;
+  --color-purple-200: #ddbcb9;
+  --color-purple-300: #c4908c;
+  --color-purple-400: #a3585b;
+  --color-purple-500: #7d0712;
+  --color-purple-600: #6b0710;
+  --color-purple-700: #5c0a11;
+  --color-purple-800: #48080e;
+  --color-purple-900: #34040a;
+  --color-purple-950: #1c0306;
+  --color-blue-50: #eef5f8;
+  --color-blue-100: #d9e8ef;
+  --color-blue-200: #b3d1df;
+  --color-blue-300: #82b1c8;
+  --color-blue-400: #5590ad;
+  --color-blue-500: #2d6a8a;
+  --color-blue-600: #245a76;
+  --color-blue-700: #1d4a61;
+  --color-blue-800: #173b4d;
+  --color-blue-900: #112c3a;
+  --color-blue-950: #0a1c25;
+  --color-sky-50: #eef5f8;
+  --color-sky-100: #d9e8ef;
+  --color-sky-200: #b3d1df;
+  --color-sky-300: #82b1c8;
+  --color-sky-400: #5590ad;
+  --color-sky-500: #2d6a8a;
+  --color-sky-600: #245a76;
+  --color-sky-700: #1d4a61;
+  --color-sky-800: #173b4d;
+  --color-sky-900: #112c3a;
+  --color-sky-950: #0a1c25;
+  --color-marigold-50: #fff5e3;
+  --color-marigold-100: #feebc4;
+  --color-marigold-200: #fdd88f;
+  --color-marigold-300: #fcc45c;
+  --color-marigold-400: #fab236;
+  --color-marigold-500: #f8a01a;
+  --color-marigold-600: #df840b;
+  --color-marigold-700: #b8650a;
+  --color-marigold-800: #8f4e0f;
+  --color-marigold-900: #6e3d11;
+  --color-marigold-950: #3e1f06;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -91,7 +191,17 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont,
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont,
     'Segoe UI', sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* AskMira chrome: the nav rail is the AskMira maroon, top to bottom, with the
+   Marigold pill on the active item. Page titles use Fraunces. */
+.askmira-rail {
+  background-image: linear-gradient(180deg, #6b0a13 0%, #5c0a11 45%, #34040a 100%);
+}
+main h1 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }

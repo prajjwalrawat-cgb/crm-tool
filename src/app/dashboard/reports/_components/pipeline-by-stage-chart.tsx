@@ -83,7 +83,7 @@ export function PipelineByStageChart({
           />
           <Bar
             dataKey={mode}
-            fill="#4f46e5"
+            fill="#7d0712"
             radius={[6, 6, 0, 0]}
             maxBarSize={56}
           />

@@ -23,12 +23,12 @@ export const BRAND_COLORS = {
   iconArrow: '#e11d48', // rose-600
 
   // Semantic colors. Reused by charts + status badges.
-  primary: '#4f46e5',
+  primary: '#7d0712', // AskMira maroon
   success: '#059669',
   warning: '#f59e0b',
   danger: '#e11d48',
-  info: '#0ea5e9',
-  muted: '#64748b',
+  info: '#2d6a8a',
+  muted: '#7a6e68',
 } as const;
 
 /**
@@ -37,14 +37,14 @@ export const BRAND_COLORS = {
  * that holds up at small sizes (tooltips, legends).
  */
 export const CHART_PALETTE = [
-  '#4f46e5', // indigo-600
+  '#7d0712', // AskMira maroon
   '#059669', // emerald-600
   '#f59e0b', // amber-500
   '#e11d48', // rose-600
-  '#0ea5e9', // sky-500
-  '#8b5cf6', // violet-500
+  '#2d6a8a', // AskMira info blue
+  '#a3585b', // maroon-400
   '#14b8a6', // teal-500
-  '#f97316', // orange-500
+  '#f8a01a', // AskMira marigold
 ] as const;
 
 /**
