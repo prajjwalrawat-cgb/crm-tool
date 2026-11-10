@@ -4,12 +4,12 @@ import { tenants } from './tenants';
 import { users } from './users';
 
 /**
- * The link with AskMira (src/lib/askmira, migration 0070). Read and written by
+ * The link with AskMiraa (src/lib/askmira, migration 0070). Read and written by
  * the server's own connection only: RLS is on with no policies, so the
  * app_user role a request drops to can never see them.
  */
 
-/** One AskMira workspace per workspace here. The secret is derived, never stored. */
+/** One AskMiraa workspace per workspace here. The secret is derived, never stored. */
 export const askmiraLinks = pgTable('askmira_links', {
   tenantId: uuid('tenant_id')
     .primaryKey()
@@ -22,7 +22,7 @@ export const askmiraLinks = pgTable('askmira_links', {
   connectedAt: timestamp('connected_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** A one-time code from Allow, swapped by AskMira's server with its PKCE verifier. */
+/** A one-time code from Allow, swapped by AskMiraa's server with its PKCE verifier. */
 export const askmiraConnectCodes = pgTable('askmira_connect_codes', {
   codeHash: text('code_hash').primaryKey(),
   tenantId: uuid('tenant_id')
@@ -43,7 +43,7 @@ export const askmiraUsedTokens = pgTable('askmira_used_tokens', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
-/** Members AskMira manages: linked by email, suspended when they leave in AskMira. */
+/** Members AskMiraa manages: linked by email, suspended when they leave in AskMiraa. */
 export const askmiraPeople = pgTable(
   'askmira_people',
   {

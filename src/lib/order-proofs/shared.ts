@@ -59,7 +59,7 @@ export function matchOrderProofs(
 }
 
 /**
- * Why a deal can't be Won, in words a rep (or AskMira's assistant) can act on.
+ * Why a deal can't be Won, in words a rep (or AskMiraa's assistant) can act on.
  * Null when the proofs match.
  */
 export function orderProofProblem(

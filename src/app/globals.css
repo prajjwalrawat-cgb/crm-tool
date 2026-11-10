@@ -28,24 +28,24 @@
  * don't auto-set that class anymore (see providers.tsx).
  */
 :root {
-  /* AskMira palette: cream page, warm ink text, maroon accent. */
+  /* AskMiraa palette: cream page, warm ink text, maroon accent. */
   --background: #fef8f4;            /* cream */
   --foreground: #1a1110;            /* ink */
   --surface: #ffffff;
   --surface-muted: #f9efe8;         /* cream-100, hover/strip rows */
   --border: #f0e2d8;                /* cream-200 */
   --border-strong: #e3cfc1;         /* cream-300, used on focus */
-  --accent: #7d0712;                /* AskMira maroon, primary CTA + active */
+  --accent: #7d0712;                /* AskMiraa maroon, primary CTA + active */
   --accent-fg: #ffffff;
   --accent-soft: #f6eceb;           /* maroon-50 */
   --accent-soft-fg: #7d0712;
 }
 
 /*
- * AskMira re-theme. The screens use Tailwind's slate (neutrals) and indigo
+ * AskMiraa re-theme. The screens use Tailwind's slate (neutrals) and indigo
  * (accent) classes directly, so those families are redefined here: slate and
- * zinc become AskMira's warm cream-to-ink ramp, indigo/violet/purple the
- * maroon, blue/sky the muted AskMira info blue. Status greens, ambers and
+ * zinc become AskMiraa's warm cream-to-ink ramp, indigo/violet/purple the
+ * maroon, blue/sky the muted AskMiraa info blue. Status greens, ambers and
  * reds keep their meaning and are untouched.
  */
 @theme {
@@ -196,7 +196,7 @@ body {
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
 
-/* AskMira chrome: the nav rail is the AskMira maroon, top to bottom, with the
+/* AskMiraa chrome: the nav rail is the AskMiraa maroon, top to bottom, with the
    Marigold pill on the active item. Page titles use Fraunces. */
 .askmira-rail {
   background-image: linear-gradient(180deg, #6b0a13 0%, #5c0a11 45%, #34040a 100%);

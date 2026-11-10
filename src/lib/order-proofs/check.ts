@@ -11,7 +11,7 @@ import { matchOrderProofs, orderProofProblem, type OrderProofMatch } from './sha
 /**
  * The Won rule (0071): a deal is Won only on the client's order confirmation,
  * and only at the value that confirmation states. Every path into Won — the
- * board, the edit form, AskMira — calls `orderProofFailure` first so the user
+ * board, the edit form, AskMiraa — calls `orderProofFailure` first so the user
  * gets an actionable answer; the `deal_order_proof_check` trigger backs it up.
  */
 

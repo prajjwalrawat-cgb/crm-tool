@@ -1,6 +1,6 @@
 import 'server-only';
 
-// The AskMira endpoints, one function per route (src/app/api/integrations/askmira/…).
+// The AskMiraa endpoints, one function per route (src/app/api/integrations/askmira/…).
 // Kept here so they can be exercised without a running server.
 
 import { ACTIONS } from './actions';
@@ -47,14 +47,14 @@ export const actRoute = (req: Request) =>
     await spendOnce(claims, 'This request was already carried out.');
     const me = await actorIn(found, body.actor);
     const result = await action({ found, me, params: paramsOf(body) });
-    console.log(`[AskMira] ${kind} by ${me.email} in ${found.workspace.name}`);
+    console.log(`[AskMiraa] ${kind} by ${me.email} in ${found.workspace.name}`);
     return { kind, actor: actorOf(me), ...result };
   });
 
-/** POST connect/token — AskMira's server swaps the one-time code (no token yet: PKCE). */
+/** POST connect/token — AskMiraa's server swaps the one-time code (no token yet: PKCE). */
 export const tokenRoute = (req: Request) => respond(async () => swap(await jsonOf(req)));
 
-/** POST connect/revoke — AskMira disconnected (use=revoke). */
+/** POST connect/revoke — AskMiraa disconnected (use=revoke). */
 export const revokeRoute = (req: Request) =>
   respond(async () => {
     const { claims } = await assertion(req, 'revoke');
@@ -71,11 +71,11 @@ export const connectionRoute = () => respond(async () => connection(await signed
 /** DELETE connection — disconnect from this side. */
 export const disconnectRoute = () => respond(async () => disconnect(await signedInAdmin()));
 
-/** POST launch — the sign-in page hands over AskMira's link (use=launch, once). */
+/** POST launch — the sign-in page hands over AskMiraa's link (use=launch, once). */
 export const launchRoute = (req: Request) =>
   respond(async () => {
     const body = await jsonOf(req);
     const token = String(body.token ?? '');
-    if (!token || token.length > 4000) throw httpError(401, 'This AskMira link is not valid.');
+    if (!token || token.length > 4000) throw httpError(401, 'This AskMiraa link is not valid.');
     return launch(token, body.next);
   });

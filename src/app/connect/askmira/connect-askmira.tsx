@@ -20,12 +20,12 @@ export type Ask = {
   challenge: string;
 };
 
-/** What AskMira will be able to do once allowed. */
+/** What AskMiraa will be able to do once allowed. */
 const GRANTS = [
-  'Open Saleinx for your members from AskMira, without a second password.',
-  'Let Ask Mira read and change deals for a member with that member’s own access here: a rep’s Won still waits for a manager, a viewer still only reads.',
-  'Switch off a member AskMira linked when they leave the company in AskMira. Their deals stay.',
-  'AskMira never adds anyone here and never changes a role: your owners and admins still decide both.',
+  'Open Saleinx for your members from AskMiraa, without a second password.',
+  'Let Ask Miraa read and change deals for a member with that member’s own access here: a rep’s Won still waits for a manager, a viewer still only reads.',
+  'Switch off a member AskMiraa linked when they leave the company in AskMiraa. Their deals stay.',
+  'AskMiraa never adds anyone here and never changes a role: your owners and admins still decide both.',
 ];
 
 function originOf(uri: string) {
@@ -55,7 +55,7 @@ export function ConnectAskMira({
   if (refused) return <Message tone="warning" text={refused} />;
   if (!state) return <Message tone="warning" text="Could not load this workspace." />;
   if (!state.can_connect) {
-    return <Message tone="warning" text="This Saleinx is not set up to connect to AskMira yet. Ask the person who runs it." />;
+    return <Message tone="warning" text="This Saleinx is not set up to connect to AskMiraa yet. Ask the person who runs it." />;
   }
 
   const elsewhere =
@@ -101,11 +101,11 @@ export function ConnectAskMira({
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-[16px] font-semibold text-slate-900 dark:text-[#FAFAFA]">Connect AskMira</h1>
+        <h1 className="text-[16px] font-semibold text-slate-900 dark:text-[#FAFAFA]">Connect AskMiraa</h1>
         <p className="mt-1 text-[13px] text-slate-600 dark:text-[#A1A1AA]">
           {ask ? (
             <>
-              The AskMira workspace <strong>{ask.tenant_name}</strong>
+              The AskMiraa workspace <strong>{ask.tenant_name}</strong>
               {originOf(ask.redirect_uri) ? <> at {originOf(ask.redirect_uri)}</> : null} wants to connect to{' '}
               <strong>{state.workspace.name}</strong>.
             </>
@@ -113,9 +113,9 @@ export function ConnectAskMira({
             <>
               <strong>{state.workspace.name}</strong>
               {state.connected ? (
-                <> is connected to the AskMira workspace {state.askmira_workspace ?? ''}.</>
+                <> is connected to the AskMiraa workspace {state.askmira_workspace ?? ''}.</>
               ) : (
-                <> is not connected to AskMira. Start from Settings → Connectors in AskMira.</>
+                <> is not connected to AskMiraa. Start from Settings → Connectors in AskMiraa.</>
               )}
             </>
           )}
@@ -136,7 +136,7 @@ export function ConnectAskMira({
       {elsewhere && ask ? (
         <Message
           tone="warning"
-          text={`${state.workspace.name} is already connected to the AskMira workspace ${state.askmira_workspace ?? ''}. Disconnect it first to connect another.`}
+          text={`${state.workspace.name} is already connected to the AskMiraa workspace ${state.askmira_workspace ?? ''}. Disconnect it first to connect another.`}
         />
       ) : null}
       {error ? <Message tone="warning" text={error} /> : null}
@@ -148,7 +148,7 @@ export function ConnectAskMira({
           disabled={busy}
           className={`${button} bg-indigo-600 text-white hover:bg-indigo-500 focus:ring-indigo-500/30`}
         >
-          {busy ? 'Please wait…' : `Allow AskMira to connect`}
+          {busy ? 'Please wait…' : `Allow AskMiraa to connect`}
         </button>
       ) : null}
       {state.connected ? (
@@ -158,7 +158,7 @@ export function ConnectAskMira({
           disabled={busy}
           className={`${button} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-300 dark:border-[#1F1F1F] dark:bg-[#0A0A0A] dark:text-[#FAFAFA]`}
         >
-          Disconnect AskMira
+          Disconnect AskMiraa
         </button>
       ) : null}
       <p className="text-center text-[12px] text-slate-500">

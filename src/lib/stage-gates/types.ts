@@ -105,7 +105,7 @@ export type GateRuleResult = {
 export type GateFailure = {
   /**
    * `order_proof` is the built-in Won rule (src/lib/order-proofs), reported
-   * in the same shape so the board's slide-over and AskMira render it like
+   * in the same shape so the board's slide-over and AskMiraa render it like
    * any other gate. It is not an admin-configurable rule type.
    */
   rule_type: GateRuleType | 'order_proof';

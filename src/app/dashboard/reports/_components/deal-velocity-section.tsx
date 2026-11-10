@@ -57,7 +57,7 @@ export function DealVelocitySection({
     if (r.sampleSize < 3) return '#cbd5e1'; // slate-300 — low confidence
     if (r.avgDays > medianAvg * 1.5) return '#e11d48'; // rose-600 — bottleneck
     if (r.stage === extras.fastestStage) return '#059669'; // emerald-600 — fastest
-    return '#7d0712'; // AskMira maroon — default
+    return '#7d0712'; // AskMiraa maroon — default
   }
 
   const chartData = rows.map((r) => ({

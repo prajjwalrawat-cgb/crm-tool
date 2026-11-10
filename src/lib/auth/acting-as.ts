@@ -7,7 +7,7 @@ import type { SessionClaims } from './jwt';
 /**
  * Who a server-to-server request acts as, when it is not a browser session.
  *
- * AskMira's assistant does things here for one person (src/lib/askmira): it
+ * AskMiraa's assistant does things here for one person (src/lib/askmira): it
  * creates their lead, moves their deal. Rather than a second copy of every
  * rule, the request runs the app's own server actions — `createDealAction`,
  * `updateDealStageAction` and the rest — as that person. `getSessionClaims`
@@ -16,7 +16,7 @@ import type { SessionClaims } from './jwt';
  * session.
  *
  * Only `runAsPerson` sets it, and only src/lib/askmira/actions.ts calls that,
- * after checking AskMira's signed request and the person's active membership
+ * after checking AskMiraa's signed request and the person's active membership
  * of the connected workspace. Nothing a browser sends can reach it.
  */
 

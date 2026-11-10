@@ -1,27 +1,27 @@
 import 'server-only';
 
-// The link with AskMira, the HRMS a company may run its people in.
+// The link with AskMiraa, the HRMS a company may run its people in.
 //
-// An owner or admin of a workspace here connects it to one AskMira workspace:
-// AskMira's admin presses Connect there, lands on /connect/askmira here and
-// presses Allow (connect.ts). From then on AskMira's server calls here for that
+// An owner or admin of a workspace here connects it to one AskMiraa workspace:
+// AskMiraa's admin presses Connect there, lands on /connect/askmira here and
+// presses Allow (connect.ts). From then on AskMiraa's server calls here for that
 // one workspace only, each call carrying a short-lived HS256 token signed with
 // the connection's own secret (aud "askmira:saleinx", iss "askmira"):
 //
 //   POST /api/integrations/askmira/users/sync      use=provision  the company's people (people.ts)
 //   POST /api/integrations/askmira/query           use=query      read for one person (queries.ts)
 //   POST /api/integrations/askmira/act             use=act        a lead, a stage move (actions.ts)
-//   POST /api/integrations/askmira/connect/token   AskMira swaps the one-time code (PKCE)
-//   POST /api/integrations/askmira/connect/revoke  use=revoke     AskMira disconnected
+//   POST /api/integrations/askmira/connect/token   AskMiraa swaps the one-time code (PKCE)
+//   POST /api/integrations/askmira/connect/revoke  use=revoke     AskMiraa disconnected
 //   POST /api/integrations/askmira/launch          use=launch     sign a person in (launch.ts)
 //
 // Server-to-server tokens carry `bh`, the SHA-256 of the exact body, so a
 // captured token can't be replayed with another body; `act` and `launch`
 // tokens work only once (their `jti`).
 //
-// Roles are this workspace's own. AskMira never grants one: a person is who
+// Roles are this workspace's own. AskMiraa never grants one: a person is who
 // their membership here says (owner, admin, manager, member, viewer), and
-// AskMira only learns that role, to know what to offer them.
+// AskMiraa only learns that role, to know what to offer them.
 
 import crypto from 'node:crypto';
 
@@ -72,7 +72,7 @@ function isMissingTable(err: unknown) {
 }
 
 export const SETUP_MESSAGE =
-  'This Saleinx is not set up for AskMira yet: its database does not have the AskMira tables. ' +
+  'This Saleinx is not set up for AskMiraa yet: its database does not have the AskMiraa tables. ' +
   'Whoever runs Saleinx needs to run scripts/apply-0070.ts once (the build does it); then try again.';
 
 /** A route's answer: the result as JSON, or `{ error }` with the status we chose. */
@@ -84,10 +84,10 @@ export async function respond(work: () => Promise<unknown>) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
     if (isMissingTable(err)) {
-      console.error('[AskMira] the AskMira tables are missing:', err);
+      console.error('[AskMiraa] the AskMiraa tables are missing:', err);
       return NextResponse.json({ error: SETUP_MESSAGE }, { status: 503 });
     }
-    console.error('[AskMira] request failed:', err);
+    console.error('[AskMiraa] request failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -132,7 +132,7 @@ export function canConnect() {
   return serverKey().length >= 32;
 }
 
-/** A workspace's AskMira secret: derived here, so the database keeps only the nonce. */
+/** A workspace's AskMiraa secret: derived here, so the database keeps only the nonce. */
 export function derive(tenantId: string, nonce: string) {
   return crypto
     .createHmac('sha256', serverKey())
@@ -193,7 +193,7 @@ export function verify(token: string, secret: string): Claims | null {
 export type Workspace = { id: string; name: string; slug: string };
 export type Linked = { link: AskmiraLink; workspace: Workspace };
 
-/** The workspace connected to an AskMira workspace, or null. */
+/** The workspace connected to an AskMiraa workspace, or null. */
 export async function linkedTo(askmiraTenantId: string): Promise<Linked | null> {
   if (!UUID_RE.test(askmiraTenantId)) return null;
   const [row] = await db
@@ -206,7 +206,7 @@ export async function linkedTo(askmiraTenantId: string): Promise<Linked | null> 
 }
 
 /**
- * A token's claims, checked with the secret of the AskMira workspace it names
+ * A token's claims, checked with the secret of the AskMiraa workspace it names
  * (`sub` on server-to-server calls, `tid` on a sign-in link), so one
  * workspace's secret can never act for another. A workspace that is not
  * connected gets a 404, as if these endpoints did not exist.
@@ -217,12 +217,12 @@ export async function claimsOf(token: string, use: Use): Promise<Linked & { clai
   const found = canConnect() ? await linkedTo(tenantId) : null;
   if (!found) throw httpError(404, 'Not found');
   const claims = verify(token, derive(found.link.tenantId, found.link.secretNonce));
-  if (!claims) throw httpError(401, 'This AskMira link is not valid or has expired.');
-  if (claims.use !== use) throw httpError(401, 'This AskMira link is not valid here.');
+  if (!claims) throw httpError(401, 'This AskMiraa link is not valid or has expired.');
+  if (claims.use !== use) throw httpError(401, 'This AskMiraa link is not valid here.');
   return { ...found, claims };
 }
 
-/** AskMira's server-to-server call: the token, bound to this exact body and workspace. */
+/** AskMiraa's server-to-server call: the token, bound to this exact body and workspace. */
 export async function assertion(req: Request, use: Exclude<Use, 'launch'>) {
   const raw = Buffer.from(await req.arrayBuffer());
   let body: Record<string, unknown>;
@@ -235,7 +235,7 @@ export async function assertion(req: Request, use: Exclude<Use, 'launch'>) {
     throw httpError(400, 'The request is not a JSON object.');
   }
   const match = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '');
-  if (!match) throw httpError(401, 'Missing AskMira assertion.');
+  if (!match) throw httpError(401, 'Missing AskMiraa assertion.');
   const found = await claimsOf(match[1]!.trim(), use);
   if (!safeEqual(String(found.claims.bh ?? ''), sha256hex(raw))) {
     throw httpError(401, 'The assertion does not match this request.');
@@ -266,7 +266,7 @@ export async function spendOnce(claims: Claims, refusal: string) {
 
 export type Person = {
   userId: string;
-  /** The workspace here (not AskMira's). */
+  /** The workspace here (not AskMiraa's). */
   tenantId: string;
   email: string;
   name: string;
@@ -299,8 +299,8 @@ export async function memberByEmail(tenantId: string, email: string) {
 }
 
 /**
- * The person AskMira is asking for, if they are an active member of the
- * connected workspace. Their role is their membership's, whatever AskMira says.
+ * The person AskMiraa is asking for, if they are an active member of the
+ * connected workspace. Their role is their membership's, whatever AskMiraa says.
  */
 export async function actorIn(found: Linked, actor: unknown): Promise<Person> {
   const given = actor && typeof actor === 'object' ? (actor as Record<string, unknown>) : {};

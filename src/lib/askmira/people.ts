@@ -1,22 +1,22 @@
 import 'server-only';
 
-// AskMira sends the company's people (users/sync, use=provision).
+// AskMiraa sends the company's people (users/sync, use=provision).
 //
 // Saleinx admits who its own owners and admins invite, with the role they
-// give: AskMira never adds anyone here and never changes a role. What the
+// give: AskMiraa never adds anyone here and never changes a role. What the
 // sync does:
 //
-// * links each active member of this workspace whose email is in AskMira's
-//   list (askmira_people), so AskMira knows their role here and can sign them
-//   in from AskMira;
-// * switches off a member AskMira linked once who has since left the company
-//   in AskMira (membership "suspended"; their deals and history stay). An
-//   owner is never switched off. Someone AskMira never linked is never
+// * links each active member of this workspace whose email is in AskMiraa's
+//   list (askmira_people), so AskMiraa knows their role here and can sign them
+//   in from AskMiraa;
+// * switches off a member AskMiraa linked once who has since left the company
+//   in AskMiraa (membership "suspended"; their deals and history stay). An
+//   owner is never switched off. Someone AskMiraa never linked is never
 //   touched;
-// * switches a member back on if AskMira switched them off and they are in
+// * switches a member back on if AskMiraa switched them off and they are in
 //   the list again (rehired).
 //
-// The answer lists each linked member's role here, which is what AskMira
+// The answer lists each linked member's role here, which is what AskMiraa
 // offers them in its assistant.
 
 import { and, eq } from 'drizzle-orm';
@@ -32,7 +32,7 @@ export async function syncPeople(found: Linked, body: Record<string, unknown>) {
   const list = Array.isArray(body.users) ? body.users : null;
   // An empty list would switch everybody off: refused, nothing changed.
   if (!list || list.length === 0) {
-    throw httpError(422, 'AskMira sent nobody. Nothing was changed.');
+    throw httpError(422, 'AskMiraa sent nobody. Nothing was changed.');
   }
   const roster = new Map<string, Incoming>();
   for (const raw of list) {
@@ -41,7 +41,7 @@ export async function syncPeople(found: Linked, body: Record<string, unknown>) {
     const email = normEmail(item.email);
     if (EMAIL_RE.test(email)) roster.set(email, { id: clean(item.id, 64), email });
   }
-  if (roster.size === 0) throw httpError(422, 'AskMira sent nobody with an email. Nothing was changed.');
+  if (roster.size === 0) throw httpError(422, 'AskMiraa sent nobody with an email. Nothing was changed.');
 
   const tenantId = found.link.tenantId;
   const members = await db
@@ -85,7 +85,7 @@ export async function syncPeople(found: Linked, body: Record<string, unknown>) {
         });
       if (!row) linked += 1;
       let status = member.status;
-      // Only AskMira's own switch-off is undone here, never one made in Saleinx.
+      // Only AskMiraa's own switch-off is undone here, never one made in Saleinx.
       if (row?.suspendedAt && member.status === 'suspended') {
         await db
           .update(memberships)
@@ -112,7 +112,7 @@ export async function syncPeople(found: Linked, body: Record<string, unknown>) {
 
   const outsiders = [...roster.keys()].filter((email) => !known.has(email));
   console.log(
-    `[AskMira] people sync for ${found.workspace.name}: ${kept.length} linked, ` +
+    `[AskMiraa] people sync for ${found.workspace.name}: ${kept.length} linked, ` +
       `${suspended} switched off, ${restored} back on, ${outsiders.length} not members`,
   );
   return {
@@ -121,7 +121,7 @@ export async function syncPeople(found: Linked, body: Record<string, unknown>) {
     deactivated: suspended,
     restored,
     not_members: outsiders.length,
-    // A few, so AskMira can show why someone has no access; the count says the rest.
+    // A few, so AskMiraa can show why someone has no access; the count says the rest.
     skipped: outsiders.slice(0, 20).map((email) => ({
       email,
       reason: `Not a member of ${found.workspace.name} in Saleinx; an owner or admin there invites them.`,

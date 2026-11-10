@@ -1,13 +1,13 @@
 import 'server-only';
 
-// Signing someone in who opened Saleinx from AskMira.
+// Signing someone in who opened Saleinx from AskMiraa.
 //
-// AskMira sends the browser to /sso/askmira#token=… (the fragment never reaches
+// AskMiraa sends the browser to /sso/askmira#token=… (the fragment never reaches
 // a server log). That page posts the token here; if it is good — signed with
 // the workspace's connection secret, not used before, naming an active member
 // of the connected workspace — the browser gets a normal Saleinx session for
 // that workspace. Nobody is created here: Saleinx's own owners and admins
-// invite its members, and AskMira never decides a role.
+// invite its members, and AskMiraa never decides a role.
 
 import { and, eq } from 'drizzle-orm';
 
@@ -36,7 +36,7 @@ function landing(next: unknown) {
 export async function launch(token: string, next: unknown) {
   // Not a sign-in link at all (cut short, mistyped): say so, not "disconnected".
   if (!peek(token)?.tid) {
-    throw httpError(401, `This AskMira link is not valid. Open ${BRAND} again from AskMira.`);
+    throw httpError(401, `This AskMiraa link is not valid. Open ${BRAND} again from AskMiraa.`);
   }
   let found;
   try {
@@ -48,12 +48,12 @@ export async function launch(token: string, next: unknown) {
     throw err;
   }
   const { claims, link, workspace } = found;
-  await spendOnce(claims, `This sign-in link was already used. Open ${BRAND} again from AskMira.`);
+  await spendOnce(claims, `This sign-in link was already used. Open ${BRAND} again from AskMiraa.`);
   if (claims.ext && String(claims.ext) !== link.tenantId) {
     throw httpError(403, `Your company is not connected to ${BRAND} any more. Ask your HR admin.`);
   }
   const email = normEmail(claims.email);
-  if (!EMAIL_RE.test(email)) throw httpError(403, `AskMira did not say who you are.`);
+  if (!EMAIL_RE.test(email)) throw httpError(403, `AskMiraa did not say who you are.`);
   const member = await memberByEmail(link.tenantId, email);
   if (!member) {
     throw httpError(
@@ -72,7 +72,7 @@ export async function launch(token: string, next: unknown) {
   if (managed?.suspendedAt) {
     throw httpError(403, `Your ${BRAND} access to ${workspace.name} has been switched off.`);
   }
-  // Remember who AskMira says this is, for the next sync.
+  // Remember who AskMiraa says this is, for the next sync.
   await db
     .insert(askmiraPeople)
     .values({ tenantId: link.tenantId, userId: member.userId, askmiraUserId: clean(claims.sub, 64) })
@@ -81,6 +81,6 @@ export async function launch(token: string, next: unknown) {
       set: { askmiraUserId: clean(claims.sub, 64) },
     });
   await setSession({ sub: member.userId, tid: link.tenantId });
-  console.log(`[AskMira] ${email} signed in to ${workspace.name} from AskMira`);
+  console.log(`[AskMiraa] ${email} signed in to ${workspace.name} from AskMiraa`);
   return { redirect_to: landing(next) };
 }

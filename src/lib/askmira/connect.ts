@@ -1,18 +1,18 @@
 import 'server-only';
 
-// Connecting this workspace to an AskMira workspace, like "Sign in with…".
+// Connecting this workspace to an AskMiraa workspace, like "Sign in with…".
 //
-// 1. AskMira's admin presses Connect there and lands on /connect/askmira here
-//    with AskMira's workspace, where to come back to, a state and a PKCE
+// 1. AskMiraa's admin presses Connect there and lands on /connect/askmira here
+//    with AskMiraa's workspace, where to come back to, a state and a PKCE
 //    challenge.
 // 2. An owner or admin of the workspace here, signed in, presses Allow
 //    (`approve`): a one-time code bound to this workspace and to the challenge
-//    goes back to AskMira in the browser.
-// 3. AskMira's server swaps the code and the verifier — which only it holds —
+//    goes back to AskMiraa in the browser.
+// 3. AskMiraa's server swaps the code and the verifier — which only it holds —
 //    for this workspace's own secret (`swap`).
 //
 // The secret reaches this one workspace only. Either side can disconnect:
-// AskMira from its Connectors (`revoke`), an owner or admin here from the
+// AskMiraa from its Connectors (`revoke`), an owner or admin here from the
 // same page (`disconnect`).
 
 import crypto from 'node:crypto';
@@ -50,18 +50,18 @@ export async function signedInAdmin(): Promise<Admin> {
   const membership = tenant ? await getCurrentMembership() : null;
   if (!tenant || !membership) throw httpError(401, `Choose a ${BRAND} workspace first.`);
   if (membership.role !== 'owner' && membership.role !== 'admin') {
-    throw httpError(403, `Only an owner or admin of ${tenant.name} connects it to AskMira.`);
+    throw httpError(403, `Only an owner or admin of ${tenant.name} connects it to AskMiraa.`);
   }
   return { userId, tenantId: tenant.id, tenantName: tenant.name, role: membership.role };
 }
 
-/** The AskMira that is asking, from where it wants the answer sent; refuses anything odd. */
+/** The AskMiraa that is asking, from where it wants the answer sent; refuses anything odd. */
 function askmiraCallback(redirectUri: unknown) {
   let url: URL;
   try {
     url = new URL(String(redirectUri ?? ''));
   } catch {
-    throw httpError(422, 'That is not an AskMira connect link.');
+    throw httpError(422, 'That is not an AskMiraa connect link.');
   }
   const local = ['localhost', '127.0.0.1'].includes(url.hostname);
   if (
@@ -73,19 +73,19 @@ function askmiraCallback(redirectUri: unknown) {
     url.username ||
     url.password
   ) {
-    throw httpError(422, 'That is not an AskMira connect link.');
+    throw httpError(422, 'That is not an AskMiraa connect link.');
   }
   const allowed = String(process.env.ASKMIRA_ALLOWED_ORIGINS ?? '')
     .split(',')
     .map((o) => o.trim().replace(/\/+$/, ''))
     .filter(Boolean);
   if (allowed.length && !allowed.includes(url.origin)) {
-    throw httpError(403, `This AskMira is not one this ${BRAND} connects to.`);
+    throw httpError(403, `This AskMiraa is not one this ${BRAND} connects to.`);
   }
   return url;
 }
 
-/** This workspace, and the AskMira workspace it is connected to, if any. */
+/** This workspace, and the AskMiraa workspace it is connected to, if any. */
 export async function connection(me: Admin) {
   const [link] = await db
     .select()
@@ -103,7 +103,7 @@ export async function connection(me: Admin) {
   };
 }
 
-/** Allow: a one-time code for AskMira, bound to this workspace. */
+/** Allow: a one-time code for AskMiraa, bound to this workspace. */
 export async function approve(me: Admin, body: Record<string, unknown>) {
   if (!canConnect()) {
     throw httpError(409, 'Set AUTH_SECRET or ASKMIRA_LINK_SECRET (at least 32 characters) on this server first.');
@@ -113,7 +113,7 @@ export async function approve(me: Admin, body: Record<string, unknown>) {
   const state = String(body.state ?? '');
   const name = clean(body.tenant_name);
   if (!UUID_RE.test(tenantId) || !PKCE_RE.test(challenge) || !state || state.length > 4000 || !name) {
-    throw httpError(422, 'That is not an AskMira connect link.');
+    throw httpError(422, 'That is not an AskMiraa connect link.');
   }
   const callback = askmiraCallback(body.redirect_uri);
 
@@ -122,10 +122,10 @@ export async function approve(me: Admin, body: Record<string, unknown>) {
     .from(askmiraLinks)
     .where(or(eq(askmiraLinks.tenantId, me.tenantId), eq(askmiraLinks.askmiraTenantId, tenantId)));
   if (links.some((l) => l.tenantId === me.tenantId && l.askmiraTenantId !== tenantId)) {
-    throw httpError(409, `${me.tenantName} is already connected to another AskMira workspace. Disconnect it first.`);
+    throw httpError(409, `${me.tenantName} is already connected to another AskMiraa workspace. Disconnect it first.`);
   }
   if (links.some((l) => l.askmiraTenantId === tenantId && l.tenantId !== me.tenantId)) {
-    throw httpError(409, `That AskMira workspace is already connected to another ${BRAND} workspace.`);
+    throw httpError(409, `That AskMiraa workspace is already connected to another ${BRAND} workspace.`);
   }
 
   const code = crypto.randomBytes(32).toString('base64url');
@@ -140,12 +140,12 @@ export async function approve(me: Admin, body: Record<string, unknown>) {
     approvedBy: me.userId,
     expiresAt: new Date(Date.now() + CODE_LIFETIME_MS),
   });
-  console.log(`[AskMira] ${me.tenantName} approved a connection to workspace ${tenantId} at ${callback.origin}`);
+  console.log(`[AskMiraa] ${me.tenantName} approved a connection to workspace ${tenantId} at ${callback.origin}`);
   const query = new URLSearchParams({ code, state, product: PRODUCT });
   return { redirect_to: `${callback.origin}${CALLBACK_PATH}?${query}` };
 }
 
-/** AskMira's server swaps the code, and the verifier only it holds, for the secret. */
+/** AskMiraa's server swaps the code, and the verifier only it holds, for the secret. */
 export async function swap(body: Record<string, unknown>) {
   const code = String(body.code ?? '');
   const verifier = String(body.verifier ?? '');
@@ -184,7 +184,7 @@ export async function swap(body: Record<string, unknown>) {
     .from(askmiraLinks)
     .where(or(eq(askmiraLinks.tenantId, workspace.id), eq(askmiraLinks.askmiraTenantId, tenantId)));
   if (clash.some((l) => (l.tenantId === workspace.id) !== (l.askmiraTenantId === tenantId))) {
-    throw httpError(409, `That AskMira workspace or this ${BRAND} workspace is already connected elsewhere.`);
+    throw httpError(409, `That AskMiraa workspace or this ${BRAND} workspace is already connected elsewhere.`);
   }
   const nonce = crypto.randomBytes(32).toString('base64url');
   await db
@@ -209,7 +209,7 @@ export async function swap(body: Record<string, unknown>) {
         connectedAt: new Date(),
       },
     });
-  console.log(`[AskMira] workspace ${workspace.id} connected to AskMira workspace ${tenantId}`);
+  console.log(`[AskMiraa] workspace ${workspace.id} connected to AskMiraa workspace ${tenantId}`);
   return {
     product: PRODUCT,
     brand: BRAND,
@@ -219,16 +219,16 @@ export async function swap(body: Record<string, unknown>) {
   };
 }
 
-/** AskMira disconnected: forget this workspace's secret here too. */
+/** AskMiraa disconnected: forget this workspace's secret here too. */
 export async function revoke(askmiraTenantId: string) {
   await db.delete(askmiraLinks).where(eq(askmiraLinks.askmiraTenantId, askmiraTenantId.toLowerCase()));
-  console.log(`[AskMira] AskMira workspace ${askmiraTenantId} disconnected`);
+  console.log(`[AskMiraa] AskMiraa workspace ${askmiraTenantId} disconnected`);
   return { disconnected: true };
 }
 
-/** Disconnect from this side: AskMira's secret for this workspace stops working at once. */
+/** Disconnect from this side: AskMiraa's secret for this workspace stops working at once. */
 export async function disconnect(me: Admin) {
   await db.delete(askmiraLinks).where(eq(askmiraLinks.tenantId, me.tenantId));
-  console.log(`[AskMira] ${me.tenantName} disconnected from AskMira by ${me.userId}`);
+  console.log(`[AskMiraa] ${me.tenantName} disconnected from AskMiraa by ${me.userId}`);
   return connection(me);
 }

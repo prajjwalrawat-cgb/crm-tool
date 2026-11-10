@@ -8,7 +8,7 @@ const geistSans = Geist({
   subsets: ['latin'],
 });
 
-// AskMira's pairing: Inter for the UI, Fraunces for page titles.
+// AskMiraa's pairing: Inter for the UI, Fraunces for page titles.
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const fraunces = Fraunces({ variable: '--font-fraunces', subsets: ['latin'], axes: ['SOFT', 'opsz'] });
 

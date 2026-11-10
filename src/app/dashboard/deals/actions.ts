@@ -1365,7 +1365,7 @@ export async function updateDealStageAction(
 
         // 0071 — Won rests on the client's order confirmation, at the value
         // it states. Same shape as a gate, so the board's slide-over (and
-        // AskMira) say exactly what is missing.
+        // AskMiraa) say exactly what is missing.
         if (parsed.data.stage === 'won') {
           const poFailure = await orderProofFailure(tx, {
             id: previous.id,

@@ -1,12 +1,12 @@
 import 'server-only';
 
-// Reading for one person (query, use=query): what AskMira's assistant shows.
+// Reading for one person (query, use=query): what AskMiraa's assistant shows.
 //
 // Every answer is what that person sees in Saleinx itself: a rep (member) or
 // viewer sees the deals they own and unassigned ones, as on the Deals page; a
 // manager, admin or owner sees the whole workspace. Reads run inside the
 // workspace's tenant context, so row level security holds as it does for a
-// page. Each answer says what the person may do here (`actor`), so AskMira
+// page. Each answer says what the person may do here (`actor`), so AskMiraa
 // never offers them a change Saleinx would refuse.
 
 import { and, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
@@ -289,7 +289,7 @@ async function options({ me }: QueryArgs) {
         lead_has_no_close_date: true,
         hold_needs_reason_and_revisit_date: true,
         member_won_needs_approval: true,
-        // 0071 — the client's PO is attached in Saleinx, never through AskMira.
+        // 0071 — the client's PO is attached in Saleinx, never through AskMiraa.
         won_needs_client_po_matching_value: true,
         create_at_won_refused: true,
       },

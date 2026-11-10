@@ -17,11 +17,11 @@ const PUBLIC_PATHS = [
   '/forgot-password',
   '/reset-password',
   '/accept-invite',
-  // Signing in from AskMira: the page hands its one-time link to the server.
+  // Signing in from AskMiraa: the page hands its one-time link to the server.
   '/sso/askmira',
 ];
 // Inngest verifies its own requests via signed headers — auth here is the
-// wrong layer. AskMira's server-to-server calls carry their own signed token;
+// wrong layer. AskMiraa's server-to-server calls carry their own signed token;
 // the two a signed-in admin's browser makes (Allow, the connection) check the
 // session themselves.
 const PUBLIC_PREFIXES = ['/api/inngest', '/api/integrations/askmira/'];
@@ -49,7 +49,7 @@ export default async function middleware(request: NextRequest) {
 
   if (!claims) {
     const url = new URL('/sign-in', request.url);
-    // The query is kept: AskMira's Allow link carries everything in it.
+    // The query is kept: AskMiraa's Allow link carries everything in it.
     if (pathname && pathname !== '/') {
       url.searchParams.set('next', `${pathname}${request.nextUrl.search}`);
     }

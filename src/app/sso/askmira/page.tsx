@@ -6,7 +6,7 @@ import { AuthShell } from '@/components/auth/auth-shell';
 
 /** Hands the one-time link to the server; what went wrong, or null once it is redirecting. */
 async function signIn(token: string | null, next: string | null): Promise<string | null> {
-  if (!token) return 'This AskMira link is not complete. Open Saleinx again from AskMira.';
+  if (!token) return 'This AskMiraa link is not complete. Open Saleinx again from AskMiraa.';
   try {
     const res = await fetch('/api/integrations/askmira/launch', {
       method: 'POST',
@@ -15,7 +15,7 @@ async function signIn(token: string | null, next: string | null): Promise<string
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.redirect_to) {
-      return data.error ?? 'Could not sign you in. Open Saleinx again from AskMira.';
+      return data.error ?? 'Could not sign you in. Open Saleinx again from AskMiraa.';
     }
     window.location.replace(data.redirect_to);
     return null;
@@ -25,7 +25,7 @@ async function signIn(token: string | null, next: string | null): Promise<string
 }
 
 /**
- * /sso/askmira#token=… — someone opened Saleinx from AskMira. The one-time
+ * /sso/askmira#token=… — someone opened Saleinx from AskMiraa. The one-time
  * link rides in the fragment, which never reaches a server log; this page
  * hands it to the server, which starts a normal session and says where to go.
  */
@@ -46,7 +46,7 @@ export default function AskMiraSignIn() {
   }, []);
 
   return (
-    <AuthShell subtitle="Signing you in from AskMira">
+    <AuthShell subtitle="Signing you in from AskMiraa">
       {error ? (
         <p role="alert" className="text-[13px] text-amber-800 dark:text-amber-200">
           {error}

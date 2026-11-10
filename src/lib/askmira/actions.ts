@@ -1,6 +1,6 @@
 import 'server-only';
 
-// What AskMira's assistant does here for one person (act, use=act; each token once).
+// What AskMiraa's assistant does here for one person (act, use=act; each token once).
 //
 //   lead.save    a new lead from what they typed (company, contact, deal at
 //                Lead, follow-up task, note), or changes to one (a new title, a
@@ -15,7 +15,7 @@ import 'server-only';
 // rest — as the person (runAsPerson), so their role, the margin and close-date
 // rules, Hold's fields, stage gates and the manager approval of a rep's Won
 // answer exactly as they would on the board. When one refuses, its own words
-// go back to AskMira.
+// go back to AskMiraa.
 
 import { and, eq, isNull, notInArray, sql } from 'drizzle-orm';
 

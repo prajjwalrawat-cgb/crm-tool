@@ -4,12 +4,12 @@ import { HttpError } from '@/lib/askmira/core';
 
 import { type Ask, ConnectAskMira } from './connect-askmira';
 
-export const metadata = { title: 'Connect AskMira' };
+export const metadata = { title: 'Connect AskMiraa' };
 export const dynamic = 'force-dynamic';
 
 type Query = Partial<Record<keyof Ask, string | string[]>>;
 
-/** What AskMira asks for, from the address; null unless every part is there. */
+/** What AskMiraa asks for, from the address; null unless every part is there. */
 function askOf(query: Query): Ask | null {
   const one = (key: keyof Ask) => {
     const value = query[key];
@@ -26,8 +26,8 @@ function askOf(query: Query): Ask | null {
 }
 
 /**
- * /connect/askmira — an AskMira workspace asks to connect to this one. An owner
- * or admin of the active workspace presses Allow; AskMira then gets a key that
+ * /connect/askmira — an AskMiraa workspace asks to connect to this one. An owner
+ * or admin of the active workspace presses Allow; AskMiraa then gets a key that
  * reaches this workspace only. The middleware has already sent anyone signed
  * out to sign in and back here.
  */
@@ -41,7 +41,7 @@ export default async function ConnectAskMiraPage({ searchParams }: { searchParam
     refused = err instanceof HttpError ? err.message : 'Could not load this workspace.';
   }
   return (
-    <AuthShell subtitle="Connect AskMira, your company's HR system">
+    <AuthShell subtitle="Connect AskMiraa, your company's HR system">
       <ConnectAskMira refused={refused} current={current} ask={ask} />
     </AuthShell>
   );
