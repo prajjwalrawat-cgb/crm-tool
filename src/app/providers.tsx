@@ -3,6 +3,7 @@
 import { ThemeProvider } from 'next-themes';
 import type { ReactNode } from 'react';
 import { Toaster } from 'sonner';
+import { StaleDeploymentListener } from '@/lib/stale-deployment';
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
@@ -17,6 +18,7 @@ export function Providers({ children }: { children: ReactNode }) {
       disableTransitionOnChange
     >
       {children}
+      <StaleDeploymentListener />
       <Toaster
         position="bottom-right"
         toastOptions={{

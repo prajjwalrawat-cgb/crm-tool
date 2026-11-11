@@ -3,6 +3,7 @@
 import { Building2, Loader2, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { useReloadOnStaleDeployment } from '@/lib/stale-deployment';
 
 // Sentinel substrings whose presence in `error.message` indicates a
 // recoverable race we already have a recovery UI for. Everything else
@@ -32,6 +33,8 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useReloadOnStaleDeployment(error);
+
   const isMembershipMissing =
     error.name === 'MembershipMissingError' ||
     MEMBERSHIP_HINTS.some((h) => error.message.includes(h));
