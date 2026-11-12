@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect } from 'react';
+import { useReloadOnStaleDeployment } from '@/lib/stale-deployment';
 
 export default function ContactsErrorBoundary({
   error,
@@ -9,6 +10,8 @@ export default function ContactsErrorBoundary({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useReloadOnStaleDeployment(error);
+
   useEffect(() => {
     console.error('[contacts] route error:', error);
   }, [error]);

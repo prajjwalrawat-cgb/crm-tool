@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect } from 'react';
+import { useReloadOnStaleDeployment } from '@/lib/stale-deployment';
 
 export default function BoardErrorBoundary({
   error,
@@ -9,6 +10,8 @@ export default function BoardErrorBoundary({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useReloadOnStaleDeployment(error);
+
   useEffect(() => {
     console.error('[deals/board] route error:', error);
   }, [error]);

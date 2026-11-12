@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect } from 'react';
+import { useReloadOnStaleDeployment } from '@/lib/stale-deployment';
 
 // User-facing copy stays generic — internal error messages (DB helper
 // names, table columns, async-context wiring) must not leak into the
@@ -14,6 +15,8 @@ export default function DealsErrorBoundary({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useReloadOnStaleDeployment(error);
+
   useEffect(() => {
     console.error('[deals] route error:', error);
   }, [error]);
