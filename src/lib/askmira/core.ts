@@ -56,12 +56,15 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** More for AskMiraa beside the message, such as a refusal's `code`. */
+    public extra: Record<string, unknown> = {},
   ) {
     super(message);
   }
 }
 
-export const httpError = (status: number, message: string) => new HttpError(status, message);
+export const httpError = (status: number, message: string, extra?: Record<string, unknown>) =>
+  new HttpError(status, message, extra);
 
 /** A database error saying a table does not exist (migration 0070 not applied yet). */
 function isMissingTable(err: unknown) {
@@ -81,7 +84,7 @@ export async function respond(work: () => Promise<unknown>) {
     return NextResponse.json(await work());
   } catch (err) {
     if (err instanceof HttpError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return NextResponse.json({ ...err.extra, error: err.message }, { status: err.status });
     }
     if (isMissingTable(err)) {
       console.error('[AskMiraa] the AskMiraa tables are missing:', err);

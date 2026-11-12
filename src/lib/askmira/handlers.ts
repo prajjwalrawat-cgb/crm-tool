@@ -7,6 +7,7 @@ import { ACTIONS } from './actions';
 import { approve, connection, disconnect, revoke, signedInAdmin, swap } from './connect';
 import { actorIn, assertion, httpError, paramsOf, respond, spendOnce } from './core';
 import { launch } from './launch';
+import { organizations, ping, platformAssertion, provision } from './platform';
 import { syncPeople } from './people';
 import { actorOf, QUERIES } from './queries';
 
@@ -78,4 +79,14 @@ export const launchRoute = (req: Request) =>
     const token = String(body.token ?? '');
     if (!token || token.length > 4000) throw httpError(401, 'This AskMiraa link is not valid.');
     return launch(token, body.next);
+  });
+
+/** POST platform/{ping,organizations,provision} — AskMiraa's platform (use=platform). */
+export const platformRoute = (req: Request, action: string) =>
+  respond(async () => {
+    const { body, claims } = await platformAssertion(req);
+    if (action === 'ping') return ping();
+    if (action === 'organizations') return organizations(body);
+    if (action === 'provision') return provision(body, claims);
+    throw httpError(404, 'Not found');
   });
