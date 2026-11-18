@@ -19,12 +19,16 @@ const PUBLIC_PATHS = [
   '/accept-invite',
   // Signing in from AskMiraa: the page hands its one-time link to the server.
   '/sso/askmira',
+  // Hosted lead-capture forms (public by design).
+  '/f',
 ];
 // Inngest verifies its own requests via signed headers — auth here is the
 // wrong layer. AskMiraa's server-to-server calls carry their own signed token;
 // the two a signed-in admin's browser makes (Allow, the connection) check the
 // session themselves.
-const PUBLIC_PREFIXES = ['/api/inngest', '/api/integrations/askmira/'];
+// Lead capture's public endpoints authenticate per lead source (token or
+// HMAC), never with a session.
+const PUBLIC_PREFIXES = ['/api/inngest', '/api/integrations/askmira/', '/api/public/'];
 
 function isPublic(pathname: string): boolean {
   if (

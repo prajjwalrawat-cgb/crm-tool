@@ -181,6 +181,28 @@ export const deals = pgTable(
     updatedBy: text('updated_by'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: text('deleted_by'),
+    /**
+     * Lead capture (migration 0072). Set when the deal arrived through a
+     * capture source (webhook, form, CSV …); NULL for deals created by hand.
+     */
+    leadSourceId: uuid('lead_source_id'),
+    utmSource: text('utm_source'),
+    utmMedium: text('utm_medium'),
+    utmCampaign: text('utm_campaign'),
+    utmTerm: text('utm_term'),
+    utmContent: text('utm_content'),
+    landingUrl: text('landing_url'),
+    referrerUrl: text('referrer_url'),
+    consentGiven: boolean('consent_given'),
+    consentAt: timestamp('consent_at', { withTimezone: true }),
+    /** Last time the same person enquired again (dedupe re-enquiry). */
+    lastEnquiryAt: timestamp('last_enquiry_at', { withTimezone: true }),
+    leadCity: text('lead_city'),
+    leadState: text('lead_state'),
+    leadProductInterest: text('lead_product_interest'),
+    /** NULL = not routed; 'pending' | 'unassigned' | 'assigned'. */
+    routingStatus: text('routing_status').$type<'pending' | 'unassigned' | 'assigned'>(),
+    routingQueuedAt: timestamp('routing_queued_at', { withTimezone: true }),
   },
   (t) => [
     index('deals_tenant_id_idx').on(t.tenantId),
@@ -215,5 +237,29 @@ export const dealsRelations = relations(deals, ({ one }) => ({
   }),
 }));
 
-export type Deal = typeof deals.$inferSelect;
+/** Lead-capture columns (0072). Read through `DealRecord` / the lead-capture module. */
+export type DealLeadCaptureColumn =
+  | 'leadSourceId'
+  | 'utmSource'
+  | 'utmMedium'
+  | 'utmCampaign'
+  | 'utmTerm'
+  | 'utmContent'
+  | 'landingUrl'
+  | 'referrerUrl'
+  | 'consentGiven'
+  | 'consentAt'
+  | 'lastEnquiryAt'
+  | 'leadCity'
+  | 'leadState'
+  | 'leadProductInterest'
+  | 'routingStatus'
+  | 'routingQueuedAt';
+/** The full row, including lead-capture columns. */
+export type DealRecord = typeof deals.$inferSelect;
+/**
+ * The deal shape the CRM views and realtime payloads use. Lead-capture columns
+ * are left out so list/board queries that pick explicit columns keep matching.
+ */
+export type Deal = Omit<DealRecord, DealLeadCaptureColumn>;
 export type NewDeal = typeof deals.$inferInsert;

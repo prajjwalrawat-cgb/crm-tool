@@ -21,6 +21,32 @@ import { dealScoresNightly } from './deal-scores-nightly';
 import { forecastSnapshotWeekly } from './forecast-snapshot-weekly';
 import { gmailSync } from './gmail-sync';
 import { holdRevisitDaily } from './hold-revisit-daily';
+import {
+  reportBackfill,
+  reportBackfillHandler,
+  reportDigestsHourly,
+  reportRollupNightly,
+  reportRollupRecent,
+} from './reports';
+import {
+  leadDistribute,
+  leadDistributeHandler,
+  leadImportProcess,
+  leadImportProcessHandler,
+  leadIngestProcess,
+  leadIngestProcessHandler,
+  leadSlaWatchdog,
+  leadUnassignedRetry,
+} from './lead-capture';
+import {
+  callAiSummarize,
+  callAiSummarizeHandler,
+  callEventProcess,
+  callEventProcessHandler,
+  callRecordingArchive,
+  callRecordingArchiveHandler,
+  campaignDialerTick,
+} from './telephony';
 import { incentiveActualsNightly } from './incentive-actuals-nightly';
 import {
   newMemberOnboarding,
@@ -46,8 +72,20 @@ registerLocalHandler('crm/deal.stage_changed', dealLostHandler);
 registerLocalHandler('crm/ai.embed_entity', regenerateEmbeddingHandler);
 registerLocalHandler('crm/member.invited', newMemberOnboardingHandler);
 registerLocalHandler('crm/deal.health_recompute', dealHealthRecomputeHandler);
+registerLocalHandler('crm/lead.ingest_received', leadIngestProcessHandler);
+registerLocalHandler('crm/lead.created', leadDistributeHandler);
+registerLocalHandler('crm/lead.reassign_requested', leadDistributeHandler);
+registerLocalHandler('crm/lead.import_requested', leadImportProcessHandler);
+registerLocalHandler('crm/call.event_received', callEventProcessHandler);
+registerLocalHandler('crm/call.completed', callRecordingArchiveHandler);
+registerLocalHandler('crm/call.recording_archived', callAiSummarizeHandler);
+registerLocalHandler('crm/report.backfill_requested', reportBackfillHandler);
 
 export {
+  callAiSummarize,
+  callEventProcess,
+  callRecordingArchive,
+  campaignDialerTick,
   communicationAnalyticsRollup,
   dealLost,
   dealWon,
@@ -58,10 +96,19 @@ export {
   gmailSync,
   holdRevisitDaily,
   incentiveActualsNightly,
+  leadDistribute,
+  leadImportProcess,
+  leadIngestProcess,
+  leadSlaWatchdog,
+  leadUnassignedRetry,
   newMemberOnboarding,
   notificationsRetention,
   regenerateEmbedding,
   relationshipSignalsDerive,
+  reportBackfill,
+  reportDigestsHourly,
+  reportRollupNightly,
+  reportRollupRecent,
   staleDealsScan,
   teamMetricsMonthly,
   workflowRunsRetention,

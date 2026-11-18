@@ -3,6 +3,8 @@
 import {
   Banknote,
   Bell,
+  MailOpen,
+  Network,
   Brain,
   Building2,
   CalendarClock,
@@ -17,6 +19,10 @@ import {
   Target,
   User,
   Wallet,
+  Headset,
+  Webhook,
+  FormInput,
+  Shuffle,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -51,9 +57,11 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/appearance', label: 'Appearance', icon: Palette, visibility: 'all' },
   { href: '/dashboard/settings/notifications', label: 'Notifications', icon: Bell, visibility: 'all' },
   { href: '/dashboard/settings/email-sync', label: 'Email sync', icon: MailCheck, visibility: 'all' },
+  { href: '/dashboard/settings/digests', label: 'Report digests', icon: MailOpen, visibility: 'all' },
   { href: '/dashboard/settings/organization', label: 'Organization', icon: Building2, group: 'Workspace', visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/pipeline', label: 'Pipeline', icon: GitBranch, visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/currency', label: 'Currency & Locale', icon: Banknote, visibility: 'managerOrAdmin' },
+  { href: '/dashboard/settings/reporting-lines', label: 'Reporting lines', icon: Network, visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/targets', label: 'Sales targets', icon: Target, visibility: 'adminOnly' },
   { href: '/dashboard/settings/incentives', label: 'Incentives', icon: Wallet, visibility: 'adminOnly' },
   { href: '/dashboard/settings/credit-terms', label: 'Credit terms', icon: CalendarClock, visibility: 'adminOnly' },
@@ -61,8 +69,12 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/custom-fields', label: 'Custom fields', icon: ListPlus, visibility: 'adminOnly' },
   { href: '/dashboard/settings/stage-gates', label: 'Stage gates', icon: ShieldCheck, visibility: 'adminOnly' },
   { href: '/dashboard/settings/data-quality', label: 'Data quality', icon: Sparkles, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/lead-sources', label: 'Lead sources', icon: Webhook, group: 'Lead capture', visibility: 'adminOnly' },
+  { href: '/dashboard/settings/lead-forms', label: 'Capture forms', icon: FormInput, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/distribution', label: 'Distribution', icon: Shuffle, visibility: 'adminOnly' },
   { href: '/dashboard/settings/email', label: 'Email', icon: Mail, group: 'Infrastructure', visibility: 'adminOnly' },
   { href: '/dashboard/settings/ai', label: 'AI', icon: Brain, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/telephony', label: 'Telephony', icon: Headset, visibility: 'adminOnly' },
 ];
 
 function isVisible(v: Visibility, persona: Persona): boolean {

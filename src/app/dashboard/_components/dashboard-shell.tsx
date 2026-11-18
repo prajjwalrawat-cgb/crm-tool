@@ -8,7 +8,10 @@ import type { AIMode } from '@/lib/ai/config';
 import type { Persona } from '@/lib/personas';
 
 import { CommandPalette } from './command-palette';
-import { CopilotPanel } from './copilot-panel';
+// Copilot is switched off for now. To bring it back, restore this import and
+// the <CopilotPanel> line below.
+// import { CopilotPanel } from './copilot-panel';
+import { SoftphoneBar } from './telephony/softphone-bar';
 import { EditModeProvider } from './edit-mode/edit-mode-context';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
@@ -21,7 +24,9 @@ export function DashboardShell({
   tenantId,
   currentUserId,
   initialNotifications,
-  aiMode,
+  // Only the (switched-off) Copilot reads aiMode; kept so callers don't change.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  aiMode: _aiMode,
   persona,
   account,
   currentTenantName,
@@ -178,8 +183,11 @@ export function DashboardShell({
           <div key={tenantId} className="flex-1 overflow-y-auto">
             <div className="relative min-h-full">{children}</div>
           </div>
+          {/* Telephony (0073): hidden unless the user has a mapped phone. */}
+          <SoftphoneBar key={`softphone-${tenantId}`} tenantId={tenantId} currentUserId={currentUserId} />
         </div>
-        <CopilotPanel key={tenantId} aiMode={aiMode} />
+        {/* Copilot switched off for now. */}
+        {/* <CopilotPanel key={tenantId} aiMode={_aiMode} /> */}
         <CommandPalette
           tenantId={tenantId}
           open={paletteOpen}

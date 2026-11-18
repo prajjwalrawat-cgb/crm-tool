@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { randomUUID } from 'node:crypto';
+
 import { db } from '@/db';
 import { notifications, type NotificationType } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
@@ -140,39 +142,33 @@ async function writeAndPublish(
   tx: DrizzleTx,
   input: RecordNotificationInput,
 ): Promise<void> {
-  const [row] = await tx
-    .insert(notifications)
-    .values({
-      tenantId: input.tenantId,
-      recipientUserId: input.recipientUserId,
-      actorUserId: input.actorUserId,
-      type: input.type,
-      title: input.title,
-      subtitle: input.subtitle ?? null,
-      entityType: input.entityType ?? null,
-      entityId: input.entityId ?? null,
-      metadata: input.metadata ?? {},
-    })
-    .returning();
-
-  if (!row) return;
+  // No `.returning()`: the SELECT policy only shows a notification to its
+  // recipient, and Postgres applies SELECT policies to RETURNING rows. Any
+  // notification written by someone else (or by a background job) would be
+  // rejected with "new row violates row-level security policy". The id and
+  // timestamp are generated here so the realtime event carries the same data.
+  const row = {
+    id: randomUUID(),
+    tenantId: input.tenantId,
+    recipientUserId: input.recipientUserId,
+    actorUserId: input.actorUserId,
+    type: input.type,
+    title: input.title,
+    subtitle: input.subtitle ?? null,
+    entityType: input.entityType ?? null,
+    entityId: input.entityId ?? null,
+    metadata: input.metadata ?? {},
+    createdAt: new Date(),
+  };
+  await tx.insert(notifications).values(row);
 
   await publishRealtimeEvent(tx, {
     type: 'notification.created',
     tenantId: input.tenantId,
     recipientUserId: row.recipientUserId,
     notification: {
-      id: row.id,
-      tenantId: row.tenantId,
-      recipientUserId: row.recipientUserId,
-      actorUserId: row.actorUserId,
-      type: row.type,
-      entityType: row.entityType,
-      entityId: row.entityId,
-      title: row.title,
-      subtitle: row.subtitle,
-      metadata: row.metadata as Record<string, unknown>,
-      readAt: row.readAt?.toISOString() ?? null,
+      ...row,
+      readAt: null,
       createdAt: row.createdAt.toISOString(),
     },
   });

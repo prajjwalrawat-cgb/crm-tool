@@ -46,3 +46,41 @@ export const embedEntityEvent = eventType('crm/ai.embed_entity', {
 export const dealHealthRecomputeEvent = eventType('crm/deal.health_recompute', {
   schema: staticSchema<WorkflowEvents['crm/deal.health_recompute']>(),
 });
+
+/* -------- Lead capture (0072) -------- */
+
+export const leadIngestReceivedEvent = eventType('crm/lead.ingest_received', {
+  schema: staticSchema<WorkflowEvents['crm/lead.ingest_received']>(),
+});
+
+export const leadCreatedEvent = eventType('crm/lead.created', {
+  schema: staticSchema<WorkflowEvents['crm/lead.created']>(),
+});
+
+export const leadReassignRequestedEvent = eventType('crm/lead.reassign_requested', {
+  schema: staticSchema<WorkflowEvents['crm/lead.reassign_requested']>(),
+});
+
+export const leadImportRequestedEvent = eventType('crm/lead.import_requested', {
+  schema: staticSchema<WorkflowEvents['crm/lead.import_requested']>(),
+});
+
+/* -------- Telephony (0073) -------- */
+
+export const callEventReceivedEvent = eventType('crm/call.event_received', {
+  schema: staticSchema<WorkflowEvents['crm/call.event_received']>(),
+});
+
+export const callCompletedEvent = eventType('crm/call.completed', {
+  schema: staticSchema<WorkflowEvents['crm/call.completed']>(),
+});
+
+export const callRecordingArchivedEvent = eventType('crm/call.recording_archived', {
+  schema: staticSchema<WorkflowEvents['crm/call.recording_archived']>(),
+});
+
+/* -------- Reports (0074) -------- */
+
+export const reportBackfillRequestedEvent = eventType('crm/report.backfill_requested', {
+  schema: staticSchema<WorkflowEvents['crm/report.backfill_requested']>(),
+});

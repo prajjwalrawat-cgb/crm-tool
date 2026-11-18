@@ -106,6 +106,15 @@ const PERMISSIONS = {
   viewCollections: ['owner', 'admin', 'manager'],
   /** The workspace standard credit period. Admin tier. */
   manageCollectionSettings: ['owner', 'admin'],
+  /**
+   * Lead capture (0072): lead sources, capture forms, distribution rules and
+   * routing profiles. Admin tier — these decide who gets every inbound lead.
+   */
+  manageLeadCapture: ['owner', 'admin'],
+  /** Work the unassigned queue / reassign a captured lead to another rep. */
+  assignLeads: ['owner', 'admin', 'manager'],
+  /** Bulk-import leads from CSV. */
+  importLeads: ['owner', 'admin', 'manager'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

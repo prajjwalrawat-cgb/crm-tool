@@ -66,7 +66,7 @@ export const organizationSettings = pgTable('organization_settings', {
   defaultCurrency: text('default_currency').notNull().default('INR'),
   currencyLocale: text('currency_locale').notNull().default('en-US'),
   locale: text('locale').notNull().default('en-US'),
-  timezone: text('timezone').notNull().default('UTC'),
+  timezone: text('timezone').notNull().default('Asia/Kolkata'),
   compactNumbers: boolean('compact_numbers').notNull().default(false),
   fiscalYearStartMonth: smallint('fiscal_year_start_month').notNull().default(1),
 
@@ -90,6 +90,8 @@ export const organizationSettings = pgTable('organization_settings', {
 
   defaultDealStage: text('default_deal_stage').notNull().default('lead'),
   defaultReportRange: text('default_report_range').notNull().default('last_30d'),
+  /** AI "what changed and why" narrative on the reports home (0074). Aggregates only. */
+  reportNarrativeEnabled: boolean('report_narrative_enabled').notNull().default(true),
   dashboardMetrics: text('dashboard_metrics')
     .notNull()
     .default('pipeline,won,wonRecent,activity'),

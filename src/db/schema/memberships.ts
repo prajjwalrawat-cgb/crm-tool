@@ -21,6 +21,11 @@ export const memberships = pgTable(
     userId: text('user_id').notNull(),
     role: membershipRole('role').notNull().default('member'),
     status: membershipStatus('status').notNull().default('active'),
+    /**
+     * Reporting line (0074): the user this member reports to. Drives manager
+     * report scope (self + recursive subtree) via `scopeUsers`. NULL = top.
+     */
+    reportsToUserId: text('reports_to_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
