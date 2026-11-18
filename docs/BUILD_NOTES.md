@@ -189,3 +189,82 @@ Still not done for Prompt 1:
   - `scripts/selftest-reports.ts`: pure, 81 checks, included in `pnpm selftest`.
   - Not yet run, because they need a non-production database: `selftest:reports-db`, `seed:report-load` and `loadtest:reports`. The last two also need `ALLOW_LOAD_SEED=1`.
 
+## Round 2, Prompt 0: RLS gap tables and CI (0075)
+
+- **RLS on the six remaining tenant tables.** `sales_targets`, `custom_field_definitions`, `invoice_seller_profiles`, `chart_views`, `dashboard_widgets` and `org_invitations` get the standard four policies with ENABLE + FORCE. App code reaches them through `tenantTransaction`.
+- **Invite lookup before a tenant context exists.** `org_invitation_by_token(text)` is SECURITY DEFINER, executable only by `app_user`. It returns one invite by token hash, and only while the invite is unaccepted and unexpired. Accepting runs under the invite's tenant context.
+- **No Data API exposure.** All table, sequence and function privileges in `public`, including default privileges, are revoked from `anon` and `authenticated`. The app never uses PostgREST.
+- **`scripts/verify-rls.ts` now checks the whole catalog.**
+  - Every table with a `tenant_id` must have RLS. The exception is `pending_role_intents`, which is allowlisted as a follow-up.
+  - Each must be FORCED, apart from a legacy list that may only shrink.
+  - anon must hold no privileges, cannot read `password_hash`, and cannot execute SECURITY DEFINER functions.
+  - Behavioural checks run on the six tables.
+- **Not in the `build` chain.** Apply with `pnpm exec tsx scripts/apply-0075.ts`.
+- **CI:** `.github/workflows/ci.yml`. It builds the database from `drizzle/*.sql` on pgvector:pg16 with Supabase-like roles, seeds `Test 1`, then runs verify-rls and `pnpm selftest`.
+  - It is red today because of pre-existing problems: 40 lint errors, and `selftest-forecast` / `selftest-stage-governance` hitting the 0071 `ORDER_PROOF_REQUIRED` trigger.
+  - `selftest-deploy-config` can't pass against a non-Supabase database.
+
+## Round 2, Prompt 1: Call transcription (0076)
+
+- **Providers** (docs and the Sarvam SDK source checked 2026-11-18). Each workspace picks Off / Deepgram / Sarvam in Settings › Telephony (`telephony_settings.transcription_provider`; unset = no transcription). Only the API keys are env: `DEEPGRAM_API_KEY`, `SARVAM_API_KEY`. `TELEPHONY_STT_PROVIDER` is no longer read.
+  - **Deepgram:** `POST /v1/listen` with raw bytes, `nova-3`, `language=multi`, `utterances`.
+    - Dual-channel audio uses `multichannel=true`, so agent and customer come from the channel.
+    - Mono audio uses `diarize_model=latest`, and speakers are `unknown` with a "Speaker N" label.
+  - **Sarvam:** the Batch API (init → upload-files → BlockBlob PUT → start → poll → download-files), `saaras:v4`, mode `codemix`, diarisation with 2 speakers.
+    - The synchronous REST endpoint only handles about 30 s.
+    - Sarvam merges channels into one, so its speakers are always `unknown`.
+- **Channel count** comes from the file header (`stt/audio-probe.ts`, WAV and MP3). No recordings existed to ffprobe, so this is unverified on real Exotel files.
+  - Exotel outbound now sends `RecordingChannels=dual`; `EXOTEL_RECORDING_CHANNELS=single` reverts it.
+  - Inbound recordings follow the Exotel call-flow setting.
+  - Channel order defaults to left = agent; override with `TELEPHONY_DUAL_CHANNEL_ORDER=customer,agent`.
+- **Workflow:**
+  - `crm/call.recording_archived` and `crm/call.transcribe_requested` trigger `call-transcribe`, which emits `crm/call.transcribed`.
+  - `crm/call.transcribed` triggers `call-ai-summarize`, which emits `crm/call.summarized` (the hook for AI suggestions).
+  - **Idempotency** is a conditional DB claim (`transcript_status` → `pending`). A pending claim older than 15 minutes can be taken over.
+  - **Retries:** 30 s / 2 m / 5 m on retryable errors (408/425/429/5xx, timeouts); a non-retryable 4xx fails at once.
+  - **Caps:** `TELEPHONY_STT_MAX_BYTES` (50 MB, streamed with a cap), `TELEPHONY_STT_MAX_SECONDS` (1 h), `TELEPHONY_STT_MIN_TALK_SEC` (10 s), `TELEPHONY_STT_TIMEOUT_MS` (240 s per attempt).
+  - It never changes call status, disposition or timeline rows.
+- **Gate:** `telephony_settings.transcription_enabled` AND `transcription_consent_at` (an admin ticks a consent statement in Settings › Telephony, with a warning that consent is the tenant's responsibility). The summary still also needs `ai_call_summary`.
+- **Logging:**
+  - Every STT attempt writes `ai_invocations` (kind `stt`, with provider, audio seconds, channels and latency in metadata) and a `call_recording_access` row (`stt:<provider>`, attributed to the retrying user or `system`).
+  - Call summary (`call_summary`) and CSV mapping (`lead_mapping`) are now logged too, with tokens.
+- **UI:** the deal call card shows speaker turns with timestamps, "Transcribing…", and failed/skipped with the reason plus Retry. Retry is a server action scoped like playback: reps can retry their own calls, managers and above any call. Viewers can't.
+- **Eval:** `pnpm stt:eval -- --dir <recordings> [--providers sarvam,deepgram]`. A `<name>.txt` next to the audio is used as the WER reference. Per-minute rates come from `STT_COST_PER_MIN_SARVAM` / `STT_COST_PER_MIN_DEEPGRAM`.
+- **Tests:** `selftest-transcription.ts` (pure, 37 checks) and `selftest-transcription-db.ts` (34 checks), both in `pnpm selftest`.
+
+## Round 2, Prompt 2: AI suggestions review queue (0077)
+
+- **AI never writes deal or contact fields.** `ai_suggestions` rows are applied only on accept, through `lib/ai/suggestions/appliers.ts`. It calls the same server actions as a manual edit, as the accepting user: `updateDealStageAction` (stage gates, governance), `patchDealAction` (amount, close date and its pushback audit), `updateDealFieldAction` (next step), `patchContactAction`, `createTaskAction`.
+  - `lost` and `hold` are refused with "make this change from the deal page", because both need a reason the AI must not invent.
+  - A failed apply leaves the suggestion pending with the action's error.
+- **Stale detection.** The live value is re-read under a claim (`decided_at`, 2-minute TTL, so two concurrent accepts apply once). If it differs from `current_value_at_suggestion`, the suggestion is marked `stale`, the live value is stored, and the UI shows a three-way diff. Nothing is overwritten.
+- **Extractor** (`lib/ai/suggestions/extract.ts`):
+  - `claude-sonnet-5-5`, with a strict tool and `tool_choice: auto`. Sonnet 5.5 rejects forced tool choice, so the prompt says to call the tool once; no call means no suggestions.
+  - Server-side refusal fallback (`fallbacks: "default"` plus the beta header), effort `medium`, thinking left at the default.
+  - The conversation is wrapped as data. Only the conversation text, its date and the current field values are sent.
+- **Validation** (`validate.ts`) drops:
+  - non-enum stages, and dates that are past, impossible or more than 3 years out;
+  - bad amounts, emails and phones;
+  - fields on the wrong entity, and duplicates;
+  - no-op changes (equal to the current value);
+  - evidence not found verbatim in the source;
+  - evidence that is, or comes from a line that is, instruction-like (prompt injection).
+- **Runs:** `crm/call.summarized` triggers `suggestions-from-call`. `crm/email.thread_summarized` (emitted after the email thread summary) triggers `suggestions-from-email`.
+  - **Idempotency:** per source via `ai_suggestion_sources`. An email source id is `<threadId>:<messageCount>`, so a new reply counts as a new source.
+  - **Supersede:** a newer pending suggestion for the same entity and field supersedes older ones (follow-ups excepted).
+  - **Gate:** `organization_settings.ai_suggestions_enabled` (default off) plus `ai_enabled` plus `ANTHROPIC_API_KEY`.
+  - **Logging:** each run logs `ai_invocations` (kind `ai_suggestions`, with tokens and `costUsdEstimate` at $2/$10 per MTok, overridable by env).
+- **Follow-ups folded in.** A call summary with a `follow_up_date` writes a `follow_up_task` suggestion (model `call-summary`), regardless of the suggestions switch, because no new data leaves the server. "Accept follow-up task" accepts that suggestion; older calls without one still use `acceptFollowUp`.
+- **Scope:**
+  - Reps see suggestions on records they own. Managers see their `reports_to` subtree through `scopeUsers` (a manager with no reports falls back to the whole tenant, as in 0074). Owners and admins see all. Viewers can't decide.
+  - Every decision writes `activity_logs` (`ai_suggestion_accepted|rejected|stale`, `metadata.aiOriginated = true`, with evidence, model, source and decider).
+- **UI:**
+  - The deal page "AI suggestions" card, with low-confidence items (<60%) collapsed.
+  - `/dashboard/suggestions` (Mine / My team, bulk accept and reject).
+  - A nav badge with the viewer's own pending count.
+  - Settings › AI suggestions (switch, plus acceptance rate by field and by model over 90 days).
+- **Tests:**
+  - `selftest-ai-suggestions.ts` (41 checks, pure).
+  - `selftest-ai-suggestions-db.ts` (33 checks; the stage applier uses the real gate engine).
+  - Verified end to end on the dev server against the test DB: the real `acceptSuggestion` updated the close date through `patchDealAction` (with a `deal_date_changes` row), and the rejected amount was unchanged.
+- **Demo:** `pnpm seed:ai-suggestions-demo` (real Claude) or `-- --mock`. Writes only into the allowlisted demo tenant.

@@ -62,6 +62,7 @@ import {
 } from '../../_components/entity-timeline';
 import { LogActivityLauncher } from './_components/log-activity-launcher';
 import { DealCallButton, DealCallsCard } from '../../_components/telephony/deal-calls';
+import { DealSuggestionsCard } from '../../suggestions/_components/deal-suggestions-card';
 import { CustomFieldsDisplay } from '../../_components/custom-fields-display';
 import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
@@ -715,6 +716,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               Documents. Activity is a rep's most-used widget, so it leads;
               the AI cards sit below the day-to-day widgets.
             */}
+            <DealSuggestionsCard tenantId={tenant.id} userId={userId} dealId={deal.id} contactId={deal.contactId ?? null} />
             <DealCallsCard tenantId={tenant.id} userId={userId} dealId={deal.id} />
             <EntityTimeline
               items={timeline}

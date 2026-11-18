@@ -10,10 +10,24 @@ import { claudeConfigured, summarizeCallTranscript } from '@/lib/telephony/ai-su
 import { runDialerTick } from '@/lib/telephony/campaigns';
 import { getProvider } from '@/lib/telephony/providers';
 import { processCallEvent } from '@/lib/telephony/service';
-import { downloadRecordingBytes, uploadRecording } from '@/lib/telephony/storage';
-import { getTranscriber, LANGUAGE_HINTS } from '@/lib/telephony/transcriber';
+import { recordAiInvocation } from '@/lib/ai/audit';
+import { recordFollowUpSuggestion } from '@/lib/ai/suggestions/service';
+import { uploadRecording } from '@/lib/telephony/storage';
+import {
+  attemptTranscription,
+  markTranscriptionFailed,
+  prepareTranscription,
+  type TranscribeDeps,
+} from '@/lib/telephony/transcription';
 
-import { callCompletedEvent, callEventReceivedEvent, callRecordingArchivedEvent, inngest } from '../client';
+import {
+  callCompletedEvent,
+  callEventReceivedEvent,
+  callRecordingArchivedEvent,
+  callTranscribedEvent,
+  callTranscribeRequestedEvent,
+  inngest,
+} from '../client';
 import type { WorkflowEvents } from '../events';
 import type { LocalStepAPI } from '../local-step';
 import { sendWorkflowEvent } from '../send';
@@ -22,7 +36,8 @@ import { sendWorkflowEvent } from '../send';
  * Telephony workflows (build prompt 2):
  *   call-event-process     crm/call.event_received → upsert call, side effects
  *   call-recording-archive crm/call.completed → copy recording to our storage
- *   call-ai-summarize      crm/call.recording_archived → transcript + Claude summary
+ *   call-transcribe        crm/call.recording_archived | crm/call.transcribe_requested → speech-to-text
+ *   call-ai-summarize      crm/call.transcribed → Claude summary → crm/call.summarized
  *   campaign-dialer-tick   every minute → stale claims, completed campaigns
  */
 
@@ -126,11 +141,70 @@ export const callRecordingArchive = inngest.createFunction(
   async ({ event, step }) => callRecordingArchiveHandler({ event, step: step as unknown as LocalStepAPI }),
 );
 
-/** AI summary needs this much talk time to be worth a transcript. */
+/** Backoff between transcription attempts (retryable provider errors only). */
+const TRANSCRIBE_BACKOFF = ['30s', '2m', '5m'];
+
+type TranscribeEventData = { tenantId: string; callId: string; requestedBy?: string };
+
+/**
+ * Speech-to-text on an archived recording, then `crm/call.transcribed`.
+ * Triggered by the archive (crm/call.recording_archived) and by a user's
+ * Retry (crm/call.transcribe_requested). Idempotency lives in the DB claim
+ * (lib/telephony/transcription.ts), so duplicates and retries are safe.
+ */
+export async function callTranscribeHandler(
+  args: { event: { data: TranscribeEventData }; step: LocalStepAPI },
+  deps: TranscribeDeps = {},
+) {
+  const { tenantId, callId } = args.event.data;
+  const requestedBy = args.event.data.requestedBy ?? null;
+  return await runWithTrace({ origin: 'workflow', name: 'call-transcribe' }, async () => {
+    const prep = await args.step.run('prepare', () => runWithSystemContext(tenantId, () => prepareTranscription(tenantId, callId, deps)));
+    if (prep.status !== 'claimed') return prep;
+    let lastError = 'unknown error';
+    for (let attempt = 0; attempt <= TRANSCRIBE_BACKOFF.length; attempt++) {
+      const r = await args.step.run(`transcribe-${attempt}`, () =>
+        runWithSystemContext(tenantId, () => attemptTranscription(tenantId, callId, { ...deps, requestedBy, provider: prep.provider })),
+      );
+      if (r.kind === 'done') {
+        await args.step.run('emit-transcribed', () => sendWorkflowEvent('crm/call.transcribed', { tenantId, callId }));
+        return { status: 'done' as const, segments: r.segments, attempts: attempt + 1 };
+      }
+      lastError = r.error;
+      if (r.kind === 'fail') break;
+      const wait = TRANSCRIBE_BACKOFF[attempt];
+      if (!wait) break;
+      await args.step.sleep(`transcribe-wait-${attempt}`, wait);
+    }
+    await args.step.run('mark-failed', () => runWithSystemContext(tenantId, () => markTranscriptionFailed(tenantId, callId, lastError)));
+    return { status: 'failed' as const, error: lastError };
+  });
+}
+
+export const callTranscribe = inngest.createFunction(
+  {
+    id: 'call-transcribe',
+    name: 'Telephony — transcribe call recording',
+    retries: 2,
+    // One transcription per call at a time; the DB claim makes repeats no-ops.
+    concurrency: { key: 'event.data.callId', limit: 1 },
+    triggers: [callRecordingArchivedEvent, callTranscribeRequestedEvent],
+  },
+  async ({ event, step }) =>
+    callTranscribeHandler({ event: event as unknown as { data: TranscribeEventData }, step: step as unknown as LocalStepAPI }),
+);
+
+/** AI summary needs this much talk time to be worth a call to Claude. */
 const MIN_TALK_SEC = 45;
 
-export async function callAiSummarizeHandler(args: { event: { data: WorkflowEvents['crm/call.recording_archived'] }; step: LocalStepAPI }) {
+export async function callAiSummarizeHandler(args: {
+  event: { data: WorkflowEvents['crm/call.transcribed'] };
+  step: LocalStepAPI;
+  /** Injected in tests. */
+  summarize?: typeof summarizeCallTranscript;
+}) {
   const { tenantId, callId } = args.event.data;
+  const summarize = args.summarize ?? summarizeCallTranscript;
   return await args.step.run('summarize', () =>
     runWithSystemContext(tenantId, async () => {
       const ctx = await tenantTransaction(async (tx) => {
@@ -139,36 +213,54 @@ export async function callAiSummarizeHandler(args: { event: { data: WorkflowEven
         return { settings, call: c ?? null };
       });
       const call = ctx.call;
-      if (!call || !call.recordingStorageKey) return { status: 'no-recording' };
-      // Off by default: no audio or transcript leaves the server unless the
+      if (!call) return { status: 'gone' };
+      if (call.aiSummaryStatus === 'done') return { status: 'already-done' };
+      const transcript = call.transcript;
+      if (!transcript) return { status: 'no-transcript' };
+      // Off by default: the transcript only goes to Claude when the
       // workspace turned AI call summaries on.
-      if (!ctx.settings.aiCallSummary) return { status: 'disabled' };
+      if (!ctx.settings.aiCallSummary) {
+        await tenantTransaction((tx) => tx.update(calls).set({ aiSummaryStatus: 'transcript_only' }).where(eq(calls.id, callId)));
+        return { status: 'disabled' };
+      }
       if ((call.talkTimeSec ?? 0) < MIN_TALK_SEC) {
         await tenantTransaction((tx) => tx.update(calls).set({ aiSummaryStatus: 'skipped' }).where(eq(calls.id, callId)));
         return { status: 'too-short' };
       }
-      const transcriber = getTranscriber();
-      let transcript = call.transcript;
-      if (!transcript) {
-        const audio = await downloadRecordingBytes(call.recordingStorageKey);
-        transcript = await transcriber.transcribe(audio.bytes, { contentType: audio.contentType, languageHints: LANGUAGE_HINTS });
-      }
-      if (!transcript) {
-        await tenantTransaction((tx) => tx.update(calls).set({ aiSummaryStatus: 'skipped' }).where(eq(calls.id, callId)));
-        return { status: `no-transcript (${transcriber.name})` };
-      }
-      await tenantTransaction((tx) => tx.update(calls).set({ transcript, aiSummaryStatus: 'pending' }).where(eq(calls.id, callId)));
-      if (!claudeConfigured()) {
+      if (!args.summarize && !claudeConfigured()) {
         await tenantTransaction((tx) => tx.update(calls).set({ aiSummaryStatus: 'transcript_only' }).where(eq(calls.id, callId)));
         return { status: 'transcript-only (no ANTHROPIC_API_KEY)' };
       }
-      const out = await summarizeCallTranscript({ transcript, callDate: call.startedAt ?? call.createdAt, direction: call.direction });
+      await tenantTransaction((tx) => tx.update(calls).set({ aiSummaryStatus: 'pending' }).where(eq(calls.id, callId)));
+      const out = await summarize({ transcript, callDate: call.startedAt ?? call.createdAt, direction: call.direction });
+      await recordAiInvocation({
+        tenantId,
+        actorUserId: null,
+        kind: 'call_summary',
+        model: out.usage.model,
+        promptTokens: out.usage.inputTokens,
+        completionTokens: out.usage.outputTokens,
+        totalTokens: out.usage.inputTokens + out.usage.outputTokens,
+        latencyMs: out.usage.latencyMs,
+        status: out.ok ? 'success' : 'error',
+        error: out.ok ? null : out.error.slice(0, 300),
+        metadata: { callId, attempts: out.attempts },
+      }).catch((err) => captureError(err, { category: 'telephony.summary.audit', retryable: false }));
       await tenantTransaction((tx) =>
         tx
           .update(calls)
           .set(out.ok ? { aiSummary: out.summary, aiSummaryStatus: 'done' } : { aiSummaryStatus: 'transcript_only' })
           .where(eq(calls.id, callId)),
       );
+      if (out.ok) {
+        // The summary's follow-up becomes a review-queue suggestion (one
+        // mechanism for "Accept follow-up task"); then field suggestions may run.
+        await tenantTransaction(async (tx) => {
+          const [fresh] = await tx.select().from(calls).where(eq(calls.id, callId));
+          if (fresh) await recordFollowUpSuggestion(tx, fresh);
+        });
+        await sendWorkflowEvent('crm/call.summarized', { tenantId, callId });
+      }
       return out.ok ? { status: 'done', attempts: out.attempts } : { status: 'transcript-only', error: out.error };
     }),
   );
@@ -179,8 +271,7 @@ export const callAiSummarize = inngest.createFunction(
     id: 'call-ai-summarize',
     name: 'Telephony — AI call summary',
     retries: 3,
-    idempotency: 'event.data.callId',
-    triggers: [callRecordingArchivedEvent],
+    triggers: [callTranscribedEvent],
   },
   async ({ event, step }) => callAiSummarizeHandler({ event, step: step as unknown as LocalStepAPI }),
 );

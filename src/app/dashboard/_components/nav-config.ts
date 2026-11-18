@@ -57,6 +57,8 @@ export type NavItem = {
   icon: LucideIcon;
   /** Match function for "is this nav item highlighted right now?" */
   matcher?: (pathname: string) => boolean;
+  /** Count badge key; the value comes from NavBadgesContext (dashboard layout). */
+  badge?: 'suggestions';
 };
 
 export type NavGroup = {
@@ -86,6 +88,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
     label: 'Sales',
     items: [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
       { href: '/dashboard/leads/unassigned', label: 'Lead queue', icon: Inbox },
       { href: '/dashboard/leads/import', label: 'Import leads', icon: Upload },
@@ -161,6 +164,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
     label: 'Sales',
     items: [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
       { href: '/dashboard/leads/unassigned', label: 'Lead queue', icon: Inbox },
       { href: '/dashboard/leads/import', label: 'Import leads', icon: Upload },
@@ -211,6 +215,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/dashboard/deals', label: 'My Deals', icon: Briefcase },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       {
         href: '/dashboard/deals/at-risk',
         label: 'At Risk',

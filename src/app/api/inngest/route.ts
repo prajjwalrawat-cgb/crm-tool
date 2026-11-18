@@ -13,6 +13,9 @@ import {
   holdRevisitDaily,
   incentiveActualsNightly,
   callAiSummarize,
+  callTranscribe,
+  suggestionsFromCall,
+  suggestionsFromEmail,
   callEventProcess,
   callRecordingArchive,
   campaignDialerTick,
@@ -54,6 +57,9 @@ export const { GET, POST, PUT } = serve({
     holdRevisitDaily,
     incentiveActualsNightly,
     callAiSummarize,
+    callTranscribe,
+    suggestionsFromCall,
+    suggestionsFromEmail,
     callEventProcess,
     callRecordingArchive,
     campaignDialerTick,
@@ -75,3 +81,6 @@ export const { GET, POST, PUT } = serve({
     workflowRunsRetention,
   ],
 });
+
+/** Transcription steps can take a few minutes (Sarvam batch polling); allow up to 5 min per step. */
+export const maxDuration = 300;

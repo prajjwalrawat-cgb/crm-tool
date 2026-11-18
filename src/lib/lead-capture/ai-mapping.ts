@@ -3,6 +3,8 @@ import 'server-only';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 
+import { recordAiInvocation } from '@/lib/ai/audit';
+import { getTenantContext } from '@/lib/db-context';
 import { logger } from '@/lib/observability';
 
 import { LEAD_FIELD_KEYS, suggestMappingHeuristic, type LeadFieldKey } from './mapping';
@@ -75,6 +77,29 @@ export async function suggestColumnMapping(headers: string[]): Promise<MappingSu
   const anthropic = getClient();
   if (!anthropic || headers.length === 0 || headers.length > MAX_HEADERS) return fallback();
 
+  const t0 = Date.now();
+  // Audit to ai_invocations when called inside a tenant context (the import
+  // server action). Never blocks or fails the mapping.
+  let audited = false;
+  const audit = async (status: 'success' | 'error', extra: { usage?: Anthropic.Usage; error?: string }) => {
+    const ctx = getTenantContext();
+    if (!ctx || audited) return;
+    audited = true;
+    await recordAiInvocation({
+      tenantId: ctx.tenantId,
+      actorUserId: ctx.isSystem ? null : ctx.userId,
+      kind: 'lead_mapping',
+      model: MODEL,
+      promptTokens: extra.usage?.input_tokens ?? null,
+      completionTokens: extra.usage?.output_tokens ?? null,
+      totalTokens: extra.usage ? extra.usage.input_tokens + extra.usage.output_tokens : null,
+      latencyMs: Date.now() - t0,
+      status,
+      error: extra.error ?? null,
+      metadata: { headers: headers.length },
+    }).catch((err) => logger.warn('lead mapping: audit failed', { err: String(err) }));
+  };
+
   try {
     const response = await anthropic.messages.create({
       model: MODEL,
@@ -83,6 +108,7 @@ export async function suggestColumnMapping(headers: string[]): Promise<MappingSu
       system: SYSTEM,
       messages: [{ role: 'user', content: `Headers:\n${JSON.stringify(headers)}` }],
     });
+    await audit('success', { usage: response.usage });
     if (response.stop_reason !== 'end_turn') {
       logger.warn('lead mapping: unexpected stop', { stopReason: response.stop_reason });
       return fallback();
@@ -124,6 +150,7 @@ export async function suggestColumnMapping(headers: string[]): Promise<MappingSu
             : err instanceof SyntaxError
               ? 'invalid_json'
               : 'error';
+    await audit('error', { error: reason });
     logger.warn('lead mapping: falling back to heuristic', { reason });
     return fallback();
   }

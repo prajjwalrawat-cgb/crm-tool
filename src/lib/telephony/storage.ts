@@ -51,3 +51,53 @@ export async function downloadRecordingBytes(key: string): Promise<{ bytes: Uint
   if (error || !data) throw new Error(`Recording download failed: ${error?.message ?? 'empty'}`);
   return { bytes: new Uint8Array(await data.arrayBuffer()), contentType: data.type || 'audio/mpeg' };
 }
+
+/** Thrown when a recording is larger than the transcription cap. */
+export class RecordingTooLargeError extends Error {
+  constructor(readonly limitBytes: number) {
+    super(`recording is larger than the ${Math.round(limitBytes / 1024 / 1024)} MB transcription limit`);
+    this.name = 'RecordingTooLargeError';
+  }
+}
+
+/**
+ * Stream a stored recording through a 60-second signed URL into memory,
+ * stopping as soon as it passes `maxBytes` (checked against Content-Length
+ * first, then while reading). Used by transcription; nothing is written to
+ * disk or logged.
+ */
+export async function downloadRecordingCapped(
+  key: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const { data, error } = await getClient().storage.from(recordingsBucket()).createSignedUrl(key, 60);
+  if (error || !data?.signedUrl) throw new Error(`Recording not available: ${error?.message ?? 'no url'}`);
+  const res = await fetch(data.signedUrl, { signal });
+  if (!res.ok || !res.body) throw new Error(`Recording download failed: HTTP ${res.status}`);
+  const declared = Number(res.headers.get('content-length') ?? 0);
+  if (declared > maxBytes) {
+    await res.body.cancel();
+    throw new RecordingTooLargeError(maxBytes);
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new RecordingTooLargeError(maxBytes);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    bytes.set(c, off);
+    off += c.byteLength;
+  }
+  return { bytes, contentType: res.headers.get('content-type') || 'audio/mpeg' };
+}

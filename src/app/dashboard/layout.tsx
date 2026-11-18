@@ -5,6 +5,7 @@ import { getAIMode } from '@/lib/ai/config';
 import { auth } from '@/lib/auth/server';
 import { displayNameForUser, getUserById } from '@/lib/auth/users';
 import { listUserWorkspaces } from '@/lib/auth/workspaces';
+import { countMyPending } from '@/lib/ai/suggestions/service';
 import { runWithTenantContext } from '@/lib/db-context';
 import { ensureMembership } from '@/lib/membership';
 import { listNotificationsForUser } from '@/lib/notifications/queries';
@@ -33,7 +34,7 @@ export default async function DashboardLayout({
   // serial await chain. With the larger pool (see src/db/index.ts) these
   // genuinely run concurrently; the per-request cache() de-dupes the
   // membership/tenant/user lookups the pages below repeat.
-  const [membership, initialNotifications, userRow, workspacesRaw] =
+  const [membership, initialNotifications, userRow, workspacesRaw, pendingSuggestions] =
     await Promise.all([
       ensureMembership(),
       userId
@@ -43,6 +44,10 @@ export default async function DashboardLayout({
         : Promise.resolve([]),
       userId ? getUserById(userId) : Promise.resolve(null),
       userId ? listUserWorkspaces(userId) : Promise.resolve([]),
+      // Badge only; never blocks the layout if the table isn't there yet.
+      userId
+        ? runWithTenantContext({ tenantId: tenant.id, userId }, () => countMyPending(tenant.id, userId)).catch(() => 0)
+        : Promise.resolve(0),
     ]);
 
   const persona = personaOf(membership?.role ?? null);
@@ -72,6 +77,7 @@ export default async function DashboardLayout({
       workspaces={workspaces}
       canCreateWorkspace={canCreate}
       isOwner={isOwner}
+      navBadges={{ suggestions: pendingSuggestions }}
     >
       {children}
     </DashboardShell>

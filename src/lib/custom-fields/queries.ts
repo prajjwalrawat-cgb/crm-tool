@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, asc, eq, type SQL } from 'drizzle-orm';
 
-import { db } from '@/db';
+import { tenantTransaction } from '@/lib/db-context';
 import {
   customFieldDefinitions,
   type CustomFieldDefinition,
@@ -34,14 +34,16 @@ export async function listCustomFieldDefs(
     eq(customFieldDefinitions.entityType, entity),
     eq(customFieldDefinitions.archived, false),
   ];
-  const rows = await db
+  const rows = await tenantTransaction((tx) =>
+    tx
     .select()
     .from(customFieldDefinitions)
     .where(and(...conds))
     .orderBy(
       asc(customFieldDefinitions.sortOrder),
       asc(customFieldDefinitions.createdAt),
-    );
+    ),
+  );
   return rows.map(toClientDef);
 }
 
@@ -61,7 +63,8 @@ export async function listAdminCustomFields(
   tenantId: string,
   entity: CustomFieldEntity,
 ): Promise<AdminCustomField[]> {
-  const rows = await db
+  const rows = await tenantTransaction((tx) =>
+    tx
     .select()
     .from(customFieldDefinitions)
     .where(
@@ -74,7 +77,8 @@ export async function listAdminCustomFields(
       asc(customFieldDefinitions.archived),
       asc(customFieldDefinitions.sortOrder),
       asc(customFieldDefinitions.createdAt),
-    );
+    ),
+  );
   return rows.map((d) => ({
     id: d.id,
     key: d.key,

@@ -19,7 +19,16 @@ import {
 } from '../../../telephony/actions';
 
 type Account = { id: string; provider: TelephonyProviderName; label: string | null; virtualNumbers: string[]; isActive: boolean; webhookUrl: string };
-type Settings = { recordCalls: boolean; recordingAnnouncement: boolean; consentPolicyVersion: string; aiCallSummary: boolean; enforceDnc: boolean; callingHours: CallingHours };
+type Settings = {
+  recordCalls: boolean;
+  recordingAnnouncement: boolean;
+  consentPolicyVersion: string;
+  aiCallSummary: boolean;
+  transcriptionProvider: 'off' | 'deepgram' | 'sarvam';
+  transcriptionConsent: boolean;
+  enforceDnc: boolean;
+  callingHours: CallingHours;
+};
 
 const input = 'w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[13px] dark:border-[#1F1F1F] dark:bg-black';
 const btn = 'inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-indigo-500 disabled:opacity-50';
@@ -37,6 +46,7 @@ function Card({ title, description, children }: { title: string; description?: R
 
 export function TelephonySettingsManager(props: {
   kmsConfigured: boolean;
+  sttProviders: Array<{ name: string; label: string; configured: boolean }>;
   implementedProviders: TelephonyProviderName[];
   settings: Settings;
   accounts: Account[];
@@ -69,6 +79,7 @@ export function TelephonySettingsManager(props: {
   });
   // ---- settings form
   const [s, setS] = useState(props.settings);
+  const sttProviders = props.sttProviders;
   // ---- mapping form
   const [mapUser, setMapUser] = useState('');
   const [mapPhone, setMapPhone] = useState('');
@@ -219,9 +230,52 @@ export function TelephonySettingsManager(props: {
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={s.enforceDnc} onChange={(e) => setS({ ...s, enforceDnc: e.target.checked })} /> Block calls to numbers on the do-not-call list
           </label>
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <label className="flex flex-wrap items-center gap-2 font-medium">
+              Call transcription
+              <select
+                className={`${input} w-auto`}
+                value={s.transcriptionProvider}
+                onChange={(e) => setS({ ...s, transcriptionProvider: e.target.value as Settings['transcriptionProvider'] })}
+                aria-label="Speech-to-text provider"
+              >
+                <option value="off">Off (no transcription)</option>
+                {sttProviders.map((p) => (
+                  <option key={p.name} value={p.name} disabled={!p.configured}>
+                    {p.label}
+                    {p.configured ? '' : ' (API key not set on server)'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11px] text-amber-900 dark:text-amber-200">
+              <li>
+                <span className="font-medium">Deepgram</span>: fast (seconds per call); labels Agent and Customer separately
+                on dual-channel recordings; English, Hindi and Hinglish. Paid per audio minute.
+              </li>
+              <li>
+                <span className="font-medium">Sarvam AI</span>: built for Indian languages, often better on heavy Hindi or
+                regional speech; slower (a minute or two per call); speakers shown as Speaker 1 / 2. Paid per audio minute.
+              </li>
+            </ul>
+            <p className="mt-1.5 text-[11px] text-amber-900 dark:text-amber-200">
+              When on, each recorded call&apos;s audio is sent to the chosen provider. Telling callers that calls are recorded
+              and transcribed, and getting any consent the law requires, is your organisation&apos;s responsibility, not
+              Saleinx&apos;s.
+            </p>
+            <label className="mt-2 flex items-start gap-2 text-[11px]">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={s.transcriptionConsent}
+                onChange={(e) => setS({ ...s, transcriptionConsent: e.target.checked })}
+              />
+              I confirm that callers are told their calls are recorded and may be transcribed, and that we have the consent we need.
+            </label>
+          </div>
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={s.aiCallSummary} onChange={(e) => setS({ ...s, aiCallSummary: e.target.checked })} />
-            AI call summaries — sends call transcripts to Anthropic (Claude) for a summary. Off by default; also needs a speech-to-text engine configured on the server.
+            AI call summaries — sends call transcripts to Anthropic (Claude) for a summary. Off by default; needs transcription on.
           </label>
           <label className="flex items-center gap-2">
             Consent policy version

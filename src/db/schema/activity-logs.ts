@@ -87,6 +87,16 @@ export const ACTIVITY_ACTIONS = [
    * deal amount itself is untouched, so this is the only trace of the change.
    */
   'value_split_changed',
+  /**
+   * A user decided an AI suggestion (0077). `metadata.aiOriginated` is true and
+   * carries `{ suggestionId, field, from, suggested, applied, edited, evidence,
+   * confidence, model, sourceType, sourceId, decidedBy, note }`. The field
+   * change itself is recorded by the normal edit path it went through.
+   */
+  'ai_suggestion_accepted',
+  'ai_suggestion_rejected',
+  /** Accept refused because the field changed since the suggestion (metadata.live). */
+  'ai_suggestion_stale',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 

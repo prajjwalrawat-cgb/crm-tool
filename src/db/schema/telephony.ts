@@ -93,6 +93,13 @@ export const telephonySettings = pgTable('telephony_settings', {
   consentPolicyVersion: text('consent_policy_version').notNull().default('v1'),
   /** Cloud AI on call audio. OFF by default. */
   aiCallSummary: boolean('ai_call_summary').notNull().default(false),
+  /** 0076: speech-to-text on call recordings. OFF by default. */
+  transcriptionEnabled: boolean('transcription_enabled').notNull().default(false),
+  /** When an admin confirmed that callers are told calls are recorded/transcribed. Required to transcribe. */
+  transcriptionConsentAt: timestamp('transcription_consent_at', { withTimezone: true }),
+  transcriptionConsentBy: text('transcription_consent_by'),
+  /** 'deepgram' | 'sarvam'; null = none chosen = no transcription. */
+  transcriptionProvider: text('transcription_provider'),
   callingHours: jsonb('calling_hours')
     .$type<CallingHours>()
     .notNull()
@@ -116,6 +123,19 @@ export const userPhoneMapping = pgTable(
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.userId] })],
 );
+
+export const TRANSCRIPT_STATUSES = ['pending', 'done', 'failed', 'skipped'] as const;
+export type TranscriptStatus = (typeof TRANSCRIPT_STATUSES)[number];
+export type TranscriptSpeaker = 'agent' | 'customer' | 'unknown';
+export type TranscriptSegment = {
+  speaker: TranscriptSpeaker;
+  startMs: number;
+  endMs: number;
+  text: string;
+  confidence: number | null;
+  /** Display label when the speaker is 'unknown' (diarised mono audio), e.g. "Speaker 1". */
+  label?: string;
+};
 
 export const calls = pgTable('calls', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -150,6 +170,17 @@ export const calls = pgTable('calls', {
   notes: text('notes'),
   callbackAt: timestamp('callback_at', { withTimezone: true }),
   transcript: text('transcript'),
+  /** 0076: speaker turns, ordered by startMs. See lib/telephony/transcriber.ts. */
+  transcriptSegments: jsonb('transcript_segments').$type<TranscriptSegment[] | null>(),
+  transcriptLanguage: text('transcript_language'),
+  transcriptProvider: text('transcript_provider'),
+  transcriptModel: text('transcript_model'),
+  transcriptStatus: text('transcript_status').$type<TranscriptStatus | null>(),
+  /** Short, sanitised reason. Never contains audio or transcript text. */
+  transcriptError: text('transcript_error'),
+  transcriptAttempts: integer('transcript_attempts').notNull().default(0),
+  transcriptStartedAt: timestamp('transcript_started_at', { withTimezone: true }),
+  transcriptCompletedAt: timestamp('transcript_completed_at', { withTimezone: true }),
   aiSummary: jsonb('ai_summary').$type<CallAiSummary | null>(),
   aiSummaryStatus: text('ai_summary_status').$type<'pending' | 'done' | 'transcript_only' | 'skipped' | 'failed'>(),
   followUpTaskId: uuid('follow_up_task_id'),

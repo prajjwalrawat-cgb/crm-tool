@@ -1,4 +1,4 @@
-import type { CallAiSummary, CallDisposition, CallRow, CallStatus } from '@/db/schema/telephony';
+import type { CallAiSummary, CallDisposition, CallRow, CallStatus, TranscriptSegment, TranscriptStatus } from '@/db/schema/telephony';
 
 /**
  * The ONLY shape a call leaves the server in. The provider recording URL and
@@ -25,6 +25,12 @@ export type SerializedCall = {
   notes: string | null;
   callbackAt: string | null;
   transcript: string | null;
+  /** Speaker turns; only with includeTranscript. */
+  transcriptSegments: TranscriptSegment[] | null;
+  transcriptStatus: TranscriptStatus | null;
+  /** Short reason for failed / skipped. Never contains transcript text. */
+  transcriptError: string | null;
+  transcriptProvider: string | null;
   aiSummary: CallAiSummary | null;
   aiSummaryStatus: CallRow['aiSummaryStatus'];
   followUpTaskId: string | null;
@@ -54,6 +60,10 @@ export function serializeCall(row: CallRow, opts: { includeTranscript?: boolean 
     notes: row.notes,
     callbackAt: iso(row.callbackAt),
     transcript: opts.includeTranscript ? row.transcript : null,
+    transcriptSegments: opts.includeTranscript ? (row.transcriptSegments ?? null) : null,
+    transcriptStatus: row.transcriptStatus ?? null,
+    transcriptError: row.transcriptError ?? null,
+    transcriptProvider: row.transcriptProvider ?? null,
     aiSummary: row.aiSummary ?? null,
     aiSummaryStatus: row.aiSummaryStatus,
     followUpTaskId: row.followUpTaskId,

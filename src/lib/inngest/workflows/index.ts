@@ -45,9 +45,17 @@ import {
   callEventProcessHandler,
   callRecordingArchive,
   callRecordingArchiveHandler,
+  callTranscribe,
+  callTranscribeHandler,
   campaignDialerTick,
 } from './telephony';
 import { incentiveActualsNightly } from './incentive-actuals-nightly';
+import {
+  suggestionsFromCall,
+  suggestionsFromCallHandler,
+  suggestionsFromEmail,
+  suggestionsFromEmailHandler,
+} from './ai-suggestions';
 import {
   newMemberOnboarding,
   newMemberOnboardingHandler,
@@ -78,11 +86,18 @@ registerLocalHandler('crm/lead.reassign_requested', leadDistributeHandler);
 registerLocalHandler('crm/lead.import_requested', leadImportProcessHandler);
 registerLocalHandler('crm/call.event_received', callEventProcessHandler);
 registerLocalHandler('crm/call.completed', callRecordingArchiveHandler);
-registerLocalHandler('crm/call.recording_archived', callAiSummarizeHandler);
+registerLocalHandler('crm/call.recording_archived', (a) => callTranscribeHandler(a));
+registerLocalHandler('crm/call.transcribe_requested', (a) => callTranscribeHandler(a));
+registerLocalHandler('crm/call.transcribed', callAiSummarizeHandler);
+registerLocalHandler('crm/call.summarized', (a) => suggestionsFromCallHandler(a));
+registerLocalHandler('crm/email.thread_summarized', (a) => suggestionsFromEmailHandler(a));
 registerLocalHandler('crm/report.backfill_requested', reportBackfillHandler);
 
 export {
   callAiSummarize,
+  callTranscribe,
+  suggestionsFromCall,
+  suggestionsFromEmail,
   callEventProcess,
   callRecordingArchive,
   campaignDialerTick,

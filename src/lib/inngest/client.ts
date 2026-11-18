@@ -79,6 +79,22 @@ export const callRecordingArchivedEvent = eventType('crm/call.recording_archived
   schema: staticSchema<WorkflowEvents['crm/call.recording_archived']>(),
 });
 
+export const callTranscribeRequestedEvent = eventType('crm/call.transcribe_requested', {
+  schema: staticSchema<WorkflowEvents['crm/call.transcribe_requested']>(),
+});
+
+export const callTranscribedEvent = eventType('crm/call.transcribed', {
+  schema: staticSchema<WorkflowEvents['crm/call.transcribed']>(),
+});
+
+export const callSummarizedEvent = eventType('crm/call.summarized', {
+  schema: staticSchema<WorkflowEvents['crm/call.summarized']>(),
+});
+
+export const emailThreadSummarizedEvent = eventType('crm/email.thread_summarized', {
+  schema: staticSchema<WorkflowEvents['crm/email.thread_summarized']>(),
+});
+
 /* -------- Reports (0074) -------- */
 
 export const reportBackfillRequestedEvent = eventType('crm/report.backfill_requested', {

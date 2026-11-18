@@ -2,7 +2,6 @@ import 'server-only';
 
 import { and, eq, sql } from 'drizzle-orm';
 
-import { db } from '@/db';
 import { salesTargets, type SalesTarget } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 import { listTeammates } from '@/lib/teammates/queries';
@@ -26,7 +25,8 @@ export async function listTargets(
   tenantId: string,
   fiscalYear: number,
 ): Promise<SalesTarget[]> {
-  return await db
+  return await tenantTransaction((tx) =>
+    tx
     .select()
     .from(salesTargets)
     .where(
@@ -34,7 +34,8 @@ export async function listTargets(
         eq(salesTargets.tenantId, tenantId),
         eq(salesTargets.fiscalYear, fiscalYear),
       ),
-    );
+    ),
+  );
 }
 
 export type TargetAchievement = {

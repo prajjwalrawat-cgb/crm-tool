@@ -1,34 +1,92 @@
 'use client';
 
-import { CalendarPlus, ChevronDown, Loader2, Sparkles } from 'lucide-react';
+import { AlertTriangle, CalendarPlus, ChevronDown, Loader2, RotateCw, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
-import type { CallAiSummary } from '@/db/schema/telephony';
+import type { CallAiSummary, TranscriptSegment, TranscriptStatus } from '@/db/schema/telephony';
 import { DISPOSITION_LABELS } from '@/lib/telephony/serialize';
 
-import { acceptCallFollowUp } from '../../telephony/actions';
+import { acceptCallFollowUp, retryCallTranscription } from '../../telephony/actions';
 
-/** Collapsed-by-default AI summary + expandable transcript + one-click follow-up. */
+const SPEAKER_TONE: Record<TranscriptSegment['speaker'], string> = {
+  agent: 'text-indigo-700 dark:text-indigo-300',
+  customer: 'text-emerald-700 dark:text-emerald-300',
+  unknown: 'text-slate-700 dark:text-[#E4E4E7]',
+};
+
+function clock(ms: number): string {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(t / 60)}:${(t % 60).toString().padStart(2, '0')}`;
+}
+
+function speakerName(s: TranscriptSegment): string {
+  if (s.speaker === 'agent') return 'Agent';
+  if (s.speaker === 'customer') return 'Customer';
+  return s.label ?? 'Speaker';
+}
+
+/** Speaker turns with timestamps; falls back to the plain transcript. */
+function TranscriptTurns({ segments, transcript }: { segments: TranscriptSegment[] | null; transcript: string }) {
+  if (!segments?.length) {
+    return <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap font-sans text-slate-600 dark:text-[#A1A1AA]">{transcript}</pre>;
+  }
+  const unlabelled = segments.every((s) => s.speaker === 'unknown');
+  return (
+    <div className="mt-1 max-h-72 space-y-1.5 overflow-auto">
+      {unlabelled ? (
+        <p className="text-[10px] text-slate-400">Speakers were separated automatically; the app can&apos;t tell which one is the agent.</p>
+      ) : null}
+      {segments.map((s, i) => (
+        <p key={i} className="text-slate-600 dark:text-[#A1A1AA]">
+          <span className="mr-1 font-mono text-[10px] text-slate-400">{clock(s.startMs)}</span>
+          <span className={`mr-1 font-semibold ${SPEAKER_TONE[s.speaker]}`}>{speakerName(s)}:</span>
+          {s.text}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** Collapsed-by-default AI summary + transcript turns + one-click follow-up + transcription state. */
 export function CallSummaryCard({
   callId,
   summary,
   transcript,
+  segments = null,
+  transcriptStatus = null,
+  transcriptError = null,
+  hasRecording = false,
   followUpTaskId,
 }: {
   callId: string;
   summary: CallAiSummary | null;
   transcript: string | null;
+  segments?: TranscriptSegment[] | null;
+  transcriptStatus?: TranscriptStatus | null;
+  transcriptError?: string | null;
+  hasRecording?: boolean;
   followUpTaskId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
   const [accepted, setAccepted] = useState(!!followUpTaskId);
   const [pending, startTransition] = useTransition();
+  const [retrying, startRetry] = useTransition();
   const router = useRouter();
 
-  if (!summary && !transcript) return null;
+  const showState =
+    hasRecording && !transcript && (transcriptStatus === 'pending' || transcriptStatus === 'failed' || transcriptStatus === 'skipped');
+  if (!summary && !transcript && !showState) return null;
+
+  const retry = () =>
+    startRetry(async () => {
+      const r = await retryCallTranscription(callId);
+      if (!r.ok) return void toast.error(r.message);
+      toast.success('Transcription queued');
+      router.refresh();
+    });
 
   return (
     <div className="mt-2 rounded-md border border-slate-200 bg-slate-50/60 text-[12px] dark:border-[#1F1F1F] dark:bg-[#0F0F0F]">
@@ -101,7 +159,33 @@ export function CallSummaryCard({
           <button type="button" onClick={() => setShowTranscript((v) => !v)} className="text-[11px] font-medium text-slate-500 hover:text-slate-800">
             {showTranscript ? 'Hide transcript' : 'Show transcript'}
           </button>
-          {showTranscript ? <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap font-sans text-slate-600 dark:text-[#A1A1AA]">{transcript}</pre> : null}
+          {showTranscript ? <TranscriptTurns segments={segments} transcript={transcript} /> : null}
+        </div>
+      ) : null}
+      {showState ? (
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-slate-500 dark:text-[#A1A1AA]" role="status">
+          {transcriptStatus === 'pending' ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Transcribing…
+            </>
+          ) : (
+            <>
+              <AlertTriangle className={`h-3 w-3 ${transcriptStatus === 'failed' ? 'text-rose-500' : 'text-amber-500'}`} aria-hidden />
+              <span>
+                {transcriptStatus === 'failed' ? 'Transcription failed' : 'Not transcribed'}
+                {transcriptError ? `: ${transcriptError}` : null}
+              </span>
+              <button
+                type="button"
+                onClick={retry}
+                disabled={retrying}
+                className="ml-auto inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-[#1F1F1F] dark:bg-black dark:text-[#E4E4E7]"
+              >
+                {retrying ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <RotateCw className="h-3 w-3" aria-hidden />}
+                Retry
+              </button>
+            </>
+          )}
         </div>
       ) : null}
     </div>

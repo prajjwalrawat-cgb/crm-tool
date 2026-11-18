@@ -18,6 +18,10 @@ export const DEFAULT_SETTINGS: Omit<TelephonySettings, 'tenantId' | 'updatedAt'>
   recordingAnnouncement: false,
   consentPolicyVersion: 'v1',
   aiCallSummary: false,
+  transcriptionEnabled: false,
+  transcriptionConsentAt: null,
+  transcriptionConsentBy: null,
+  transcriptionProvider: null,
   callingHours: { tz: 'Asia/Kolkata', start: '09:00', end: '21:00' },
   enforceDnc: true,
 };

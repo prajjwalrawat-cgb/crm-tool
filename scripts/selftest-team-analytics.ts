@@ -711,7 +711,10 @@ async function main() {
   let comparedOwners = 0;
 
   for (const t of tenants) {
-    const customFields = await requiredDealCustomFields(t.id);
+    // custom_field_definitions is under RLS since 0075.
+    const customFields = await runWithSystemContext(t.id, () =>
+      requiredDealCustomFields(t.id),
+    );
 
     const [completeness, quarterly, achievement, pushbacks, engagement] =
       await runWithSystemContext(t.id, async () =>

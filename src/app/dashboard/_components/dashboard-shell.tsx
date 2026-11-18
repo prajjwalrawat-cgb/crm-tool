@@ -14,6 +14,7 @@ import { CommandPalette } from './command-palette';
 import { SoftphoneBar } from './telephony/softphone-bar';
 import { EditModeProvider } from './edit-mode/edit-mode-context';
 import { Header } from './header';
+import { NavBadgesContext, type NavBadges } from './nav-badges';
 import { Sidebar } from './sidebar';
 import type { WorkspaceLite } from './workspace-switcher';
 
@@ -33,6 +34,7 @@ export function DashboardShell({
   workspaces,
   canCreateWorkspace,
   isOwner,
+  navBadges = {},
 }: {
   children: ReactNode;
   tenantId: string;
@@ -45,6 +47,7 @@ export function DashboardShell({
   workspaces: WorkspaceLite[];
   canCreateWorkspace: boolean;
   isOwner: boolean;
+  navBadges?: NavBadges;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -150,14 +153,16 @@ export function DashboardShell({
     // viewport math doesn't affect the small-screen flow.
     <EditModeProvider>
       <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-black">
-        <Sidebar
-          mobileOpen={mobileOpen}
-          onMobileClose={() => setMobileOpen(false)}
-          collapsed={sidebarCollapsed}
-          onToggleCollapsed={toggleSidebarCollapsed}
-          persona={persona}
-          isOwner={isOwner}
-        />
+        <NavBadgesContext.Provider value={navBadges}>
+          <Sidebar
+            mobileOpen={mobileOpen}
+            onMobileClose={() => setMobileOpen(false)}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebarCollapsed}
+            persona={persona}
+            isOwner={isOwner}
+          />
+        </NavBadgesContext.Provider>
         <div className="flex min-w-0 flex-1 flex-col">
           <Header
             onMobileMenuOpen={() => setMobileOpen(true)}

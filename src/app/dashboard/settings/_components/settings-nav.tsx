@@ -74,6 +74,7 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/distribution', label: 'Distribution', icon: Shuffle, visibility: 'adminOnly' },
   { href: '/dashboard/settings/email', label: 'Email', icon: Mail, group: 'Infrastructure', visibility: 'adminOnly' },
   { href: '/dashboard/settings/ai', label: 'AI', icon: Brain, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/ai-suggestions', label: 'AI suggestions', icon: Sparkles, visibility: 'adminOnly' },
   { href: '/dashboard/settings/telephony', label: 'Telephony', icon: Headset, visibility: 'adminOnly' },
 ];
 

@@ -16,6 +16,14 @@ export const AI_INVOCATION_KINDS = [
   'chat',
   'search',
   'summary',
+  /** Speech-to-text on a call recording (0076). metadata: provider, audioSeconds, channels. */
+  'stt',
+  /** Claude call summary (telephony). */
+  'call_summary',
+  /** Claude CSV header mapping (lead import). */
+  'lead_mapping',
+  /** Claude deal/contact field suggestions (ai_suggestions). */
+  'ai_suggestions',
 ] as const;
 export type AiInvocationKind = (typeof AI_INVOCATION_KINDS)[number];
 

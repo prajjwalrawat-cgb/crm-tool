@@ -167,6 +167,13 @@ export const exotelProvider: TelephonyProvider = {
     form.set('CallerId', callerId);
     form.set('CallType', 'trans');
     form.set('Record', record ? 'true' : 'false');
+    if (record) {
+      // Dual channel (agent / customer on separate channels) gives reliable
+      // speaker labels for transcription. Env EXOTEL_RECORDING_CHANNELS=single
+      // turns it off. Inbound recordings follow the Exotel call-flow setting.
+      const channels = (process.env.EXOTEL_RECORDING_CHANNELS ?? 'dual').trim().toLowerCase() === 'single' ? 'single' : 'dual';
+      form.set('RecordingChannels', channels);
+    }
     form.set('CustomField', customData.callId);
     form.set('StatusCallback', statusCallbackUrl);
     form.append('StatusCallbackEvents[0]', 'answered');

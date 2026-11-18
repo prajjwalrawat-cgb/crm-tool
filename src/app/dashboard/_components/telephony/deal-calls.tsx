@@ -73,7 +73,7 @@ export async function DealCallsCard({ tenantId, userId, dealId }: { tenantId: st
           const Icon = c.direction === 'outbound' ? PhoneOutgoing : PhoneIncoming;
           const when = new Date(c.startedAt ?? c.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
           return (
-            <li key={c.id} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0 dark:border-[#181818]">
+            <li key={c.id} id={`call-${c.id}`} className="scroll-mt-20 border-b border-slate-100 pb-3 last:border-0 last:pb-0 dark:border-[#181818]">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
                 <Icon className="h-3.5 w-3.5 text-slate-400" aria-hidden />
                 <span className="font-medium text-slate-800 dark:text-[#E4E4E7]">{c.direction === 'outbound' ? `To ${c.toNumber}` : `From ${c.fromNumber}`}</span>
@@ -93,7 +93,16 @@ export async function DealCallsCard({ tenantId, userId, dealId }: { tenantId: st
                   <CallRecordingPlayer callId={c.id} durationSec={c.durationSec} />
                 </div>
               ) : null}
-              <CallSummaryCard callId={c.id} summary={c.aiSummary} transcript={c.transcript} followUpTaskId={c.followUpTaskId} />
+              <CallSummaryCard
+                callId={c.id}
+                summary={c.aiSummary}
+                transcript={c.transcript}
+                segments={c.transcriptSegments}
+                transcriptStatus={c.transcriptStatus}
+                transcriptError={c.transcriptError}
+                hasRecording={c.hasRecording}
+                followUpTaskId={c.followUpTaskId}
+              />
             </li>
           );
         })}

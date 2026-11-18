@@ -32,9 +32,11 @@ function getClient(): Anthropic {
   return client;
 }
 
+export type SummaryUsage = { inputTokens: number; outputTokens: number; latencyMs: number; model: string };
+
 export type SummarizeOutcome =
-  | { ok: true; summary: CallAiSummary; attempts: number }
-  | { ok: false; error: string; attempts: number };
+  | { ok: true; summary: CallAiSummary; attempts: number; usage: SummaryUsage }
+  | { ok: false; error: string; attempts: number; usage: SummaryUsage };
 
 export async function summarizeCallTranscript(args: {
   transcript: string;
@@ -48,6 +50,9 @@ export async function summarizeCallTranscript(args: {
     { role: 'user', content: buildCallSummaryUserMessage(args) },
   ];
   let lastError = 'no response';
+  const usage: SummaryUsage = { inputTokens: 0, outputTokens: 0, latencyMs: 0, model: CALL_SUMMARY_MODEL };
+  const t0 = Date.now();
+  const done = () => ({ ...usage, latencyMs: Date.now() - t0 });
   for (let attempt = 1; attempt <= 2; attempt++) {
     let response: Anthropic.Message;
     try {
@@ -63,10 +68,12 @@ export async function summarizeCallTranscript(args: {
         // Transient: let the workflow's retry handle it.
         throw err;
       }
-      return { ok: false, error: err instanceof Error ? err.message : String(err), attempts: attempt };
+      return { ok: false, error: err instanceof Error ? err.message : String(err), attempts: attempt, usage: done() };
     }
+    usage.inputTokens += response.usage?.input_tokens ?? 0;
+    usage.outputTokens += response.usage?.output_tokens ?? 0;
     if (response.stop_reason === 'refusal') {
-      return { ok: false, error: 'model declined to summarise this call', attempts: attempt };
+      return { ok: false, error: 'model declined to summarise this call', attempts: attempt, usage: done() };
     }
     const text = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
@@ -75,7 +82,7 @@ export async function summarizeCallTranscript(args: {
       .trim();
     const parsed = parseCallSummary(text);
     if (parsed.ok) {
-      return { ok: true, summary: groundFollowUpDate(parsed.value, args.transcript), attempts: attempt };
+      return { ok: true, summary: groundFollowUpDate(parsed.value, args.transcript), attempts: attempt, usage: done() };
     }
     lastError = parsed.error;
     messages.push(
@@ -83,5 +90,5 @@ export async function summarizeCallTranscript(args: {
       { role: 'user', content: `That reply did not validate: ${parsed.error}. Reply again with only the corrected JSON object.` },
     );
   }
-  return { ok: false, error: lastError, attempts: 2 };
+  return { ok: false, error: lastError, attempts: 2, usage: done() };
 }

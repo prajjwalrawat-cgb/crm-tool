@@ -10,6 +10,7 @@ import { IMPLEMENTED_PROVIDERS } from '@/lib/telephony/providers';
 import { webhookUrl } from '@/lib/telephony/service';
 
 import { TelephonySettingsManager } from './_components/telephony-settings-manager';
+import { sttProviderOptions } from '@/lib/telephony/transcriber';
 
 export const metadata = { title: 'Telephony · Settings' };
 
@@ -53,12 +54,15 @@ export default async function TelephonySettingsPage() {
         </header>
         <TelephonySettingsManager
           kmsConfigured={Boolean(process.env.KMS_KEY)}
+          sttProviders={sttProviderOptions()}
           implementedProviders={IMPLEMENTED_PROVIDERS}
           settings={{
             recordCalls: data.settings.recordCalls,
             recordingAnnouncement: data.settings.recordingAnnouncement,
             consentPolicyVersion: data.settings.consentPolicyVersion,
             aiCallSummary: data.settings.aiCallSummary,
+            transcriptionProvider: ((data.settings.transcriptionEnabled && data.settings.transcriptionProvider) || 'off') as 'off' | 'deepgram' | 'sarvam',
+            transcriptionConsent: Boolean(data.settings.transcriptionConsentAt),
             enforceDnc: data.settings.enforceDnc,
             callingHours: data.settings.callingHours,
           }}

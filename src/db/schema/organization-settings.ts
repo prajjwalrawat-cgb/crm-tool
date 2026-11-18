@@ -104,6 +104,8 @@ export const organizationSettings = pgTable('organization_settings', {
   emailTracking: boolean('email_tracking').notNull().default(false),
 
   aiEnabled: boolean('ai_enabled').notNull().default(true),
+  /** 0077: AI field suggestions from calls and emails (review queue). OFF by default. */
+  aiSuggestionsEnabled: boolean('ai_suggestions_enabled').notNull().default(false),
   aiAggressiveness: text('ai_aggressiveness').notNull().default('balanced'),
   insightRefresh: text('insight_refresh').notNull().default('on_change'),
 

@@ -21,7 +21,7 @@ These settings go in the server environment, not in the app:
 | `APP_URL` | The public address of the app, e.g. `https://crm.example.com`. Webhook URLs are built from it. |
 | `SUPABASE_CALL_RECORDINGS_BUCKET` | Optional; the default is `call-recordings`. Create this bucket as **private**. |
 | `EXOTEL_WEBHOOK_IPS` | Optional. A comma-separated list of the IP addresses Exotel calls from; you get them from Exotel support. When set, webhooks from any other IP are rejected. |
-| `TELEPHONY_STT_PROVIDER`, `ANTHROPIC_API_KEY` | Only for AI summaries; see below. |
+| `DEEPGRAM_API_KEY` and/or `SARVAM_API_KEY`, `ANTHROPIC_API_KEY` | Transcription (provider chosen per workspace in Settings › Telephony) and AI summaries; see below. |
 
 Inngest must be running in production. Webhooks, recording archiving and the dialer all run as background jobs.
 

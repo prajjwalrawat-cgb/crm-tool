@@ -134,10 +134,31 @@ export type WorkflowEvents = {
     tenantId: string;
     callId: string;
   };
-  /** Our copy of the recording is stored; AI summary may run. */
+  /** Our copy of the recording is stored; transcription may run. */
   'crm/call.recording_archived': {
     tenantId: string;
     callId: string;
+  };
+  /** A user asked to retry a failed / skipped transcription (0076). */
+  'crm/call.transcribe_requested': {
+    tenantId: string;
+    callId: string;
+    requestedBy: string;
+  };
+  /** A transcript was stored (0076); the AI call summary may run. */
+  'crm/call.transcribed': {
+    tenantId: string;
+    callId: string;
+  };
+  /** The Claude call summary was stored; AI field suggestions may run. */
+  'crm/call.summarized': {
+    tenantId: string;
+    callId: string;
+  };
+  /** An email thread's AI summary was regenerated; AI field suggestions may run. */
+  'crm/email.thread_summarized': {
+    tenantId: string;
+    threadId: string;
   };
   /** Reports (0074): run / continue a resumable rollup backfill job. */
   'crm/report.backfill_requested': {

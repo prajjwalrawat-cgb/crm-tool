@@ -17,7 +17,12 @@ import {
 import { withTenantSession } from '@/lib/auth-guard';
 import { tenantTransaction } from '@/lib/db-context';
 import { normalizePhone } from '@/lib/lead-capture/normalize';
+import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { requireMembership } from '@/lib/membership';
+import { canRetryTranscription } from '@/lib/telephony/transcription';
+import { getTranscriber, STT_PROVIDER_LABELS } from '@/lib/telephony/transcriber';
+import { defaultAppliers } from '@/lib/ai/suggestions/appliers';
+import { decideSuggestion, pendingFollowUpForCall } from '@/lib/ai/suggestions/service';
 import { addDnc, getActiveAccountRow } from '@/lib/telephony/accounts';
 import { validateCallingHours } from '@/lib/telephony/calling-hours';
 import {
@@ -30,7 +35,7 @@ import {
 import { encryptJson, generateWebhookSecret, MissingKmsKeyError } from '@/lib/telephony/crypto';
 import { parseDncUpload } from '@/lib/telephony/dnc-parse';
 import { serializeCall, type SerializedCall } from '@/lib/telephony/serialize';
-import { acceptFollowUp, clickToCall, getAgentState, saveDisposition, setAgentStatus, SKIP_DISPOSITION_MAX_SEC } from '@/lib/telephony/service';
+import { acceptFollowUp, clickToCall, getAgentState, getCallScoped, saveDisposition, setAgentStatus, SKIP_DISPOSITION_MAX_SEC } from '@/lib/telephony/service';
 import { TelephonyError } from '@/lib/telephony/types';
 
 /**
@@ -133,8 +138,31 @@ export async function submitDisposition(input: z.infer<typeof Disposition>): Pro
   });
 }
 
+/** Retry a failed or skipped transcription (runs the job again; the job re-checks settings). */
+export async function retryCallTranscription(callId: string): Promise<ActionResult> {
+  if (!z.string().uuid().safeParse(callId).success) return { ok: false, message: 'Invalid call.' };
+  return session<object>(async (v) => {
+    const r = await canRetryTranscription({ tenantId: v.tenantId, viewer: { userId: v.userId, role: v.role }, callId });
+    if (!r.ok) return { ok: false, message: r.error };
+    await sendWorkflowEvent('crm/call.transcribe_requested', { tenantId: v.tenantId, callId, requestedBy: v.userId });
+    return { ok: true };
+  });
+}
+
 export async function acceptCallFollowUp(callId: string): Promise<ActionResult<{ taskId: string }>> {
   return session<{ taskId: string }>(async (v) => {
+    // One review mechanism: when the call's follow-up is a pending AI
+    // suggestion, accept that (it creates the task through the task action
+    // and records the decision). Older calls without one use the direct path.
+    const suggestionId = await pendingFollowUpForCall(v.tenantId, callId);
+    if (suggestionId) {
+      const d = await decideSuggestion({ tenantId: v.tenantId, viewer: { userId: v.userId, role: v.role }, id: suggestionId, action: 'accept' }, defaultAppliers);
+      if (!d.ok) return { ok: false, message: d.message };
+      const taskId = (await getCallScoped(v.tenantId, { userId: v.userId, role: v.role }, callId))?.followUpTaskId;
+      revalidatePath('/dashboard/tasks');
+      revalidatePath('/dashboard/suggestions');
+      return taskId ? { ok: true, taskId } : { ok: false, message: 'Follow-up task was not linked to the call.' };
+    }
     const r = await acceptFollowUp({ ...v, callId });
     if (!r.ok) return { ok: false, message: r.error };
     revalidatePath('/dashboard/tasks');
@@ -219,6 +247,10 @@ const SettingsInput = z.object({
   recordingAnnouncement: z.boolean(),
   consentPolicyVersion: z.string().min(1).max(40),
   aiCallSummary: z.boolean(),
+  /** 'off' = no transcription. */
+  transcriptionProvider: z.enum(['off', 'deepgram', 'sarvam']),
+  /** The admin's confirmation that callers are told about recording/transcription. */
+  transcriptionConsent: z.boolean(),
   enforceDnc: z.boolean(),
   callingHours: z.object({ tz: z.string(), start: z.string(), end: z.string() }),
 });
@@ -228,14 +260,32 @@ export async function saveTelephonySettings(input: z.infer<typeof SettingsInput>
   if (!parsed.success) return { ok: false, message: 'Invalid settings.' };
   const hoursErr = validateCallingHours(parsed.data.callingHours);
   if (hoursErr) return { ok: false, message: `Calling hours: ${hoursErr}` };
-  return session<object>(async ({ tenantId, role }) => {
+  const provider = parsed.data.transcriptionProvider === 'off' ? null : parsed.data.transcriptionProvider;
+  if (provider && !parsed.data.transcriptionConsent) {
+    return { ok: false, message: 'Confirm the recording-consent statement before turning on transcription.' };
+  }
+  if (provider && !getTranscriber(provider).configured()) {
+    return { ok: false, message: `The ${STT_PROVIDER_LABELS[provider] ?? provider} API key is not set on the server yet.` };
+  }
+  return session<object>(async ({ tenantId, userId, role }) => {
     if (!isAdmin(role)) return { ok: false, message: 'Only admins can manage telephony.' };
-    await tenantTransaction((tx) =>
-      tx
+    const { transcriptionConsent, transcriptionProvider: _choice, ...rest } = parsed.data;
+    void _choice;
+    await tenantTransaction(async (tx) => {
+      const [current] = await tx
+        .select({ consentAt: telephonySettings.transcriptionConsentAt, consentBy: telephonySettings.transcriptionConsentBy })
+        .from(telephonySettings)
+        .where(eq(telephonySettings.tenantId, tenantId));
+      // Keep the original confirmation time/actor; clear it when unticked.
+      const consent = transcriptionConsent
+        ? { transcriptionConsentAt: current?.consentAt ?? new Date(), transcriptionConsentBy: current?.consentAt ? current.consentBy : userId }
+        : { transcriptionConsentAt: null, transcriptionConsentBy: null };
+      const values = { ...rest, ...consent, transcriptionProvider: provider, transcriptionEnabled: provider !== null };
+      await tx
         .insert(telephonySettings)
-        .values({ tenantId, ...parsed.data })
-        .onConflictDoUpdate({ target: telephonySettings.tenantId, set: { ...parsed.data, updatedAt: new Date() } }),
-    );
+        .values({ tenantId, ...values })
+        .onConflictDoUpdate({ target: telephonySettings.tenantId, set: { ...values, updatedAt: new Date() } });
+    });
     revalidatePath('/dashboard/settings/telephony');
     return { ok: true };
   });
