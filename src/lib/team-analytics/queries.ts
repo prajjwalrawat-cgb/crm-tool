@@ -2,7 +2,6 @@ import 'server-only';
 
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 
-import { db } from '@/db';
 import { customFieldDefinitions } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 import {
@@ -571,20 +570,22 @@ export type CompletenessRow = {
 export async function requiredDealCustomFields(
   tenantId: string,
 ): Promise<CustomFieldSpec[]> {
-  const rows = await db
-    .select({
-      key: customFieldDefinitions.key,
-      label: customFieldDefinitions.label,
-    })
-    .from(customFieldDefinitions)
-    .where(
-      and(
-        eq(customFieldDefinitions.tenantId, tenantId),
-        eq(customFieldDefinitions.entityType, 'deal'),
-        eq(customFieldDefinitions.required, true),
-        eq(customFieldDefinitions.archived, false),
+  const rows = await tenantTransaction((tx) =>
+    tx
+      .select({
+        key: customFieldDefinitions.key,
+        label: customFieldDefinitions.label,
+      })
+      .from(customFieldDefinitions)
+      .where(
+        and(
+          eq(customFieldDefinitions.tenantId, tenantId),
+          eq(customFieldDefinitions.entityType, 'deal'),
+          eq(customFieldDefinitions.required, true),
+          eq(customFieldDefinitions.archived, false),
+        ),
       ),
-    );
+  );
   return rows.map((r) => ({ key: r.key, label: r.label }));
 }
 

@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { index, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 import { deals } from './deals';
 import { dealStage } from './enums';
@@ -26,6 +26,11 @@ export const dealStageHistory = pgTable(
       .notNull()
       .defaultNow(),
     exitedAt: timestamp('exited_at', { withTimezone: true }),
+    /** Request actor that moved the deal into this stage (0074); NULL = system. */
+    changedBy: text('changed_by'),
+    /** Deal owner / lead source at the moment of the change (0074). */
+    ownerIdAtChange: text('owner_id_at_change'),
+    sourceIdAtChange: uuid('source_id_at_change'),
   },
   (t) => [
     index('deal_stage_history_deal_idx').on(t.dealId, t.enteredAt),

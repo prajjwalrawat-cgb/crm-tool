@@ -4,14 +4,13 @@ import { and, asc, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { db } from '@/db';
 import {
   CUSTOM_FIELD_ENTITIES,
   CUSTOM_FIELD_TYPES,
   customFieldDefinitions,
 } from '@/db/schema';
 import { auth } from '@/lib/auth/server';
-import { runWithTenantContext } from '@/lib/db-context';
+import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { slugifyKey } from '@/lib/custom-fields/types';
 import { requireMembership } from '@/lib/membership';
 import { requireTenant } from '@/lib/tenant';
@@ -20,7 +19,7 @@ export type CfResult = { ok: true } | { ok: false; error: string };
 
 /** Owner/admin gate; returns the tenant id or an error result. */
 async function requireAdmin(): Promise<
-  { ok: true; tenantId: string } | { ok: false; error: string }
+  { ok: true; tenantId: string; userId: string } | { ok: false; error: string }
 > {
   const { userId } = await auth();
   if (!userId) return { ok: false, error: 'No active session.' };
@@ -35,8 +34,20 @@ async function requireAdmin(): Promise<
     if (!m || (m.role !== 'owner' && m.role !== 'admin')) {
       return { ok: false, error: 'Only owners and admins can manage custom fields.' };
     }
-    return { ok: true, tenantId };
+    return { ok: true, tenantId, userId };
   });
+}
+
+type Tx = Parameters<Parameters<typeof tenantTransaction>[0]>[0];
+
+/** Run one query in the admin's tenant context (custom_field_definitions is RLS since 0075). */
+function inGateTx<T>(
+  gate: { tenantId: string; userId: string },
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  return runWithTenantContext({ tenantId: gate.tenantId, userId: gate.userId }, () =>
+    tenantTransaction(fn),
+  );
 }
 
 const createSchema = z.object({
@@ -60,7 +71,8 @@ export async function createCustomFieldAction(input: unknown): Promise<CfResult>
     return { ok: false, error: 'Add at least one option for a dropdown field.' };
   }
 
-  const existing = await db
+  const existing = await inGateTx(gate, (tx) =>
+    tx
     .select({ key: customFieldDefinitions.key, sortOrder: customFieldDefinitions.sortOrder })
     .from(customFieldDefinitions)
     .where(
@@ -68,7 +80,8 @@ export async function createCustomFieldAction(input: unknown): Promise<CfResult>
         eq(customFieldDefinitions.tenantId, gate.tenantId),
         eq(customFieldDefinitions.entityType, d.entityType),
       ),
-    );
+    ),
+  );
   const keys = new Set(existing.map((r) => r.key));
   const base = slugifyKey(d.label) || 'field';
   let key = base;
@@ -76,7 +89,8 @@ export async function createCustomFieldAction(input: unknown): Promise<CfResult>
   while (keys.has(key)) key = `${base}_${n++}`;
   const sortOrder = existing.reduce((m, r) => Math.max(m, r.sortOrder), 0) + 1;
 
-  await db.insert(customFieldDefinitions).values({
+  await inGateTx(gate, (tx) =>
+    tx.insert(customFieldDefinitions).values({
     tenantId: gate.tenantId,
     entityType: d.entityType,
     key,
@@ -85,7 +99,8 @@ export async function createCustomFieldAction(input: unknown): Promise<CfResult>
     options,
     required: d.fieldType === 'boolean' ? false : d.required,
     sortOrder,
-  });
+  }),
+  );
   revalidatePath('/dashboard/settings/custom-fields');
   return { ok: true };
 }
@@ -107,7 +122,8 @@ export async function updateCustomFieldAction(input: unknown): Promise<CfResult>
   }
   const d = parsed.data;
 
-  const [row] = await db
+  const [row] = await inGateTx(gate, (tx) =>
+    tx
     .select()
     .from(customFieldDefinitions)
     .where(
@@ -116,7 +132,8 @@ export async function updateCustomFieldAction(input: unknown): Promise<CfResult>
         eq(customFieldDefinitions.tenantId, gate.tenantId),
       ),
     )
-    .limit(1);
+    .limit(1),
+  );
   if (!row) return { ok: false, error: 'Field not found.' };
 
   const options = row.fieldType === 'select' ? [...new Set(d.options)].filter(Boolean) : [];
@@ -124,7 +141,8 @@ export async function updateCustomFieldAction(input: unknown): Promise<CfResult>
     return { ok: false, error: 'Add at least one option for a dropdown field.' };
   }
 
-  await db
+  await inGateTx(gate, (tx) =>
+    tx
     .update(customFieldDefinitions)
     .set({
       label: d.label,
@@ -136,7 +154,8 @@ export async function updateCustomFieldAction(input: unknown): Promise<CfResult>
         eq(customFieldDefinitions.id, d.id),
         eq(customFieldDefinitions.tenantId, gate.tenantId),
       ),
-    );
+    ),
+  );
   revalidatePath('/dashboard/settings/custom-fields');
   return { ok: true };
 }
@@ -148,7 +167,8 @@ export async function setCustomFieldArchivedAction(
   const gate = await requireAdmin();
   if (!gate.ok) return gate;
   if (!z.uuid().safeParse(id).success) return { ok: false, error: 'Invalid field.' };
-  await db
+  await inGateTx(gate, (tx) =>
+    tx
     .update(customFieldDefinitions)
     .set({ archived })
     .where(
@@ -156,7 +176,8 @@ export async function setCustomFieldArchivedAction(
         eq(customFieldDefinitions.id, id),
         eq(customFieldDefinitions.tenantId, gate.tenantId),
       ),
-    );
+    ),
+  );
   revalidatePath('/dashboard/settings/custom-fields');
   return { ok: true };
 }
@@ -170,7 +191,8 @@ export async function moveCustomFieldAction(
   if (!gate.ok) return gate;
   if (!z.uuid().safeParse(id).success) return { ok: false, error: 'Invalid field.' };
 
-  const [current] = await db
+  const [current] = await inGateTx(gate, (tx) =>
+    tx
     .select()
     .from(customFieldDefinitions)
     .where(
@@ -179,10 +201,12 @@ export async function moveCustomFieldAction(
         eq(customFieldDefinitions.tenantId, gate.tenantId),
       ),
     )
-    .limit(1);
+    .limit(1),
+  );
   if (!current) return { ok: false, error: 'Field not found.' };
 
-  const siblings = await db
+  const siblings = await inGateTx(gate, (tx) =>
+    tx
     .select()
     .from(customFieldDefinitions)
     .where(
@@ -192,20 +216,25 @@ export async function moveCustomFieldAction(
         eq(customFieldDefinitions.archived, false),
       ),
     )
-    .orderBy(asc(customFieldDefinitions.sortOrder), asc(customFieldDefinitions.createdAt));
+    .orderBy(asc(customFieldDefinitions.sortOrder), asc(customFieldDefinitions.createdAt)),
+  );
 
   const idx = siblings.findIndex((s) => s.id === id);
   const swapWith = direction === 'up' ? siblings[idx - 1] : siblings[idx + 1];
   if (idx === -1 || !swapWith) return { ok: true }; // already at the edge
 
-  await db
+  await inGateTx(gate, (tx) =>
+    tx
     .update(customFieldDefinitions)
     .set({ sortOrder: swapWith.sortOrder })
-    .where(eq(customFieldDefinitions.id, current.id));
-  await db
+    .where(eq(customFieldDefinitions.id, current.id)),
+  );
+  await inGateTx(gate, (tx) =>
+    tx
     .update(customFieldDefinitions)
     .set({ sortOrder: current.sortOrder })
-    .where(eq(customFieldDefinitions.id, swapWith.id));
+    .where(eq(customFieldDefinitions.id, swapWith.id)),
+  );
   revalidatePath('/dashboard/settings/custom-fields');
   return { ok: true };
 }

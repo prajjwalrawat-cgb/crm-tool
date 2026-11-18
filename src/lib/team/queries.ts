@@ -2,7 +2,6 @@ import 'server-only';
 
 import { and, asc, eq, gt, isNull } from 'drizzle-orm';
 
-import { db } from '@/db';
 import { type Membership, memberships, orgInvitations } from '@/db/schema';
 import { clerkClient } from '@/lib/auth/server';
 import { tenantTransaction } from '@/lib/db-context';
@@ -61,7 +60,8 @@ export async function listTeamMembers(tenantId: string): Promise<TeamMemberRow[]
 export async function listPendingInvitations(
   tenantId: string,
 ): Promise<PendingInvitationRow[]> {
-  const rows = await db
+  const rows = await tenantTransaction((tx) =>
+    tx
     .select()
     .from(orgInvitations)
     .where(
@@ -71,7 +71,8 @@ export async function listPendingInvitations(
         gt(orgInvitations.expiresAt, new Date()),
       ),
     )
-    .orderBy(asc(orgInvitations.createdAt));
+    .orderBy(asc(orgInvitations.createdAt)),
+  );
 
   return rows.map((inv) => ({
     id: inv.id,

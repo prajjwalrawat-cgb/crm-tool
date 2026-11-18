@@ -61,6 +61,8 @@ import {
   EntityTimeline,
 } from '../../_components/entity-timeline';
 import { LogActivityLauncher } from './_components/log-activity-launcher';
+import { DealCallButton, DealCallsCard } from '../../_components/telephony/deal-calls';
+import { DealSuggestionsCard } from '../../suggestions/_components/deal-suggestions-card';
 import { CustomFieldsDisplay } from '../../_components/custom-fields-display';
 import { EntityViewers } from '../../_components/entity-viewers';
 import { NotesTimeline } from '../../_components/notes-timeline';
@@ -80,6 +82,7 @@ import { EditableDetailCard } from './_components/editable-detail-card';
 import { DealOrderProofCard } from './_components/deal-order-proof-card';
 import { DealOwnerPicker } from './_components/deal-owner-picker';
 import { StageHistoryCard } from './_components/stage-history-card';
+import { LeadRoutingCard } from './_components/lead-routing-card';
 import { DealAuditCard } from './_components/deal-audit-card';
 import { SummaryCard } from './_components/summary-card';
 import { DealPathBar } from './_components/deal-path-bar';
@@ -289,6 +292,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             defaultRecipients={primaryEmail ? [primaryEmail] : []}
             canSend={canEdit}
           />
+          {/* Telephony (0073): renders nothing until telephony is set up. */}
+          <DealCallButton tenantId={tenant.id} dealId={deal.id} />
         </div>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">
@@ -494,6 +499,13 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 holdRevisitOn={deal.holdRevisitOn ?? null}
                 holdNote={deal.holdNote ?? null}
                 canEdit={canEdit}
+              />
+              <LeadRoutingCard
+                tenantId={tenant.id}
+                userId={userId}
+                dealId={deal.id}
+                teammates={teammates.map((t) => ({ id: t.id, displayName: t.displayName }))}
+                canAssign={can(membership.role, 'assignLeads')}
               />
               <StageHistoryCard
                 entries={stageHistory.entries.map((e) => ({
@@ -704,6 +716,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               Documents. Activity is a rep's most-used widget, so it leads;
               the AI cards sit below the day-to-day widgets.
             */}
+            <DealSuggestionsCard tenantId={tenant.id} userId={userId} dealId={deal.id} contactId={deal.contactId ?? null} />
+            <DealCallsCard tenantId={tenant.id} userId={userId} dealId={deal.id} />
             <EntityTimeline
               items={timeline}
               authorLookup={authorLookup}

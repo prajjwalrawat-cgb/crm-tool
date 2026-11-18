@@ -74,6 +74,97 @@ export type WorkflowEvents = {
     /** What triggered it — surfaced on the workflow run row. */
     reason: string;
   };
+  /** Lead capture (0072): a raw payload was stored; process it. */
+  'crm/lead.ingest_received': {
+    tenantId: string;
+    eventId: string;
+  };
+  /** A captured lead deal was created and needs an owner. */
+  'crm/lead.created': {
+    tenantId: string;
+    dealId: string;
+    sourceId: string | null;
+  };
+  /** Ask the distributor to (re)run for one lead. */
+  'crm/lead.reassign_requested': {
+    tenantId: string;
+    dealId: string;
+    excludeUserIds?: string[];
+  };
+  'crm/lead.assigned': {
+    tenantId: string;
+    dealId: string;
+    userId: string;
+    ruleId: string;
+    slaDueAt: string;
+  };
+  /** Process a CSV import job in resumable chunks. */
+  'crm/lead.import_requested': {
+    tenantId: string;
+    jobId: string;
+  };
+  'crm/lead.unassigned': {
+    tenantId: string;
+    dealId: string;
+    reason: string;
+  };
+  /** Telephony (0073): one verified, normalized provider webhook. Dates are ISO strings. */
+  'crm/call.event_received': {
+    tenantId: string;
+    accountId: string;
+    provider: string;
+    event: {
+      providerCallId: string;
+      direction: 'outbound' | 'inbound' | null;
+      status: string;
+      from: string | null;
+      to: string | null;
+      startedAt: string | null;
+      answeredAt: string | null;
+      endedAt: string | null;
+      durationSec: number | null;
+      talkTimeSec: number | null;
+      recordingUrl: string | null;
+      agentPhone: string | null;
+      customData: string | null;
+    };
+  };
+  /** A call reached a terminal status and has a provider recording to archive. */
+  'crm/call.completed': {
+    tenantId: string;
+    callId: string;
+  };
+  /** Our copy of the recording is stored; transcription may run. */
+  'crm/call.recording_archived': {
+    tenantId: string;
+    callId: string;
+  };
+  /** A user asked to retry a failed / skipped transcription (0076). */
+  'crm/call.transcribe_requested': {
+    tenantId: string;
+    callId: string;
+    requestedBy: string;
+  };
+  /** A transcript was stored (0076); the AI call summary may run. */
+  'crm/call.transcribed': {
+    tenantId: string;
+    callId: string;
+  };
+  /** The Claude call summary was stored; AI field suggestions may run. */
+  'crm/call.summarized': {
+    tenantId: string;
+    callId: string;
+  };
+  /** An email thread's AI summary was regenerated; AI field suggestions may run. */
+  'crm/email.thread_summarized': {
+    tenantId: string;
+    threadId: string;
+  };
+  /** Reports (0074): run / continue a resumable rollup backfill job. */
+  'crm/report.backfill_requested': {
+    tenantId: string;
+    jobId: string;
+  };
 };
 
 export type WorkflowEventName = keyof WorkflowEvents;

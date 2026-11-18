@@ -7,6 +7,7 @@ import {
   activityLogs,
 } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
+import { markFirstTouch } from '@/lib/lead-capture/first-touch';
 import { serializeActivity } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
@@ -62,6 +63,10 @@ async function writeActivityAndPublish(
     .returning();
 
   if (!row) return;
+
+  // Lead capture SLA: an owner's call/email/note on a routed lead is its
+  // first touch. No-op for every other action.
+  await markFirstTouch(tx, input);
 
   await publishRealtimeEvent(tx, {
     type: 'activity.recorded',

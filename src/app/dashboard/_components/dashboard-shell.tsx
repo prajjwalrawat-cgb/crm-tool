@@ -8,9 +8,13 @@ import type { AIMode } from '@/lib/ai/config';
 import type { Persona } from '@/lib/personas';
 
 import { CommandPalette } from './command-palette';
-import { CopilotPanel } from './copilot-panel';
+// Copilot is switched off for now. To bring it back, restore this import and
+// the <CopilotPanel> line below.
+// import { CopilotPanel } from './copilot-panel';
+import { SoftphoneBar } from './telephony/softphone-bar';
 import { EditModeProvider } from './edit-mode/edit-mode-context';
 import { Header } from './header';
+import { NavBadgesContext, type NavBadges } from './nav-badges';
 import { Sidebar } from './sidebar';
 import type { WorkspaceLite } from './workspace-switcher';
 
@@ -21,13 +25,16 @@ export function DashboardShell({
   tenantId,
   currentUserId,
   initialNotifications,
-  aiMode,
+  // Only the (switched-off) Copilot reads aiMode; kept so callers don't change.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  aiMode: _aiMode,
   persona,
   account,
   currentTenantName,
   workspaces,
   canCreateWorkspace,
   isOwner,
+  navBadges = {},
 }: {
   children: ReactNode;
   tenantId: string;
@@ -40,6 +47,7 @@ export function DashboardShell({
   workspaces: WorkspaceLite[];
   canCreateWorkspace: boolean;
   isOwner: boolean;
+  navBadges?: NavBadges;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -145,14 +153,16 @@ export function DashboardShell({
     // viewport math doesn't affect the small-screen flow.
     <EditModeProvider>
       <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-black">
-        <Sidebar
-          mobileOpen={mobileOpen}
-          onMobileClose={() => setMobileOpen(false)}
-          collapsed={sidebarCollapsed}
-          onToggleCollapsed={toggleSidebarCollapsed}
-          persona={persona}
-          isOwner={isOwner}
-        />
+        <NavBadgesContext.Provider value={navBadges}>
+          <Sidebar
+            mobileOpen={mobileOpen}
+            onMobileClose={() => setMobileOpen(false)}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebarCollapsed}
+            persona={persona}
+            isOwner={isOwner}
+          />
+        </NavBadgesContext.Provider>
         <div className="flex min-w-0 flex-1 flex-col">
           <Header
             onMobileMenuOpen={() => setMobileOpen(true)}
@@ -178,8 +188,11 @@ export function DashboardShell({
           <div key={tenantId} className="flex-1 overflow-y-auto">
             <div className="relative min-h-full">{children}</div>
           </div>
+          {/* Telephony (0073): hidden unless the user has a mapped phone. */}
+          <SoftphoneBar key={`softphone-${tenantId}`} tenantId={tenantId} currentUserId={currentUserId} />
         </div>
-        <CopilotPanel key={tenantId} aiMode={aiMode} />
+        {/* Copilot switched off for now. */}
+        {/* <CopilotPanel key={tenantId} aiMode={_aiMode} /> */}
         <CommandPalette
           tenantId={tenantId}
           open={paletteOpen}

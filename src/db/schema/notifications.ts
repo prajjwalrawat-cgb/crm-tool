@@ -22,6 +22,14 @@ export const NOTIFICATION_TYPES = [
   'owner_changed',
   'comment_mention',
   'automation_failed',
+  /** Lead capture (0072): a routed lead was assigned to the recipient. */
+  'lead_assigned',
+  /** No eligible rep for a lead — sits in the managers' unassigned queue. */
+  'lead_unassigned',
+  /** First-response SLA missed after the last allowed reassignment. */
+  'lead_sla_breach',
+  /** Telephony (0073): an inbound call to the recipient was missed. */
+  'call_missed',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

@@ -36,6 +36,7 @@ type ContactField = 'email' | 'title' | 'phone';
 import { CreateContactForm } from './create-contact-form';
 import { EditContactDrawer } from './edit-contact-drawer';
 import { EmptyState } from './empty-state';
+import { RowCallButton } from '../../_components/telephony/click-to-call-button';
 
 type ContactItem = ContactRow & { __pending?: boolean };
 
@@ -567,6 +568,7 @@ function ContactsTable({
                       onCommit={(v) => onPatchField(c, 'phone', v)}
                     />
                   </span>
+                  {c.__pending !== true ? <RowCallButton contactId={c.id} phone={c.phone} /> : null}
                     </div>
                   </div>
                 </td>

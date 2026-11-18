@@ -2,6 +2,7 @@ import 'server-only';
 
 import { after } from 'next/server';
 
+import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { complete } from '@/lib/ai/complete';
 import { aiLive, aiModeLabel } from '@/lib/ai/config';
 import { hashContent } from '@/lib/ai/embed';
@@ -300,6 +301,9 @@ async function regenThreadSummary(args: {
     content: JSON.stringify(summary),
     sourceHash: hashContent(args.source),
   });
+  // AI field suggestions (0077) run off the fresh thread summary. They are
+  // gated per workspace; a failure to enqueue never affects the summary.
+  await sendWorkflowEvent('crm/email.thread_summarized', { tenantId: args.tenantId, threadId: args.threadId }).catch(() => undefined);
 }
 
 async function regenRiskFlags(args: {

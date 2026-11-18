@@ -9,7 +9,8 @@ import type { Persona } from '@/lib/personas';
 import { cn } from '@/lib/utils';
 
 import { HoverPrefetchLink } from './hover-prefetch-link';
-import { isNavActive, navGroupsForPersona } from './nav-config';
+import { isNavActive, navGroupsForPersona, type NavItem } from './nav-config';
+import { useNavBadge } from './nav-badges';
 
 type Props = {
   mobileOpen: boolean;
@@ -227,7 +228,7 @@ function NavList({
                 const active = isNavActive(item.href, pathname);
                 const Icon = item.icon;
                 return (
-                  <li key={item.href}>
+                  <li key={item.href} className="relative">
                     {/* Intent-deferred prefetch: 19-23 nav links are in the
                         viewport on every dashboard page, and automatic
                         prefetch (production-only) would fire an `?_rsc=`
@@ -247,6 +248,7 @@ function NavList({
                     >
                       <Icon className="h-4 w-4 shrink-0" aria-hidden />
                       {!collapsed ? <span>{item.label}</span> : null}
+                      <NavCount badge={item.badge} collapsed={collapsed} />
                     </HoverPrefetchLink>
                   </li>
                 );
@@ -256,5 +258,19 @@ function NavList({
         ))}
       </div>
     </nav>
+  );
+}
+
+/** Count pill for nav items with a `badge` key (e.g. pending AI suggestions). */
+function NavCount({ badge, collapsed }: { badge: NavItem['badge']; collapsed: boolean }) {
+  const n = useNavBadge(badge);
+  if (!n) return null;
+  const label = n > 99 ? '99+' : String(n);
+  return collapsed ? (
+    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-marigold-500" aria-label={`${label} pending`} />
+  ) : (
+    <span className="ml-auto rounded-full bg-marigold-500 px-1.5 text-[10px] font-semibold leading-4 text-[#100404]" aria-label={`${label} pending`}>
+      {label}
+    </span>
   );
 }

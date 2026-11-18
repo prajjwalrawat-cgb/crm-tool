@@ -16,11 +16,13 @@ import {
   Inbox,
   LayoutDashboard,
   LineChart,
+  PieChart,
   Radar,
   Settings as SettingsIcon,
   Sparkles,
   Target,
   Trash2,
+  Upload,
   UserCog,
   UsersRound,
   HandCoins,
@@ -55,6 +57,8 @@ export type NavItem = {
   icon: LucideIcon;
   /** Match function for "is this nav item highlighted right now?" */
   matcher?: (pathname: string) => boolean;
+  /** Count badge key; the value comes from NavBadgesContext (dashboard layout). */
+  badge?: 'suggestions';
 };
 
 export type NavGroup = {
@@ -84,7 +88,10 @@ const ADMIN_NAV: readonly NavGroup[] = [
     label: 'Sales',
     items: [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
+      { href: '/dashboard/leads/unassigned', label: 'Lead queue', icon: Inbox },
+      { href: '/dashboard/leads/import', label: 'Import leads', icon: Upload },
       { href: '/dashboard/deals/approvals', label: 'Approvals', icon: BadgeCheck },
       {
         href: '/dashboard/deals/at-risk',
@@ -100,6 +107,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
         icon: LineChart,
       },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
+      { href: '/dashboard/insights', label: 'Sales reports', icon: PieChart },
       { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
     ],
   },
@@ -156,7 +164,10 @@ const MANAGER_NAV: readonly NavGroup[] = [
     label: 'Sales',
     items: [
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
+      { href: '/dashboard/leads/unassigned', label: 'Lead queue', icon: Inbox },
+      { href: '/dashboard/leads/import', label: 'Import leads', icon: Upload },
       { href: '/dashboard/deals/approvals', label: 'Approvals', icon: BadgeCheck },
       {
         href: '/dashboard/deals/at-risk',
@@ -169,6 +180,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
       // Managers often carry a plan of their own.
       { href: '/dashboard/my-incentive', label: 'My Incentive', icon: Wallet },
       { href: '/dashboard/communications', label: 'Communications', icon: Inbox },
+      { href: '/dashboard/insights', label: 'Sales reports', icon: PieChart },
       { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
     ],
   },
@@ -203,6 +215,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/dashboard/deals', label: 'My Deals', icon: Briefcase },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       {
         href: '/dashboard/deals/at-risk',
         label: 'At Risk',
@@ -236,6 +249,8 @@ const MEMBER_NAV: readonly NavGroup[] = [
         icon: Target,
       },
       { href: '/dashboard/targets', label: 'My Targets', icon: Gauge },
+      // Same pages as managers get; scopeUsers limits a rep to their own numbers.
+      { href: '/dashboard/insights', label: 'My reports', icon: PieChart },
       { href: '/dashboard/my-incentive', label: 'My Incentive', icon: Wallet },
     ],
   },

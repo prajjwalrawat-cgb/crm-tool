@@ -237,6 +237,39 @@ export type RealtimeEvent =
       tenantId: string;
       userId: string;
       threadId: string;
+    }
+  /* ----- telephony (0073) -----
+   *
+   * Per-recipient, like notifications: published on the tenant channel and
+   * filtered by `recipientUserId` on the client. `call.inbound` drives the
+   * inbound popup; `call.updated` drives the softphone bar's call state.
+   * Neither carries a recording URL or storage key.
+   */
+  | {
+      type: 'call.inbound';
+      tenantId: string;
+      recipientUserId: string;
+      call: {
+        id: string;
+        fromNumber: string;
+        leadId: string | null;
+        leadName: string | null;
+        companyName: string | null;
+        contactName: string | null;
+        ownerId: string | null;
+        lastInteraction: string | null;
+        isNewLead: boolean;
+      };
+    }
+  | {
+      type: 'call.updated';
+      tenantId: string;
+      recipientUserId: string;
+      callId: string;
+      status: string;
+      leadId: string | null;
+      endedAt: string | null;
+      needsDisposition: boolean;
     };
 
 export type EventKind = RealtimeEvent['type'];

@@ -4,9 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { salesTargets } from '@/db/schema';
-import { db } from '@/db';
 import { checkPermission } from '@/lib/auth-guard';
-import { runWithTenantContext } from '@/lib/db-context';
+import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { toMinorUnits } from '@/lib/deals/currency';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 
@@ -48,8 +47,7 @@ export async function upsertSalesTargetAction(
   }
 
   // getOrgSettings reads the RLS-protected settings table, so it needs a
-  // tenant context. The sales_targets upsert itself uses the base connection
-  // (non-RLS, scoped by tenant_id explicitly, like org_invitations).
+  // tenant context, and so does the sales_targets upsert (RLS since 0075).
   return await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
     async () => {
@@ -61,7 +59,8 @@ export async function upsertSalesTargetAction(
       );
       const marginTargetMinor = toMinorUnits(parsed.data.marginTarget, currency);
 
-      await db
+      await tenantTransaction((tx) =>
+    tx
         .insert(salesTargets)
         .values({
           tenantId: tenant.id,
@@ -86,7 +85,8 @@ export async function upsertSalesTargetAction(
             updatedBy: membership.userId,
             updatedAt: new Date(),
           },
-        });
+        }),
+  );
 
       revalidatePath('/dashboard/settings/targets');
       revalidatePath('/dashboard/targets');

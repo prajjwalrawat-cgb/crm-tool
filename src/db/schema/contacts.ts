@@ -50,6 +50,9 @@ export const contacts = pgTable(
     mergedIntoId: uuid('merged_into_id'),
     /** Created despite a surfaced duplicate warning. */
     dedupOverride: boolean('dedup_override').notNull().default(false),
+    /** Lead capture dedupe keys (0072): E.164 phone, lower-cased trimmed email. */
+    phoneNormalized: text('phone_normalized'),
+    emailNormalized: text('email_normalized'),
   },
   (t) => [
     index('contacts_tenant_id_idx').on(t.tenantId),
@@ -74,5 +77,8 @@ export const contactsRelations = relations(contacts, ({ one, many }) => ({
   deals: many(deals),
 }));
 
-export type Contact = typeof contacts.$inferSelect;
+/** The full row, including lead-capture dedupe keys (0072). */
+export type ContactRecord = typeof contacts.$inferSelect;
+/** The contact shape the CRM views use (dedupe keys are internal). */
+export type Contact = Omit<ContactRecord, 'phoneNormalized' | 'emailNormalized'>;
 export type NewContact = typeof contacts.$inferInsert;

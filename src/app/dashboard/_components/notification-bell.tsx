@@ -5,6 +5,7 @@ import {
   Briefcase,
   CheckCheck,
   CheckSquare,
+  PhoneMissed,
   Sparkles,
   UserCog,
   Workflow,
@@ -50,6 +51,10 @@ const TYPE_ICON: Record<string, LucideIcon> = {
   owner_changed: UserCog,
   comment_mention: Bell,
   automation_failed: Workflow,
+  lead_assigned: UserCog,
+  lead_unassigned: UserCog,
+  lead_sla_breach: Bell,
+  call_missed: PhoneMissed,
 };
 
 const TYPE_TINT: Record<string, string> = {
@@ -61,6 +66,10 @@ const TYPE_TINT: Record<string, string> = {
   owner_changed: 'text-blue-500',
   comment_mention: 'text-indigo-500',
   automation_failed: 'text-rose-500',
+  lead_assigned: 'text-blue-500',
+  lead_unassigned: 'text-amber-500',
+  lead_sla_breach: 'text-rose-500',
+  call_missed: 'text-rose-500',
 };
 
 function notificationHref(n: NotificationItem): string | null {

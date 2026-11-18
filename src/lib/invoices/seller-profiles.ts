@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, asc, eq } from 'drizzle-orm';
 
-import { db } from '@/db';
+import { tenantTransaction } from '@/lib/db-context';
 import { invoiceSellerProfiles } from '@/db/schema';
 
 import { INDIAN_STATES } from './india-geo';
@@ -55,11 +55,13 @@ function toProfile(r: Row): SellerProfile {
 export async function listSellerProfiles(
   tenantId: string,
 ): Promise<SellerProfile[]> {
-  const rows = await db
+  const rows = await tenantTransaction((tx) =>
+    tx
     .select()
     .from(invoiceSellerProfiles)
     .where(eq(invoiceSellerProfiles.tenantId, tenantId))
-    .orderBy(asc(invoiceSellerProfiles.stateCode));
+    .orderBy(asc(invoiceSellerProfiles.stateCode)),
+  );
   return rows.map(toProfile);
 }
 
@@ -82,25 +84,29 @@ export async function upsertSellerProfile(
     bankBranch: clean(p.bankBranch),
     updatedBy: userId,
   };
-  await db
+  await tenantTransaction((tx) =>
+    tx
     .insert(invoiceSellerProfiles)
     .values({ tenantId, stateCode: p.stateCode, ...values })
     .onConflictDoUpdate({
       target: [invoiceSellerProfiles.tenantId, invoiceSellerProfiles.stateCode],
       set: { ...values, updatedAt: new Date() },
-    });
+    }),
+  );
 }
 
 export async function deleteSellerProfile(
   tenantId: string,
   stateCode: string,
 ): Promise<void> {
-  await db
+  await tenantTransaction((tx) =>
+    tx
     .delete(invoiceSellerProfiles)
     .where(
       and(
         eq(invoiceSellerProfiles.tenantId, tenantId),
         eq(invoiceSellerProfiles.stateCode, stateCode),
       ),
-    );
+    ),
+  );
 }
