@@ -197,12 +197,34 @@ export const exotelProvider: TelephonyProvider = {
       json = null;
     }
     if (!res.ok) {
-      const msg =
-        (json as { RestException?: { Message?: string } } | null)?.RestException?.Message ?? `HTTP ${res.status}`;
+      // Exotel's error body is JSON, XML (<RestException><Message>…) or plain
+      // text depending on the error; surface its reason in every case.
+      const xmlMsg = /<Message>([\s\S]*?)<\/Message>/i.exec(text)?.[1]?.trim();
+      const plain = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+      const reason = (json as { RestException?: { Message?: string } } | null)?.RestException?.Message ?? xmlMsg ?? (plain || null);
+      const msg = reason ? `HTTP ${res.status}: ${reason}` : `HTTP ${res.status}`;
       throw new TelephonyError(`Exotel refused the call: ${msg}`, 'provider_error');
     }
-    const sid = str((json as { Call?: Bag } | null)?.Call ? pick((json as { Call: Bag }).Call, 'Sid') : undefined);
-    if (!sid) throw new TelephonyError('Exotel returned no call id.', 'provider_error');
+    // Exotel accepted the call (2xx). Its body is JSON ({ Call: { Sid } }) or
+    // XML (<TwilioResponse><Call><Sid>…) depending on account/API version.
+    const bag = json as Bag | null;
+    const callObj = bag ? (pick(bag, 'Call') as Bag | undefined) : undefined;
+    const sid =
+      str(callObj && typeof callObj === 'object' ? pick(callObj, 'Sid', 'CallSid') : undefined) ??
+      str(bag ? pick(bag, 'Sid', 'CallSid') : undefined) ??
+      str(/<Call>[\s\S]*?<Sid>([\s\S]*?)<\/Sid>/i.exec(text)?.[1]) ??
+      str(/<Sid>([\s\S]*?)<\/Sid>/i.exec(text)?.[1]);
+    if (!sid) {
+      // The call IS ringing; don't fail it. Keep our pending id: Exotel echoes
+      // CustomField (our call id) on every status callback, so the first
+      // webhook attaches the real CallSid and the status/recording.
+      console.warn('exotel connect: 2xx without a readable call Sid', {
+        status: res.status,
+        contentType: res.headers.get('content-type'),
+        bodyShape: json ? Object.keys(json as object).join(',') : text.trim().slice(0, 1) === '<' ? 'xml' : 'text',
+      });
+      return { providerCallId: `pending:${customData.callId}` };
+    }
     return { providerCallId: sid };
   },
 

@@ -144,6 +144,33 @@ async function main() {
   check('IP allowlist admits listed IP', exotelProvider.verifyWebhook(req('https://x/w?s=sekret-123', '9.9.9.9'), acct));
   delete process.env.EXOTEL_WEBHOOK_IPS;
 
+  // ------------------------------------------------------------ Exotel connect response formats
+  {
+    const realFetch = globalThis.fetch;
+    const live: TelephonyAccountContext = { ...acct, credentials: { accountSid: 'sid1', apiKey: 'k', apiToken: 't', subdomain: 'api.exotel.com' } };
+    const dial = async (status: number, body: string, contentType: string) => {
+      globalThis.fetch = (async () => new Response(body, { status, headers: { 'content-type': contentType } })) as typeof fetch;
+      try {
+        return await exotelProvider.clickToCall({ account: live, agentPhone: '+919800000001', customerPhone: '+919811122233', callerId: '+911140847509', record: true, statusCallbackUrl: 'https://x/w?s=1', customData: { callId: 'c-123', tenantId: 't1' } });
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    };
+    const fromJson = await dial(200, JSON.stringify({ Call: { Sid: 'sid-json' } }), 'application/json');
+    check('connect: Sid read from JSON', fromJson.providerCallId === 'sid-json');
+    const fromXml = await dial(200, '<?xml version="1.0"?><TwilioResponse><Call><Sid>sid-xml</Sid><Status>in-progress</Status></Call></TwilioResponse>', 'application/xml');
+    check('connect: Sid read from XML', fromXml.providerCallId === 'sid-xml');
+    const unreadable = await dial(200, 'OK', 'text/plain');
+    check('connect: 2xx without a Sid keeps the call pending (not failed)', unreadable.providerCallId === 'pending:c-123');
+    let err403 = '';
+    try {
+      await dial(403, '<TwilioResponse><RestException><Status>403</Status><Message>Number not whitelisted for trial</Message></RestException></TwilioResponse>', 'application/xml');
+    } catch (e) {
+      err403 = (e as Error).message;
+    }
+    check("connect: 403 shows Exotel's own reason", /HTTP 403: Number not whitelisted for trial/.test(err403), err403);
+  }
+
   // ------------------------------------------------------------ calling hours
   const hrs = { tz: 'Asia/Kolkata', start: '09:00', end: '21:00' };
   check('10:00 IST inside', isWithinCallingHours(hrs, new Date('2026-11-16T04:30:00Z')));
