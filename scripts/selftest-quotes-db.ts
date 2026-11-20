@@ -74,6 +74,35 @@ async function main() {
       (seenByA as unknown as unknown[]).length === 1,
     );
 
+    // Numbering: allocation under RLS, concurrency, FY restart, tenant isolation.
+    const { allocateQuoteNumber } = await import("../src/lib/quotes/numbering");
+    const alloc = (tid: string, date: string) =>
+      runWithSystemContext(tid, () =>
+        tenantTransaction((tx) => allocateQuoteNumber(tx, tid, date)),
+      );
+    const nums = await Promise.all(
+      [1, 2, 3, 4, 5].map(() => alloc(tidA, "2026-11-20")),
+    );
+    const tails = nums.map((n) => n.slice(-4)).sort();
+    check(
+      "numbering: 5 concurrent allocations are distinct 0001-0005",
+      new Set(nums).size === 5 &&
+        tails.join(",") === "0001,0002,0003,0004,0005",
+      nums.join(" "),
+    );
+    const nextFy = await alloc(tidA, "2027-12-01");
+    check(
+      "numbering: a later fiscal year restarts at 0001",
+      nextFy.endsWith("0001") && !nums.includes(nextFy),
+      nextFy,
+    );
+    const firstB = await alloc(tidB, "2026-11-20");
+    check(
+      "numbering: tenant B starts at 0001 independent of tenant A",
+      firstB.endsWith("0001"),
+      firstB,
+    );
+
     // FK behaviour (superuser db.execute is fine: this is FK, not RLS).
     const mkFixture = async (tag: string) => {
       const [d] = (await db.execute(sql`

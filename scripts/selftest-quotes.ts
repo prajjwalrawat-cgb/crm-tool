@@ -13,6 +13,7 @@ import {
 } from '../src/lib/quotes/template-schema';
 import { richTextDocSchema, richTextFromPlain, type RichTextDoc } from '../src/lib/quotes/rich-text';
 import { defaultTemplateBody } from '../src/lib/quotes/default-template';
+import { fiscalYearLabel, formatQuoteNumber } from '../src/lib/quotes/numbering';
 
 let exitCode = 0;
 const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
@@ -179,6 +180,14 @@ check('mergeContentForTemplate keeps, drops, adds', (() => {
   const m = mergeContentForTemplate(b, prev);
   return m[tx.id].text === edited && !('gone' in m) && !!m[b.sections.find((x) => x.type === 'terms')!.id]?.terms;
 })());
+
+check('fiscalYearLabel 2026-11-20 start 4 = 2026-27', fiscalYearLabel('2026-11-20', 4) === '2026-27');
+check('fiscalYearLabel 2027-03-31 start 4 = 2026-27', fiscalYearLabel('2027-03-31', 4) === '2026-27');
+check('fiscalYearLabel 2027-04-01 start 4 = 2027-28', fiscalYearLabel('2027-04-01', 4) === '2027-28');
+check('fiscalYearLabel start 1 = calendar year', fiscalYearLabel('2026-11-20', 1) === '2026');
+const numFmt = { prefix: 'Q', separator: '/', includeFiscalYear: true, padding: 4 };
+check('formatQuoteNumber with FY', formatQuoteNumber(numFmt, '2026-27', 42) === 'Q/2026-27/0042');
+check('formatQuoteNumber without FY', formatQuoteNumber({ ...numFmt, includeFiscalYear: false }, null, 42) === 'Q/0042');
 
 for (const x of results) console.log(`${x.ok ? 'PASS' : 'FAIL'}  ${x.name}${!x.ok && x.detail ? `\n      ${x.detail}` : ''}`);
 const failed = results.filter((x) => !x.ok).length;
