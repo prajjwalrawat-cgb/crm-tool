@@ -88,13 +88,15 @@ export function QuoteEditor({
   const quote = renderInput.quote;
   const body = renderInput.body;
   const editable = quote.status === 'draft' && canManage;
-  const readOnly = !editable;
 
   const [form, setForm] = useState<QuoteEditorForm>(() => formFromQuote(quote));
   const [saved, setSaved] = useState(() => snapshotOf(formFromQuote(quote)));
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
+  // Inputs freeze while a save is in flight: the refresh after it remounts
+  // the editor from the server copy, which would drop keystrokes typed meanwhile.
+  const readOnly = !editable || saving;
 
   const dirty = editable && snapshotOf(form) !== saved;
   useUnsavedChangesWarning(dirty, 'You have unsaved changes to this quote. Leave without saving?');

@@ -52,6 +52,11 @@ export function RichTextEditor({
     onUpdate: ({ editor: e }) => onChangeRef.current(e.getJSON() as RichTextDoc),
   });
 
+  // useEditor only reads `editable` at creation; follow later changes (no update event).
+  useEffect(() => {
+    if (editor && !editor.isDestroyed && editor.isEditable !== editable) editor.setEditable(editable, false);
+  }, [editor, editable]);
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 dark:border-[#2A2A2A] dark:bg-[#111111]">
       {editor && editable ? <Toolbar editor={editor} /> : null}

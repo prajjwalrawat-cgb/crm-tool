@@ -2,12 +2,12 @@
 
 import { CheckboxGroup, Field, inputCls, NumberInput, selectCls, type SectionFormProps } from './controls';
 
-const SELLER_FIELDS = [
+export const SELLER_FIELDS = [
   { key: 'gstin', label: 'GSTIN' },
   { key: 'pan', label: 'PAN' },
   { key: 'address', label: 'Address' },
-  { key: 'email', label: 'Email' },
-  { key: 'phone', label: 'Phone' },
+  // 'email' / 'phone' are still accepted by the schema (older templates) but
+  // not offered: the seller snapshot carries neither, so they never print.
 ] as const;
 
 const META_FIELDS = [

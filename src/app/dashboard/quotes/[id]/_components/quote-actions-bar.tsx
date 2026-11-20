@@ -75,7 +75,7 @@ export function QuoteActionsBar({
   }
 
   function reapply() {
-    if (!window.confirm('Re-apply the latest version of the template? Your line items and edited text are kept where the sections still exist.')) return;
+    if (!window.confirm('Re-apply the latest version of the template? Your line items and edited text are kept where the sections still exist; sections the template locks take its latest text.')) return;
     run(() => reapplyTemplateAction(quoteId), 'Template re-applied');
   }
 
@@ -94,7 +94,8 @@ export function QuoteActionsBar({
   function setDealValue() {
     const from = deal ? formatCurrency(deal.amountMinor, deal.currency) : '—';
     const to = formatInr(dealValueMinor);
-    if (!window.confirm(`Set the deal value from ${from} to ${to} (the quote value before GST)?`)) return;
+    const currencyNote = deal && deal.currency !== 'INR' ? ` The deal's currency will change from ${deal.currency} to INR.` : '';
+    if (!window.confirm(`Set the deal value from ${from} to ${to} (the quote value before GST)?${currencyNote}`)) return;
     run(() => setDealAmountFromQuoteAction(quoteId), `Deal value set to ${to}`);
   }
 

@@ -30,7 +30,7 @@ import {
   listOfferingOptions,
 } from '@/lib/offerings/queries';
 import { listDealValueSplit } from '@/lib/deals/value-split-queries';
-import { listQuoteTemplates, listQuotesForDeal } from '@/lib/quotes/queries';
+import { listQuoteTemplateOptions, listQuotesForDeal } from '@/lib/quotes/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
@@ -202,7 +202,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       // Quotes card (0078): the deal's quotes + revisions, and the templates
       // "New quote" can start from.
       listQuotesForDeal(tenant.id, deal.id),
-      listQuoteTemplates(tenant.id),
+      listQuoteTemplateOptions(tenant.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -853,7 +853,7 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 totalMinor: q.totalMinor,
                 createdAt: q.createdAt.toISOString(),
               }))}
-              templates={quoteTemplateRows.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }))}
+              templates={quoteTemplateRows}
               canCreate={can(membership.role, 'manageQuotes')}
             />
 
