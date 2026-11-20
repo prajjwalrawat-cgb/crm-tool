@@ -6,6 +6,13 @@ const nextConfig: NextConfig = {
   // @react-pdf/renderer (quote PDFs) is ESM with Node-only font loading;
   // also on Next's built-in external list, listed here to make it explicit.
   serverExternalPackages: ["unpdf", "@react-pdf/renderer"],
+  // The server quote render (mark as sent) reads its TTFs from
+  // <cwd>/public/fonts/quote at runtime (src/lib/quotes/pdf/fonts.ts), which
+  // file tracing can't see. Server actions run in the invoking page's
+  // function, so include the fonts in every route's trace.
+  outputFileTracingIncludes: {
+    "/*": ["./public/fonts/quote/**/*.ttf"],
+  },
   experimental: {
     serverActions: {
       // Server Actions accept 1 MB by default. Deal documents go up to 15 MB
