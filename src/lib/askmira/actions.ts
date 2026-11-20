@@ -249,6 +249,10 @@ async function saveLead({ me, params }: ActArgs) {
     // A new lead's contact, decided before anything is written (lead-choices).
     let contactPlan: Decision | null = null;
     let existingContact: ContactFields | null = null;
+    // The same lead found already here with its own contact: that link stays.
+    let dealContactId: string | null = null;
+    // What a new deal sells, settled with the rest before anything is written.
+    let offerings: string[] = [];
 
     if (dealId) {
       // An existing lead: its company and contact are the ones to change.
@@ -301,13 +305,15 @@ async function saveLead({ me, params }: ActArgs) {
         );
         if (open) {
           dealId = open.id;
-          contactId = open.contactId;
+          dealContactId = open.contactId;
           done.push('found the lead already here, so nothing was added twice');
         }
       }
 
-      // The contact: same email anywhere here, or a similar name at the chosen company.
-      if (!dealId) {
+      // The contact: same email anywhere here, or a similar name at the chosen
+      // company. Asked even for a lead found already here, so the card's person
+      // never overwrites someone else.
+      {
         const emailMatch = contactEmail
           ? await inScope(me, () => findContactByEmail(me.tenantId, contactEmail))
           : null;
@@ -331,6 +337,9 @@ async function saveLead({ me, params }: ActArgs) {
           contactId = contactPlan.id;
         }
       }
+
+      // A new deal must say what it sells; a refusal here must come before any write.
+      if (!dealId) offerings = await offeringIds(me, dealIn.offerings);
 
       // Settled: now the writes, company first.
       if (companyPlan.kind === 'create') {
@@ -411,7 +420,7 @@ async function saveLead({ me, params }: ActArgs) {
     }
 
     if (!dealId) {
-      const ids = await offeringIds(me, dealIn.offerings);
+      const ids = offerings;
       const made = await createDealAction(
         form({
           name: clean(dealIn.name, 200),
@@ -434,7 +443,10 @@ async function saveLead({ me, params }: ActArgs) {
     } else {
       const patch: Record<string, unknown> = { id: dealId };
       if (amount) patch.amount = amount;
-      if (contactId) patch.contactId = contactId;
+      if (contactId && !dealContactId) patch.contactId = contactId;
+      else if (contactId && contactId !== dealContactId) {
+        done.push('the lead keeps its own contact; this person was saved at the company');
+      }
       if (Object.keys(patch).length > 1) {
         const changed = await patchDealAction(patch);
         if (!changed.ok) refuse(changed, 'The lead could not be updated');
