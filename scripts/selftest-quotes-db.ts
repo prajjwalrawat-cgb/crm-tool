@@ -156,6 +156,7 @@ async function main() {
     );
 
     await dataLayerChecks(tidA, tidB);
+    await sendChecks(tidA);
   } catch (err) {
     check("database checks ran", false, String(err));
   } finally {
@@ -423,6 +424,199 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
     d2?.a === 171_000 && d2.u === USER && audit?.n === 1,
     JSON.stringify({ d2, audit }),
   );
+}
+
+/** Task 8: mark as sent (filed PDF, locking, cleanup), render input, delete protection. */
+async function sendChecks(tidA: string): Promise<void> {
+  const { db } = await import("../src/db/index");
+  const { runWithSystemContext, tenantTransaction } = await import("../src/lib/db-context");
+  const q = await import("../src/lib/quotes/queries");
+  const { markQuoteSent } = await import("../src/lib/quotes/send");
+  const { buildQuoteRenderInput } = await import("../src/lib/quotes/render-input");
+  const { protectedDocumentReason } = await import("../src/lib/deals/protected-documents");
+  type SendDeps = import("../src/lib/quotes/send").SendDeps;
+  const asA = <T>(fn: () => Promise<T>) => runWithSystemContext(tidA, fn);
+
+  // A real user as the quote creator (users is global, not tenant-scoped).
+  const creatorId = "selftest-quote-creator";
+  await db.execute(sql`DELETE FROM users WHERE id = ${creatorId}`);
+  await db.execute(sql`
+    INSERT INTO users (id, email, first_name, last_name)
+    VALUES (${creatorId}, 'priya.selftest@example.test', 'Priya', 'Sharma')
+  `);
+  try {
+    const [deal] = (await db.execute(sql`
+      INSERT INTO deals (tenant_id, name, company_name, custom_fields)
+      VALUES (${tidA}, 'Send flow deal', 'Globex Ltd', '{"po":"PO-42"}'::jsonb) RETURNING id
+    `)) as unknown as Array<{ id: string }>;
+    const dealId = deal!.id;
+
+    const newDraft = async (withItems: boolean) => {
+      const { id } = await asA(() => q.createQuoteFromDeal(tidA, creatorId, { dealId }));
+      if (withItems) {
+        const cur = (await asA(() => q.getQuote(tidA, id)))!;
+        await asA(() =>
+          q.updateQuoteDraft(tidA, creatorId, id, {
+            quoteDate: cur.quoteDate,
+            validUntil: cur.validUntil,
+            sellerProfileId: null,
+            buyer: cur.buyer,
+            consignee: null,
+            items: [{ description: "Widget", quantity: 1, rateMinor: 10_000, discountBps: 0, taxRateBps: 1800 }],
+            overallDiscount: { type: "none" as const },
+            content: cur.content,
+          }),
+        );
+      }
+      return id;
+    };
+    const fakeDeps = (render?: SendDeps["render"]) => {
+      const calls = { upload: [] as Array<{ fileName: string; contentType: string; size: number }>, removed: [] as string[] };
+      const deps: SendDeps = {
+        render: render ?? (async () => new Uint8Array([37, 80, 68, 70])),
+        upload: async (input) => {
+          calls.upload.push({ fileName: input.fileName, contentType: input.contentType, size: input.bytes.byteLength });
+          return { url: "u", path: "p" };
+        },
+        removeUpload: async (path) => {
+          calls.removed.push(path);
+        },
+      };
+      return { deps, calls };
+    };
+
+    // buildQuoteRenderInput: deal name, creator name, custom fields, snapshot body.
+    const draftId = await newDraft(true);
+    const input = await asA(() => buildQuoteRenderInput(tidA, draftId));
+    check(
+      "buildQuoteRenderInput: deal.name and the creator's name/email in placeholderValues, deal custom fields, snapshot body",
+      input?.placeholderValues["deal.name"] === "Send flow deal" &&
+        input.placeholderValues["rep.name"] === "Priya Sharma" &&
+        input.placeholderValues["rep.email"] === "priya.selftest@example.test" &&
+        input.dealCustomFields.po === "PO-42" &&
+        JSON.stringify(input.body) === JSON.stringify(input.quote.templateSnapshot) &&
+        input.logoUrl === null,
+      JSON.stringify({ pv: input?.placeholderValues, cf: input?.dealCustomFields, logo: input?.logoUrl }),
+    );
+
+    // Happy path.
+    const ok = fakeDeps();
+    const sent = await asA(() => markQuoteSent(tidA, creatorId, draftId, ok.deps));
+    const after = await asA(() => q.getQuote(tidA, draftId));
+    const docs = (await db.execute(sql`
+      SELECT id, category::text AS category, uploaded_by, file_name, file_url, storage_path, file_type, size_bytes::int AS size
+      FROM deal_documents WHERE deal_id = ${dealId}
+    `)) as unknown as Array<{ id: string; category: string; uploaded_by: string; file_name: string; file_url: string; storage_path: string; file_type: string; size: number }>;
+    check(
+      "markQuoteSent: status sent, one proposal deal_documents row, pdf_document_id set",
+      after?.status === "sent" &&
+        after.sentAt !== null &&
+        after.sentBy === creatorId &&
+        after.pdfDocumentId === sent.documentId &&
+        docs.length === 1 &&
+        docs[0]!.id === sent.documentId &&
+        docs[0]!.category === "proposal" &&
+        docs[0]!.uploaded_by === creatorId &&
+        docs[0]!.file_url === "u" &&
+        docs[0]!.storage_path === "p" &&
+        docs[0]!.file_type === "application/pdf" &&
+        docs[0]!.size === 4 &&
+        docs[0]!.file_name === `${after.quoteNumber} Rev 1.pdf` &&
+        ok.calls.upload.length === 1 &&
+        ok.calls.upload[0]!.fileName === `${after.quoteNumber} Rev 1.pdf` &&
+        ok.calls.upload[0]!.contentType === "application/pdf" &&
+        ok.calls.removed.length === 0,
+      JSON.stringify({ status: after?.status, sent, docs, calls: ok.calls }),
+    );
+
+    // Second send: frozen.
+    const again = fakeDeps();
+    let frozen = false;
+    try {
+      await asA(() => markQuoteSent(tidA, creatorId, draftId, again.deps));
+    } catch (err) {
+      frozen = err instanceof q.QuoteFrozenError;
+    }
+    check("markQuoteSent a second time throws QuoteFrozenError, no upload", frozen && again.calls.upload.length === 0);
+
+    // protectedDocumentReason
+    const reason = await asA(() =>
+      tenantTransaction((tx) => protectedDocumentReason(tx, tidA, sent.documentId)),
+    );
+    const [plain] = (await db.execute(sql`
+      INSERT INTO deal_documents (tenant_id, deal_id, uploaded_by, file_name, file_url)
+      VALUES (${tidA}, ${dealId}, 'selftest', 'plain.pdf', 'http://x/plain.pdf') RETURNING id
+    `)) as unknown as Array<{ id: string }>;
+    const plainReason = await asA(() =>
+      tenantTransaction((tx) => protectedDocumentReason(tx, tidA, plain!.id)),
+    );
+    check(
+      "protectedDocumentReason: 'quote' for the filed PDF, null for an ordinary document",
+      reason === "quote" && plainReason === null,
+      JSON.stringify({ reason, plainReason }),
+    );
+
+    // No items: rejected before upload.
+    const emptyId = await newDraft(false);
+    const empty = fakeDeps();
+    let emptyMsg = "";
+    try {
+      await asA(() => markQuoteSent(tidA, creatorId, emptyId, empty.deps));
+    } catch (err) {
+      emptyMsg = err instanceof Error ? err.message : String(err);
+    }
+    check(
+      "markQuoteSent on a draft without items throws, upload never called",
+      emptyMsg === "Add at least one line item before sending." && empty.calls.upload.length === 0,
+      emptyMsg,
+    );
+
+    // DB step fails after render + upload: the upload is removed.
+    const doomedId = await newDraft(true);
+    const doomed = fakeDeps(async () => {
+      await db.execute(sql`DELETE FROM quotes WHERE id = ${doomedId}`);
+      return new Uint8Array([37, 80, 68, 70]);
+    });
+    let doomedThrew = false;
+    try {
+      await asA(() => markQuoteSent(tidA, creatorId, doomedId, doomed.deps));
+    } catch {
+      doomedThrew = true;
+    }
+    const [orphans] = (await db.execute(sql`
+      SELECT count(*)::int AS n FROM deal_documents WHERE deal_id = ${dealId} AND category = 'proposal'
+    `)) as unknown as Array<{ n: number }>;
+    check(
+      "markQuoteSent: when the DB step fails after upload, removeUpload('p') is called and nothing is filed",
+      doomedThrew &&
+        doomed.calls.upload.length === 1 &&
+        doomed.calls.removed.length === 1 &&
+        doomed.calls.removed[0] === "p" &&
+        orphans?.n === 1,
+      JSON.stringify({ doomedThrew, calls: doomed.calls, orphans }),
+    );
+
+    // An edit between the load and the transaction must not file a stale PDF.
+    const racedId = await newDraft(true);
+    const raced = fakeDeps(async () => {
+      await db.execute(sql`UPDATE quotes SET updated_at = now() + interval '1 second' WHERE id = ${racedId}`);
+      return new Uint8Array([37, 80, 68, 70]);
+    });
+    let racedThrew = false;
+    try {
+      await asA(() => markQuoteSent(tidA, creatorId, racedId, raced.deps));
+    } catch {
+      racedThrew = true;
+    }
+    const racedAfter = await asA(() => q.getQuote(tidA, racedId));
+    check(
+      "markQuoteSent: a draft edited while rendering stays draft and the upload is removed",
+      racedThrew && racedAfter?.status === "draft" && raced.calls.removed[0] === "p",
+      JSON.stringify({ racedThrew, status: racedAfter?.status, calls: raced.calls }),
+    );
+  } finally {
+    await db.execute(sql`DELETE FROM users WHERE id = ${creatorId}`);
+  }
 }
 
 function report(): void {

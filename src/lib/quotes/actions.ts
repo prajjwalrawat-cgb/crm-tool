@@ -6,8 +6,8 @@ import { z } from 'zod';
 import { auth } from '@/lib/auth/server';
 import { runWithTenantContext } from '@/lib/db-context';
 import { requireMembership } from '@/lib/membership';
-import { getOrgSettings } from '@/lib/org-settings/queries';
 import { can, type Permission } from '@/lib/rbac';
+import { deleteDealDocument, isStorageConfigured, uploadDealDocument } from '@/lib/storage/supabase';
 import { requireTenant } from '@/lib/tenant';
 
 import {
@@ -26,7 +26,11 @@ import {
   setDefaultQuoteTemplate,
   updateQuoteDraft,
 } from './queries';
+import type { QuoteRenderInput } from './pdf/context';
+import { renderQuotePdfServer } from './pdf/render-server';
+import { buildQuoteRenderInput } from './render-input';
 import { quoteDraftInputSchema, quoteSettingsInputSchema } from './schema';
+import { markQuoteSent, type SendDeps } from './send';
 import type { QuoteDetail } from './types';
 
 export type QuoteActionFailure = {
@@ -235,19 +239,39 @@ export async function setDealAmountFromQuoteAction(id: string): Promise<QuoteAct
 }
 
 /** Readable by any member (viewers included): the data the PDF is rendered from. */
-export async function getQuoteForPdfAction(
-  id: string,
-): Promise<QuoteActionResult<{ quote: QuoteDetail; logoUrl: string | null }>> {
+export async function getQuoteForPdfAction(id: string): Promise<QuoteActionResult<{ input: QuoteRenderInput }>> {
   if (!idSchema.safeParse(id).success) return invalidId('quote');
   return gated([], async ({ tenantId }) => {
-    const quote = await getQuote(tenantId, id);
-    if (!quote) throw new QuoteNotFoundError();
-    const source = quote.templateSnapshot.theme.logoSource;
-    let logoUrl: string | null = null;
-    if (source !== 'none') {
-      const org = await getOrgSettings(tenantId);
-      logoUrl = (source === 'invoice' ? org.invoiceLogoUrl : org.logoUrl) ?? null;
-    }
-    return { ok: true, quote, logoUrl };
+    const input = await buildQuoteRenderInput(tenantId, id);
+    if (!input) throw new QuoteNotFoundError();
+    return { ok: true, input };
+  });
+}
+
+/** Production send dependencies: the same render input as the browser download, Supabase storage. */
+function serverSendDeps(tenantId: string): SendDeps {
+  return {
+    render: async (q) => {
+      const input = await buildQuoteRenderInput(tenantId, q.id);
+      if (!input) throw new QuoteNotFoundError();
+      return renderQuotePdfServer(input);
+    },
+    upload: uploadDealDocument,
+    removeUpload: deleteDealDocument,
+  };
+}
+
+/** Render the PDF, file it on the deal as a proposal and lock the quote. */
+export async function markQuoteSentAction(id: string): Promise<QuoteActionResult<{ documentId: string }>> {
+  if (!idSchema.safeParse(id).success) return invalidId('quote');
+  if (!isStorageConfigured()) {
+    return { ok: false, error: 'Document storage is not configured. Add SUPABASE_SERVICE_ROLE_KEY.' };
+  }
+  return gated(['manageQuotes'], async ({ tenantId, userId }) => {
+    const { documentId } = await markQuoteSent(tenantId, userId, id, serverSendDeps(tenantId));
+    revalidatePath(QUOTES_PATH);
+    const q = await getQuote(tenantId, id);
+    if (q) revalidatePath(dealPath(q.dealId));
+    return { ok: true, documentId };
   });
 }

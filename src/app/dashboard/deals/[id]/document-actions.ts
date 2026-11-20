@@ -4,10 +4,11 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { dealDocuments, dealOrderProofs, deals, type DealDocument } from '@/db/schema';
+import { dealDocuments, deals, type DealDocument } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
+import { protectedDocumentReason } from '@/lib/deals/protected-documents';
 import {
   deleteDealDocument,
   isStorageConfigured,
@@ -175,18 +176,10 @@ export async function deleteDealDocumentAction(
     async () => {
       const removed = await tenantTransaction(async (tx) => {
         // A PO backing the deal's order confirmation is removed from that
-        // card, which knows whether the deal is Won (0071).
-        const [proof] = await tx
-          .select({ id: dealOrderProofs.id })
-          .from(dealOrderProofs)
-          .where(
-            and(
-              eq(dealOrderProofs.documentId, parsed.data.id),
-              eq(dealOrderProofs.tenantId, tenant.id),
-            ),
-          )
-          .limit(1);
-        if (proof) return 'order_proof' as const;
+        // card, which knows whether the deal is Won (0071). A quote's sent
+        // PDF stays for good; changes go into a revision.
+        const reason = await protectedDocumentReason(tx, tenant.id, parsed.data.id);
+        if (reason) return reason;
         const [row] = await tx
           .delete(dealDocuments)
           .where(
@@ -205,6 +198,13 @@ export async function deleteDealDocumentAction(
           ok: false,
           message:
             'This file is the deal’s order confirmation. Remove it from the Order confirmation card.',
+        };
+      }
+      if (removed === 'quote') {
+        return {
+          ok: false,
+          message:
+            'This file is the sent copy of a quote and can’t be deleted. Create a revision instead.',
         };
       }
       if (removed?.storagePath) {

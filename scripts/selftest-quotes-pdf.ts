@@ -10,6 +10,7 @@ import { amountInWords } from '../src/lib/quotes/pdf/amount-in-words';
 import { formatBps, formatMoney } from '../src/lib/quotes/pdf/context';
 import { registerQuoteFonts } from '../src/lib/quotes/pdf/fonts';
 import { QuoteDocument, type QuoteRenderInput } from '../src/lib/quotes/pdf/quote-document';
+import { renderQuotePdfServer } from '../src/lib/quotes/pdf/render-server';
 import { sampleRenderInput } from '../src/lib/quotes/pdf/sample-data';
 import type { QuoteTemplateBody } from '../src/lib/quotes/template-schema';
 
@@ -112,6 +113,10 @@ async function main(): Promise<void> {
   check('amount in words uses rounded total', ro.text.includes(amountInWords(payable, 'INR')));
   const milestoneMinor = [...ro.text.matchAll(/(?:Advance with order|On delivery) \d+% -?₹([\d,]+\.\d{2})/g)].map((m) => Math.round(Number(m[1].replace(/,/g, '')) * 100));
   check('milestones sum to the rounded total', milestoneMinor.length === 2 && milestoneMinor.reduce((a, b) => a + b, 0) === payable, milestoneMinor.join('+'));
+
+  // Server render used by "mark as sent"
+  const served = await renderQuotePdfServer(sampleRenderInput(defaultTemplateBody()));
+  check('renderQuotePdfServer returns %PDF bytes', served instanceof Uint8Array && Buffer.from(served.subarray(0, 4)).toString('latin1') === '%PDF');
 
   // Every font family renders
   for (const fontFamily of ['inter', 'roboto'] as const) {
