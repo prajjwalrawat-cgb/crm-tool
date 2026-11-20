@@ -63,3 +63,4 @@ export * from './lead-capture';
 export * from './reporting';
 export * from './telephony';
 export * from './ai-suggestions';
+export * from './quotes';

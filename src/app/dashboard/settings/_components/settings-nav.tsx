@@ -22,6 +22,8 @@ import {
   Headset,
   Webhook,
   FormInput,
+  FileText,
+  Hash,
   Shuffle,
   type LucideIcon,
 } from 'lucide-react';
@@ -66,6 +68,8 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/incentives', label: 'Incentives', icon: Wallet, visibility: 'adminOnly' },
   { href: '/dashboard/settings/credit-terms', label: 'Credit terms', icon: CalendarClock, visibility: 'adminOnly' },
   { href: '/dashboard/settings/offerings', label: 'Offerings', icon: Package, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/quote-templates', label: 'Quote templates', icon: FileText, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/quotes', label: 'Quotes', icon: Hash, visibility: 'adminOnly' },
   { href: '/dashboard/settings/custom-fields', label: 'Custom fields', icon: ListPlus, visibility: 'adminOnly' },
   { href: '/dashboard/settings/stage-gates', label: 'Stage gates', icon: ShieldCheck, visibility: 'adminOnly' },
   { href: '/dashboard/settings/data-quality', label: 'Data quality', icon: Sparkles, visibility: 'adminOnly' },
