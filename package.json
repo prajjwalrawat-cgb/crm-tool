@@ -36,6 +36,7 @@
     "selftest:quotes": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes.ts",
     "selftest:quotes-pdf": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes-pdf.ts",
     "selftest:quotes-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes-db.ts",
+    "selftest:quote-builder": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quote-builder.ts",
     "backfill:contact-phones": "tsx scripts/backfill-contact-phones.ts",
     "selftest:reports-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-reports-db.ts",
     "seed:report-load": "tsx scripts/seed-report-load.ts",
