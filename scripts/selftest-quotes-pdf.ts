@@ -7,6 +7,7 @@ import { extractText } from 'unpdf';
 
 import { defaultTemplateBody } from '../src/lib/quotes/default-template';
 import { amountInWords } from '../src/lib/quotes/pdf/amount-in-words';
+import { formatBps, formatMoney } from '../src/lib/quotes/pdf/context';
 import { registerQuoteFonts } from '../src/lib/quotes/pdf/fonts';
 import { QuoteDocument, type QuoteRenderInput } from '../src/lib/quotes/pdf/quote-document';
 import { sampleRenderInput } from '../src/lib/quotes/pdf/sample-data';
@@ -42,6 +43,11 @@ async function main(): Promise<void> {
   check('contains quote number', main.text.includes(base.quote.quoteNumber), base.quote.quoteNumber);
   check('intra-state shows CGST', main.text.includes('CGST') && main.text.includes('SGST'));
   check('intra-state hides IGST', !main.text.includes('IGST'));
+  for (const g of base.quote.totals.taxGroups) {
+    const cgst = Math.round(g.taxMinor / 2);
+    const want = [`CGST @ ${formatBps(g.rateBps / 2)} ${formatMoney(cgst)}`, `SGST @ ${formatBps(g.rateBps / 2)} ${formatMoney(g.taxMinor - cgst)}`];
+    check(`intra-state ${formatBps(g.rateBps)} CGST + SGST amounts are the halves`, want.every((w) => main.text.includes(w)), want.join(' | '));
+  }
   const words = amountInWords(base.quote.totals.totalMinor, 'INR');
   check('contains amount in words', main.text.includes(words), words);
   check('placeholders resolved in intro', main.text.includes(`Dear ${base.quote.buyer.contactName}`) && !main.text.includes('{{'));
@@ -80,6 +86,32 @@ async function main(): Promise<void> {
   const inter = await render(sampleRenderInput(defaultTemplateBody(), { interState: true }));
   check('inter-state shows IGST', inter.text.includes('IGST'));
   check('inter-state hides CGST', !inter.text.includes('CGST'));
+  for (const g of sampleRenderInput(defaultTemplateBody(), { interState: true }).quote.totals.taxGroups) {
+    const want = `IGST @ ${formatBps(g.rateBps)} ${formatMoney(g.taxMinor)}`;
+    check(`inter-state ${formatBps(g.rateBps)} IGST amount is the group tax`, inter.text.includes(want), want);
+  }
+
+  // Place of supply follows the consignee: seller 29, buyer 29, ship-to 27 → IGST
+  const shipped = sampleRenderInput(defaultTemplateBody());
+  shipped.quote.consignee = { name: 'Globex Pune plant', address: 'MIDC Chakan', city: 'Pune', state: 'Maharashtra', stateCode: '27', gstin: '27AAACG5678K2Z1' };
+  const sh = await render(shipped);
+  check('consignee in another state → IGST', sh.text.includes('IGST') && !sh.text.includes('CGST'));
+
+  // Round-off: printed total, round-off row, words and milestone split all use the rounded figure
+  const rounded = defaultTemplateBody();
+  for (const s of rounded.sections) if (s.type === 'totals') s.settings.showRoundOff = true;
+  const paise = sampleRenderInput(rounded, {
+    lines: [{ description: 'Odd-priced item', hsnSac: '997331', unit: 'Nos', quantity: 1, rateMinor: 100_033, discountBps: 0, taxRateBps: 1800, groupLabel: null }],
+  });
+  const exact = paise.quote.totals.totalMinor;
+  const payable = Math.round(exact / 100) * 100;
+  check('round-off sample has paise', exact % 100 !== 0, String(exact));
+  const ro = await render(paise);
+  check('rounded total printed', ro.text.includes(`Total ${formatMoney(payable)}`), formatMoney(payable));
+  check('round-off row printed', ro.text.includes(`Round off ${formatMoney(payable - exact)}`), formatMoney(payable - exact));
+  check('amount in words uses rounded total', ro.text.includes(amountInWords(payable, 'INR')));
+  const milestoneMinor = [...ro.text.matchAll(/(?:Advance with order|On delivery) \d+% -?₹([\d,]+\.\d{2})/g)].map((m) => Math.round(Number(m[1].replace(/,/g, '')) * 100));
+  check('milestones sum to the rounded total', milestoneMinor.length === 2 && milestoneMinor.reduce((a, b) => a + b, 0) === payable, milestoneMinor.join('+'));
 
   // Every font family renders
   for (const fontFamily of ['inter', 'roboto'] as const) {

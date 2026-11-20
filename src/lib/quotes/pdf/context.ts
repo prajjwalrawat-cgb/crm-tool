@@ -89,6 +89,20 @@ export function formatQuantity(q: string | number): string {
   return Number.isFinite(n) ? n.toLocaleString('en-IN', { maximumFractionDigits: 3 }) : String(q);
 }
 
+/**
+ * The total the PDF prints and splits. With the template's totals section
+ * `showRoundOff` on, the payable figure is rounded to the rupee (display
+ * only: the stored total_minor stays exact). Totals, amount in words and
+ * the payment schedule all use payableMinor so the PDF agrees with itself.
+ */
+export function grandTotalForDisplay(input: Pick<QuoteRenderInput, 'body' | 'quote'>): { exactMinor: number; roundOffMinor: number; payableMinor: number } {
+  const exactMinor = input.quote.totals.totalMinor;
+  const totals = input.body.sections.find((s) => s.type === 'totals');
+  const round = totals?.type === 'totals' && totals.settings.showRoundOff;
+  const payableMinor = round ? Math.round(exactMinor / 100) * 100 : exactMinor;
+  return { exactMinor, roundOffMinor: payableMinor - exactMinor, payableMinor };
+}
+
 /** Seller state from its GSTIN; place of supply = consignee, else buyer (as for invoices). */
 export function supplyStateCodes(quote: Pick<QuoteDetail, 'seller' | 'buyer' | 'consignee'>): { seller: string | null; place: string | null } {
   return {

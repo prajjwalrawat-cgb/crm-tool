@@ -4,7 +4,7 @@ import { gstBreakdown } from '@/lib/invoices/gst';
 
 import type { QuoteSection } from '../../template-schema';
 import { amountInWords } from '../amount-in-words';
-import { formatBps, formatMoney, supplyStateCodes, type RenderContext } from '../context';
+import { formatBps, formatMoney, grandTotalForDisplay, supplyStateCodes, type RenderContext } from '../context';
 
 type TotalsSection = Extract<QuoteSection, { type: 'totals' }>;
 type Row = { label: string; minor: number; strong?: boolean };
@@ -41,9 +41,9 @@ export function TotalsSectionPdf({ section, ctx }: { section: TotalsSection; ctx
   }
 
   // Round-off is display only: the stored total stays exact to the paisa.
-  const grandMinor = settings.showRoundOff ? Math.round(t.totalMinor / 100) * 100 : t.totalMinor;
-  if (settings.showRoundOff && grandMinor !== t.totalMinor) rows.push({ label: 'Round off', minor: grandMinor - t.totalMinor });
-  rows.push({ label: 'Total', minor: grandMinor, strong: true });
+  const grand = grandTotalForDisplay(ctx);
+  if (grand.roundOffMinor !== 0) rows.push({ label: 'Round off', minor: grand.roundOffMinor });
+  rows.push({ label: 'Total', minor: grand.payableMinor, strong: true });
 
   return (
     <View style={styles.section} wrap={false}>
@@ -61,7 +61,7 @@ export function TotalsSectionPdf({ section, ctx }: { section: TotalsSection; ctx
       {settings.showAmountInWords ? (
         <Text style={{ marginTop: 6 }}>
           <Text style={styles.muted}>Amount in words: </Text>
-          {amountInWords(grandMinor, quote.currency)}
+          {amountInWords(grand.payableMinor, quote.currency)}
         </Text>
       ) : null}
     </View>

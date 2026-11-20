@@ -1,7 +1,7 @@
 import { Text, View } from '@react-pdf/renderer';
 
 import type { QuoteSection } from '../../template-schema';
-import { formatBps, formatMoney, type RenderContext } from '../context';
+import { formatBps, formatMoney, grandTotalForDisplay, type RenderContext } from '../context';
 
 type PaymentScheduleSection = Extract<QuoteSection, { type: 'payment_schedule' }>;
 
@@ -15,7 +15,8 @@ function milestoneAmounts(totalMinor: number, shares: { percentBps: number }[]):
 export function PaymentScheduleSectionPdf({ section, ctx }: { section: PaymentScheduleSection; ctx: RenderContext }) {
   const { styles, quote } = ctx;
   const milestones = quote.content[section.id]?.milestones ?? section.settings.defaultMilestones;
-  const amounts = milestoneAmounts(quote.totals.totalMinor, milestones);
+  // Split the printed (possibly rounded) total so the milestones sum to it.
+  const amounts = milestoneAmounts(grandTotalForDisplay(ctx).payableMinor, milestones);
 
   return (
     <View style={styles.section} wrap={false}>

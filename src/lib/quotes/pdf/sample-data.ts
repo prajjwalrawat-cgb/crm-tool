@@ -8,7 +8,7 @@ import type { QuoteDetail, QuoteDetailItem } from '../types';
 import type { QuoteRenderInput } from './context';
 import { buildPlaceholderValues } from './quote-document';
 
-type SampleLine = QuoteLineInput & { description: string; hsnSac: string; unit: string; groupLabel: string | null };
+export type SampleLine = QuoteLineInput & { description: string; hsnSac: string; unit: string; groupLabel: string | null };
 
 const BASE_LINES: SampleLine[] = [
   { description: 'Annual software licence (25 users)', hsnSac: '997331', unit: 'Nos', quantity: 25, rateMinor: 1_200_000, discountBps: 1000, taxRateBps: 1800, groupLabel: 'Software' },
@@ -29,6 +29,8 @@ function isoDate(d: Date): string {
 }
 
 export type SampleOptions = {
+  /** Use these lines instead of the three sample lines. */
+  lines?: SampleLine[];
   /** Replace the three sample lines with `itemCount` generated lines ("Sample item N"). */
   itemCount?: number;
   /** Buyer in a different state from the seller (IGST instead of CGST + SGST). */
@@ -36,7 +38,7 @@ export type SampleOptions = {
 };
 
 export function sampleRenderInput(body: QuoteTemplateBody, opts: SampleOptions = {}): QuoteRenderInput {
-  const lines = sampleLines(opts.itemCount);
+  const lines = opts.lines ?? sampleLines(opts.itemCount);
   const totals = computeQuoteTotals(lines, { type: 'none' });
   const id = '00000000-0000-4000-8000-000000000001';
   const tenantId = '00000000-0000-4000-8000-000000000000';
