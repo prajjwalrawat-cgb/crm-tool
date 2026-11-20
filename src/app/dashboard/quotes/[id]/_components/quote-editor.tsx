@@ -188,7 +188,7 @@ export function QuoteEditor({
   }
 
   return (
-    <main className="space-y-4">
+    <main className="mx-auto w-full max-w-[88rem] space-y-4 px-4 py-6 sm:px-5 lg:px-6">
       <header className="space-y-3">
         {deal ? (
           <Link
