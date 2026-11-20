@@ -155,7 +155,7 @@ export const quotes = pgTable(
     sentAt: timestamp('sent_at', { withTimezone: true }),
     sentBy: text('sent_by'),
     pdfDocumentId: uuid('pdf_document_id').references(() => dealDocuments.id, {
-      onDelete: 'restrict',
+      onDelete: 'no action',
     }),
     createdBy: text('created_by'),
     updatedBy: text('updated_by'),

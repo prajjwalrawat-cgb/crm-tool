@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS "quotes" (
   "total_minor" bigint NOT NULL DEFAULT 0,
   "sent_at" timestamptz,
   "sent_by" text,
-  "pdf_document_id" uuid REFERENCES "deal_documents"("id") ON DELETE RESTRICT,
+  "pdf_document_id" uuid,
   "created_by" text,
   "updated_by" text,
   "created_at" timestamptz NOT NULL DEFAULT now(),
@@ -101,6 +101,16 @@ CREATE TABLE IF NOT EXISTS "quotes" (
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "quotes_tenant_deal_idx"
   ON "quotes" ("tenant_id", "deal_id");
+--> statement-breakpoint
+-- pdf_document_id -> deal_documents is NO ACTION (checked at statement end), not
+-- RESTRICT: deleting a deal cascades to both quotes and deal_documents, and an
+-- immediate RESTRICT check could fail depending on cascade order. NO ACTION
+-- still blocks deleting a referenced document on its own. Drop + re-add so a
+-- replay also corrects a database that got the earlier RESTRICT version.
+ALTER TABLE "quotes" DROP CONSTRAINT IF EXISTS "quotes_pdf_document_id_fkey";
+--> statement-breakpoint
+ALTER TABLE "quotes" ADD CONSTRAINT "quotes_pdf_document_id_fkey"
+  FOREIGN KEY ("pdf_document_id") REFERENCES "deal_documents"("id") ON DELETE NO ACTION;
 --> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "quote_items" (
