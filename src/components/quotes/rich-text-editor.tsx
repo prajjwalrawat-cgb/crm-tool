@@ -9,7 +9,9 @@ import { quoteRichTextExtensions } from '@/lib/quotes/rich-text-extensions';
 import { PLACEHOLDERS } from '@/lib/quotes/template-schema';
 import { cn } from '@/lib/utils';
 
-import { selectCls } from '../../lead-capture/_components/ui';
+/** Same tokens as the Settings form controls. */
+const selectCls =
+  'w-auto rounded-lg border border-slate-200 bg-white px-3 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-[#2A2A2A] dark:bg-[#111111] dark:text-[#FAFAFA]';
 
 /**
  * TipTap editor restricted to the RichTextDoc subset, plus a picker that
@@ -20,10 +22,13 @@ export function RichTextEditor({
   value,
   onChange,
   ariaLabel,
+  editable = true,
 }: {
   value: RichTextDoc;
   onChange: (doc: RichTextDoc) => void;
   ariaLabel: string;
+  /** false: read-only text, no toolbar. */
+  editable?: boolean;
 }) {
   // The editor keeps its first options; read the latest callback through a ref.
   const onChangeRef = useRef(onChange);
@@ -34,6 +39,7 @@ export function RichTextEditor({
   const editor = useEditor({
     extensions: quoteRichTextExtensions(),
     content: value,
+    editable,
     immediatelyRender: false,
     editorProps: {
       attributes: {
@@ -48,7 +54,7 @@ export function RichTextEditor({
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 dark:border-[#2A2A2A] dark:bg-[#111111]">
-      {editor ? <Toolbar editor={editor} /> : null}
+      {editor && editable ? <Toolbar editor={editor} /> : null}
       <EditorContent editor={editor} />
     </div>
   );
@@ -89,7 +95,7 @@ function Toolbar({ editor }: { editor: Editor }) {
       </ToolButton>
       <select
         aria-label="Insert placeholder"
-        className={cn(selectCls, 'ml-auto w-auto py-1 text-[12px]')}
+        className={cn(selectCls, 'ml-auto py-1 text-[12px]')}
         value=""
         onChange={(e) => {
           const key = e.target.value;

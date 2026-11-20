@@ -10,6 +10,7 @@ import {
   Building2,
   CheckSquare,
   Cog,
+  FileSpreadsheet,
   FileText,
   Gauge,
   GitBranch,
@@ -118,6 +119,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
       { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
       { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
       { href: '/dashboard/invoices', label: 'Invoices', icon: FileText },
+      { href: '/dashboard/quotes', label: 'Quotes', icon: FileSpreadsheet },
     ],
   },
   {
@@ -191,6 +193,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
       { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
       { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
       { href: '/dashboard/invoices', label: 'Invoices', icon: FileText },
+      { href: '/dashboard/quotes', label: 'Quotes', icon: FileSpreadsheet },
     ],
   },
   {
@@ -234,6 +237,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
       { href: '/dashboard/contacts', label: 'Contacts', icon: UsersRound },
       { href: '/dashboard/companies', label: 'Companies', icon: Building2 },
       { href: '/dashboard/invoices', label: 'Invoices', icon: FileText },
+      { href: '/dashboard/quotes', label: 'Quotes', icon: FileSpreadsheet },
     ],
   },
   {

@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
+import { useUnsavedChangesWarning } from '@/components/quotes/use-unsaved-changes';
 import { saveQuoteTemplateAction } from '@/lib/quotes/actions';
 import { quoteTemplateBodySchema, type QuoteSection, type QuoteTemplateBody, type QuoteTheme } from '@/lib/quotes/template-schema';
 import { cn } from '@/lib/utils';
@@ -17,7 +18,6 @@ import { SectionList, type Selection } from './section-list';
 import { SectionSettings, type DealFieldOption } from './section-settings';
 import { groupTemplateErrors, issuesToFieldErrors, mergeTemplateErrors, NO_ERRORS, type TemplateErrors } from './template-errors';
 import { ThemeSettings } from './theme-settings';
-import { useUnsavedChangesWarning } from './use-unsaved-changes';
 
 const PdfPreview = dynamic(() => import('./pdf-preview'), {
   ssr: false,
@@ -63,7 +63,7 @@ export function TemplateBuilder({
   const [serverErrors, setServerErrors] = useState<TemplateErrors>(NO_ERRORS);
 
   const dirty = snapshotOf(name, body) !== saved;
-  useUnsavedChangesWarning(dirty);
+  useUnsavedChangesWarning(dirty, 'You have unsaved changes to this template. Leave without saving?');
 
   const liveErrors = useMemo(() => {
     const r = quoteTemplateBodySchema.safeParse(body);

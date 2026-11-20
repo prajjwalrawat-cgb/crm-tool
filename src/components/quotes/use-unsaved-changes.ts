@@ -2,15 +2,13 @@
 
 import { useEffect } from 'react';
 
-const MESSAGE = 'You have unsaved changes to this template. Leave without saving?';
-
 /**
  * While `dirty`, asks before the page is left: tab close / reload / external
  * navigation (beforeunload) and in-app link clicks (the App Router has no
  * route-change event, so same-origin <a> clicks are intercepted in the
  * capture phase, before next/link handles them).
  */
-export function useUnsavedChangesWarning(dirty: boolean): void {
+export function useUnsavedChangesWarning(dirty: boolean, message: string): void {
   useEffect(() => {
     if (!dirty) return;
 
@@ -26,7 +24,7 @@ export function useUnsavedChangesWarning(dirty: boolean): void {
       const url = new URL(a.href, window.location.href);
       if (url.origin !== window.location.origin) return;
       if (url.pathname === window.location.pathname && url.search === window.location.search) return;
-      if (!window.confirm(MESSAGE)) {
+      if (!window.confirm(message)) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -38,5 +36,5 @@ export function useUnsavedChangesWarning(dirty: boolean): void {
       window.removeEventListener('beforeunload', onBeforeUnload);
       document.removeEventListener('click', onClick, true);
     };
-  }, [dirty]);
+  }, [dirty, message]);
 }

@@ -30,6 +30,7 @@ import {
   listOfferingOptions,
 } from '@/lib/offerings/queries';
 import { listDealValueSplit } from '@/lib/deals/value-split-queries';
+import { listQuoteTemplates, listQuotesForDeal } from '@/lib/quotes/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
@@ -74,6 +75,7 @@ import { DealCreditTermsCard } from './_components/deal-credit-terms-card';
 import { DealOfferingsCard } from './_components/deal-offerings-card';
 import { OfferingsDisabledNotice } from '../_components/offerings-disabled-notice';
 import { DealDocumentsCard } from './_components/deal-documents-card';
+import { DealQuotesCard } from './_components/deal-quotes-card';
 import { DealFieldEditor } from './_components/deal-field-editor';
 import { DealInlineHeader } from './_components/deal-inline-header';
 import { DealStageCard } from './_components/deal-stage-card';
@@ -146,6 +148,8 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       orgSettings,
       orderProofRows,
       proofCheckContext,
+      quoteRows,
+      quoteTemplateRows,
     ] = await Promise.all([
       membershipPromise,
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -195,6 +199,10 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       listDealOrderProofs(tenant.id, deal.id),
       // …and what those POs are checked against beyond the amount.
       loadProofCheckContext(tenant.id, deal.id),
+      // Quotes card (0078): the deal's quotes + revisions, and the templates
+      // "New quote" can start from.
+      listQuotesForDeal(tenant.id, deal.id),
+      listQuoteTemplates(tenant.id),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -833,6 +841,20 @@ export default async function DealDetailPage({ params }: { params: Params }) {
               initialRows={valueSplitRows}
               canEdit={canEdit}
               fiscalStartMonth={orgSettings.fiscalYearStartMonth ?? 1}
+            />
+
+            <DealQuotesCard
+              dealId={deal.id}
+              quotes={quoteRows.map((q) => ({
+                id: q.id,
+                quoteNumber: q.quoteNumber,
+                revision: q.revision,
+                status: q.status,
+                totalMinor: q.totalMinor,
+                createdAt: q.createdAt.toISOString(),
+              }))}
+              templates={quoteTemplateRows.map((t) => ({ id: t.id, name: t.name, isDefault: t.isDefault }))}
+              canCreate={can(membership.role, 'manageQuotes')}
             />
 
             <DealDocumentsCard

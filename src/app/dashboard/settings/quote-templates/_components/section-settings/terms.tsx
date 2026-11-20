@@ -1,6 +1,6 @@
 'use client';
 
-import { RichTextEditor } from '../rich-text-editor';
+import { RichTextEditor } from '@/components/quotes/rich-text-editor';
 import { Field, ToggleRow, type SectionFormProps } from './controls';
 
 export function TermsSettings({ section, onChange }: SectionFormProps<'terms'>) {
