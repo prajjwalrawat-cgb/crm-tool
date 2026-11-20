@@ -13,6 +13,7 @@ import {
 } from '../src/lib/quotes/template-schema';
 import { richTextDocSchema, richTextFromPlain, type RichTextDoc } from '../src/lib/quotes/rich-text';
 import { defaultTemplateBody } from '../src/lib/quotes/default-template';
+import { can } from '../src/lib/rbac';
 import { fiscalYearLabel, formatQuoteNumber } from '../src/lib/quotes/numbering';
 
 let exitCode = 0;
@@ -188,6 +189,15 @@ check('fiscalYearLabel start 1 = calendar year', fiscalYearLabel('2026-11-20', 1
 const numFmt = { prefix: 'Q', separator: '/', includeFiscalYear: true, padding: 4 };
 check('formatQuoteNumber with FY', formatQuoteNumber(numFmt, '2026-27', 42) === 'Q/2026-27/0042');
 check('formatQuoteNumber without FY', formatQuoteNumber({ ...numFmt, includeFiscalYear: false }, null, 42) === 'Q/0042');
+
+check('member can manageQuotes', can('member', 'manageQuotes'));
+check('viewer cannot manageQuotes', !can('viewer', 'manageQuotes'));
+check('manager can manageQuotes', can('manager', 'manageQuotes'));
+check('manager cannot manageQuoteTemplates', !can('manager', 'manageQuoteTemplates'));
+check('member cannot manageQuoteTemplates', !can('member', 'manageQuoteTemplates'));
+check('admin can manageQuoteTemplates', can('admin', 'manageQuoteTemplates'));
+check('owner can manageQuoteTemplates', can('owner', 'manageQuoteTemplates'));
+check('viewer cannot manageQuoteTemplates', !can('viewer', 'manageQuoteTemplates'));
 
 for (const x of results) console.log(`${x.ok ? 'PASS' : 'FAIL'}  ${x.name}${!x.ok && x.detail ? `\n      ${x.detail}` : ''}`);
 const failed = results.filter((x) => !x.ok).length;

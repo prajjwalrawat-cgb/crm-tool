@@ -84,6 +84,19 @@ const PERMISSIONS = {
    */
   manageIncentives: ['owner', 'admin'],
   /**
+   * Creating, editing, duplicating, archiving quote templates, choosing the
+   * default, and the quote numbering settings. Admin tier: these set the
+   * look and wording of every outgoing quote.
+   */
+  manageQuoteTemplates: ['owner', 'admin'],
+  /**
+   * Creating and editing quotes, revising sent quotes, re-applying a template.
+   * Same tier as `manageDeals`. Viewers can read and download quotes but not
+   * change them. Setting a deal's amount from a quote additionally requires
+   * `manageDeals` (it patches the deal), enforced in the action.
+   */
+  manageQuotes: ['owner', 'admin', 'manager', 'member'],
+  /**
    * Reading OTHER people's incentive plans and the roll-up. Everyone may read
    * their own (see `lib/incentives/access`); this is the team view, and
    * matches who already sees every rep's targets.
