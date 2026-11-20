@@ -119,6 +119,8 @@ export const dealDocumentCategory = pgEnum('deal_document_category', [
   'purchase_order',
 ]);
 
+export const quoteStatus = pgEnum('quote_status', ['draft', 'sent', 'superseded']);
+
 export type DealApprovalStatus = (typeof dealApprovalStatus.enumValues)[number];
 export type DealTypeEnum = (typeof dealType.enumValues)[number];
 export type MembershipRole = (typeof membershipRole.enumValues)[number];
@@ -132,3 +134,4 @@ export type DealContactRole = (typeof dealContactRole.enumValues)[number];
 export type DealDocumentCategory =
   (typeof dealDocumentCategory.enumValues)[number];
 export type OfferingCategory = (typeof offeringCategory.enumValues)[number];
+export type QuoteStatus = (typeof quoteStatus.enumValues)[number];
