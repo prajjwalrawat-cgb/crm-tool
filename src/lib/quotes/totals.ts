@@ -62,9 +62,11 @@ export function computeQuoteTotals(lines: QuoteLineInput[], overall: OverallDisc
   const base = lines.map((l) => {
     const grossMinor = Math.round(l.quantity * l.rateMinor);
     const lineDiscountMinor = bpsOf(grossMinor, l.discountBps);
+    if (!Number.isSafeInteger(grossMinor)) invalid('line amount is too large');
     return { grossMinor, lineDiscountMinor, amountMinor: grossMinor - lineDiscountMinor };
   });
   const amountSum = base.reduce((s, b) => s + b.amountMinor, 0);
+  if (!Number.isSafeInteger(amountSum)) invalid('quote total is too large');
 
   let overallDiscountMinor = 0;
   if (overall.type === 'amount') {
@@ -78,17 +80,21 @@ export function computeQuoteTotals(lines: QuoteLineInput[], overall: OverallDisc
     throw new QuoteTotalsError('discount_exceeds_subtotal', 'Overall discount exceeds the discounted line total');
   }
 
-  // Proportional allocation; the rounding remainder goes to the largest line (first on a tie).
+  // Proportional allocation. The floor remainder is handed out 1 paise at a time over
+  // lines in descending amount order (earlier line first on a tie), never beyond a
+  // line's own amount, so no line's taxable value goes negative.
   const allocated = base.map((b) =>
     amountSum > 0 && b.amountMinor > 0 ? Number((BigInt(overallDiscountMinor) * BigInt(b.amountMinor)) / BigInt(amountSum)) : 0,
   );
-  const remainder = overallDiscountMinor - allocated.reduce((s, a) => s + a, 0);
-  if (remainder > 0) {
-    let target = 0;
-    base.forEach((b, i) => {
-      if (b.amountMinor > base[target].amountMinor) target = i;
-    });
-    allocated[target] += remainder;
+  let remainder = overallDiscountMinor - allocated.reduce((s, a) => s + a, 0);
+  const order = base.map((_, i) => i).sort((x, y) => base[y].amountMinor - base[x].amountMinor || x - y);
+  while (remainder > 0) {
+    for (const i of order) {
+      if (remainder > 0 && allocated[i] < base[i].amountMinor) {
+        allocated[i] += 1;
+        remainder -= 1;
+      }
+    }
   }
 
   const lineTotals: QuoteLineTotals[] = base.map((b, i) => {
@@ -115,9 +121,11 @@ export function computeQuoteTotals(lines: QuoteLineInput[], overall: OverallDisc
   const lineDiscountMinor = sum((l) => l.lineDiscountMinor);
   const taxableMinor = sum((l) => l.taxableMinor);
   const taxMinor = sum((l) => l.taxMinor);
+  const subtotalMinor = sum((l) => l.grossMinor);
+  if (![subtotalMinor, taxableMinor, taxMinor, taxableMinor + taxMinor].every(Number.isSafeInteger)) invalid('quote total is too large');
   return {
     lines: lineTotals,
-    subtotalMinor: sum((l) => l.grossMinor),
+    subtotalMinor,
     lineDiscountMinor,
     overallDiscountMinor,
     discountMinor: lineDiscountMinor + overallDiscountMinor,

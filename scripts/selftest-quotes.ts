@@ -60,6 +60,18 @@ check('tax groups skip zero-taxable rates', (() => {
   return JSON.stringify(z.taxGroups.map((g) => g.rateBps)) === '[500]';
 })());
 
+const noNeg = (x: ReturnType<typeof computeQuoteTotals>, o: number) =>
+  x.lines.every((l) => l.taxableMinor >= 0) && x.lines.reduce((s, l) => s + l.allocatedDiscountMinor, 0) === o && x.overallDiscountMinor === o;
+check('remainder never makes taxable negative (1-paise lines)', (() => {
+  const x = computeQuoteTotals([1, 2, 3].map(() => ({ quantity: 1, rateMinor: 1, discountBps: 0, taxRateBps: 0 })), { type: 'amount', valueMinor: 2 });
+  return noNeg(x, 2);
+})());
+check('remainder never makes taxable negative (4 x 10000, 39999)', (() => {
+  const x = computeQuoteTotals([1, 2, 3, 4].map(() => ({ quantity: 1, rateMinor: 10_000, discountBps: 0, taxRateBps: 0 })), { type: 'amount', valueMinor: 39_999 });
+  return noNeg(x, 39_999);
+})());
+check('huge quantity throws invalid_input', throwsCode(() => computeQuoteTotals([{ ...A, quantity: 1e300 }], { type: 'none' }), 'invalid_input'));
+
 for (const x of results) console.log(`${x.ok ? 'PASS' : 'FAIL'}  ${x.name}${!x.ok && x.detail ? `\n      ${x.detail}` : ''}`);
 const failed = results.filter((x) => !x.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
