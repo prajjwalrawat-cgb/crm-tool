@@ -33,6 +33,7 @@
     "bench": "tsx scripts/benchmark-queries.ts",
     "selftest:telephony-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-telephony-db.ts",
     "selftest:lead-capture-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-lead-capture-db.ts",
+    "selftest:quotes": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes.ts",
     "selftest:quotes-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes-db.ts",
     "backfill:contact-phones": "tsx scripts/backfill-contact-phones.ts",
     "selftest:reports-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-reports-db.ts",
