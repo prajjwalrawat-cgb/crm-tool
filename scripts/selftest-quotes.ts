@@ -11,7 +11,7 @@ import {
   findUnknownPlaceholders,
   type QuoteTemplateBody,
 } from '../src/lib/quotes/template-schema';
-import { richTextFromPlain, type RichTextDoc } from '../src/lib/quotes/rich-text';
+import { richTextDocSchema, richTextFromPlain, type RichTextDoc } from '../src/lib/quotes/rich-text';
 import { defaultTemplateBody } from '../src/lib/quotes/default-template';
 
 let exitCode = 0;
@@ -121,27 +121,48 @@ check('milestones summing to 9000 rejected', (() => {
   const b = clone();
   const ps = b.sections.find((x) => x.type === 'payment_schedule');
   if (ps?.type !== 'payment_schedule') return false;
-  ps.defaultMilestones = [{ label: 'A', percentBps: 4000 }, { label: 'B', percentBps: 5000 }];
+  ps.settings.defaultMilestones = [{ label: 'A', percentBps: 4000 }, { label: 'B', percentBps: 5000 }];
   return !quoteTemplateBodySchema.safeParse(b).success;
 })());
 check('hidden description column rejected', (() => {
   const b = clone();
   const li = b.sections.find((x) => x.type === 'line_items');
   if (li?.type !== 'line_items') return false;
-  li.columns.find((c) => c.key === 'description')!.visible = false;
+  li.settings.columns.find((c) => c.key === 'description')!.visible = false;
   return !quoteTemplateBodySchema.safeParse(b).success;
 })());
 check('unknown placeholder default rejected, message names it', (() => {
   const b = clone();
   const tx = b.sections.find((x) => x.type === 'text');
   if (tx?.type !== 'text') return false;
-  tx.defaultText = phDoc('deal.amount');
+  tx.settings.defaultText = phDoc('deal.amount');
   const r = quoteTemplateBodySchema.safeParse(b);
   return !r.success && r.error.issues.some((i) => i.message.includes('deal.amount'));
 })());
 check('leftover {{x}} text counts as unknown', findUnknownPlaceholders(richTextFromPlain('Hi {{deal.amount}}')).join() === 'deal.amount');
 check('known placeholder node is not unknown', findUnknownPlaceholders(phDoc('client.name')).length === 0);
-check('richText schema rejects disallowed node', !quoteTemplateBodySchema.safeParse({ ...clone(), sections: [{ id: 'x', type: 'text', enabled: true, title: 't', repEditable: true, defaultText: { type: 'doc', content: [{ type: 'heading', attrs: { level: 1 } }] } }] }).success);
+const txt = (text: string, marks?: { type: string }[]) => ({ type: 'text', text, ...(marks ? { marks } : {}) });
+const validRich = {
+  type: 'doc',
+  content: [
+    { type: 'paragraph', content: [txt('a', [{ type: 'bold' }, { type: 'italic' }]), { type: 'hardBreak' }, { type: 'placeholder', attrs: { key: 'client.name' } }] },
+    { type: 'heading', attrs: { level: 2 }, content: [txt('h')] },
+    { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [txt('b')] }] }] },
+    { type: 'orderedList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [txt('o')] }] }] },
+  ],
+};
+check('richText accepts a valid doc', richTextDocSchema.safeParse(validRich).success);
+check('richText rejects heading level 1', !richTextDocSchema.safeParse({ type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [txt('h')] }] }).success);
+check('richText rejects underline mark', !richTextDocSchema.safeParse({ type: 'doc', content: [{ type: 'paragraph', content: [txt('a', [{ type: 'underline' }])] }] }).success);
+check('richText rejects link mark', !richTextDocSchema.safeParse({ type: 'doc', content: [{ type: 'paragraph', content: [txt('a', [{ type: 'link' }])] }] }).success);
+check('richText accepts TipTap orderedList attrs', richTextDocSchema.safeParse({ type: 'doc', content: [{ type: 'orderedList', attrs: { start: 1, type: null }, content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [txt('o')] }] }] }] }).success);
+check('mergeContentForTemplate ignores previous content of a different type', (() => {
+  const b = clone();
+  const tx = b.sections.find((x) => x.type === 'text')!;
+  const m = mergeContentForTemplate(b, { [tx.id]: { terms: richTextFromPlain('wrong shape') } });
+  return m[tx.id].text !== undefined && m[tx.id].terms === undefined;
+})());
+check('mergeContentForTemplate ignores inherited keys', !!mergeContentForTemplate(clone(), JSON.parse('{"__proto__":{"x":1}}')));
 check('resolvePlaceholders fills and blanks', (() => {
   const out = resolvePlaceholders(phDoc('client.name', 'client.contact'), { 'client.name': 'Acme', 'client.contact': null });
   const txt = plainText(out);

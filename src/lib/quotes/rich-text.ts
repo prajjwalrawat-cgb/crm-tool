@@ -14,7 +14,9 @@ export type RichTextInline = RichTextText | RichTextHardBreak | RichTextPlacehol
 export type RichTextParagraph = { type: 'paragraph'; content?: RichTextInline[] };
 export type RichTextHeading = { type: 'heading'; attrs: { level: 2 | 3 }; content?: RichTextInline[] };
 export type RichTextListItem = { type: 'listItem'; content: RichTextBlock[] };
-export type RichTextList = { type: 'bulletList' | 'orderedList'; content: RichTextListItem[] };
+export type RichTextList =
+  | { type: 'bulletList'; content: RichTextListItem[] }
+  | { type: 'orderedList'; attrs?: { start?: number; type?: string | null }; content: RichTextListItem[] };
 export type RichTextBlock = RichTextParagraph | RichTextHeading | RichTextList;
 export type RichTextDoc = { type: 'doc'; content: RichTextBlock[] };
 
@@ -41,7 +43,14 @@ const blockSchema: z.ZodType<RichTextBlock> = z.lazy(() => {
     paragraphSchema,
     headingSchema,
     z.object({ type: z.literal('bulletList'), content: z.array(listItem).min(1) }).strict(),
-    z.object({ type: z.literal('orderedList'), content: z.array(listItem).min(1) }).strict(),
+    z
+      .object({
+        type: z.literal('orderedList'),
+        // TipTap OrderedList getJSON() emits attrs { start: 1, type: null }.
+        attrs: z.object({ start: z.number().int().optional(), type: z.string().nullable().optional() }).strict().optional(),
+        content: z.array(listItem).min(1),
+      })
+      .strict(),
   ]);
 });
 
