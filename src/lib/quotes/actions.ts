@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { auth } from '@/lib/auth/server';
 import { runWithTenantContext } from '@/lib/db-context';
 import { requireMembership } from '@/lib/membership';
+import { logger } from '@/lib/observability/logger';
 import { can, type Permission } from '@/lib/rbac';
 import { deleteDealDocument, isStorageConfigured, uploadDealDocument } from '@/lib/storage/supabase';
 import { requireTenant } from '@/lib/tenant';
@@ -30,7 +31,7 @@ import type { QuoteRenderInput } from './pdf/context';
 import { renderQuotePdfServer } from './pdf/render-server';
 import { buildQuoteRenderInput } from './render-input';
 import { quoteDraftInputSchema, quoteSettingsInputSchema } from './schema';
-import { markQuoteSent, type SendDeps } from './send';
+import { markQuoteSent, sendFailure, type SendDeps } from './send';
 import type { QuoteDetail } from './types';
 
 export type QuoteActionFailure = {
@@ -264,11 +265,23 @@ function serverSendDeps(tenantId: string): SendDeps {
 /** Render the PDF, file it on the deal as a proposal and lock the quote. */
 export async function markQuoteSentAction(id: string): Promise<QuoteActionResult<{ documentId: string }>> {
   if (!idSchema.safeParse(id).success) return invalidId('quote');
-  if (!isStorageConfigured()) {
-    return { ok: false, error: 'Document storage is not configured. Add SUPABASE_SERVICE_ROLE_KEY.' };
-  }
-  return gated(['manageQuotes'], async ({ tenantId, userId }) => {
-    const { documentId } = await markQuoteSent(tenantId, userId, id, serverSendDeps(tenantId));
+  return gated<{ documentId: string }>(['manageQuotes'], async ({ tenantId, userId }) => {
+    if (!isStorageConfigured()) {
+      return { ok: false, error: 'Document storage is not configured. Add SUPABASE_SERVICE_ROLE_KEY.' };
+    }
+    let documentId: string;
+    try {
+      ({ documentId } = await markQuoteSent(tenantId, userId, id, serverSendDeps(tenantId)));
+    } catch (err) {
+      const failure = sendFailure(err);
+      if (failure.unexpected) {
+        logger.error('quote send failed', {
+          quoteId: id,
+          error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+        });
+      }
+      return { ok: false, error: failure.error };
+    }
     revalidatePath(QUOTES_PATH);
     const q = await getQuote(tenantId, id);
     if (q) revalidatePath(dealPath(q.dealId));

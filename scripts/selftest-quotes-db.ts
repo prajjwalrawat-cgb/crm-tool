@@ -431,7 +431,7 @@ async function sendChecks(tidA: string): Promise<void> {
   const { db } = await import("../src/db/index");
   const { runWithSystemContext, tenantTransaction } = await import("../src/lib/db-context");
   const q = await import("../src/lib/quotes/queries");
-  const { markQuoteSent } = await import("../src/lib/quotes/send");
+  const { markQuoteSent, sendFailure, SEND_FAILED_MESSAGE } = await import("../src/lib/quotes/send");
   const { buildQuoteRenderInput } = await import("../src/lib/quotes/render-input");
   const { protectedDocumentReason } = await import("../src/lib/deals/protected-documents");
   type SendDeps = import("../src/lib/quotes/send").SendDeps;
@@ -527,6 +527,32 @@ async function sendChecks(tidA: string): Promise<void> {
         ok.calls.upload[0]!.contentType === "application/pdf" &&
         ok.calls.removed.length === 0,
       JSON.stringify({ status: after?.status, sent, docs, calls: ok.calls }),
+    );
+
+    const [stamp] = (await db.execute(sql`
+      SELECT updated_by, (updated_at = sent_at) AS same FROM quotes WHERE id = ${draftId}
+    `)) as unknown as Array<{ updated_by: string; same: boolean }>;
+    check(
+      "markQuoteSent stamps updated_at (= sent_at) and updated_by",
+      stamp?.updated_by === creatorId && stamp.same === true,
+      JSON.stringify(stamp),
+    );
+
+    // Error mapping used by markQuoteSentAction.
+    const frozenF = sendFailure(new q.QuoteFrozenError());
+    const ruleF = sendFailure(new q.QuoteRuleError("Add at least one line item before sending."));
+    const notFoundF = sendFailure(new q.QuoteNotFoundError());
+    const storageF = sendFailure(new Error("Storage upload failed: bucket missing"));
+    const oddF = sendFailure("boom");
+    check(
+      "sendFailure: quote errors keep their message; render/storage/other errors get the generic message, flagged unexpected",
+      frozenF.error === new q.QuoteFrozenError().message && !frozenF.unexpected &&
+        ruleF.error === "Add at least one line item before sending." && !ruleF.unexpected &&
+        notFoundF.error === "Quote not found." && !notFoundF.unexpected &&
+        storageF.error === SEND_FAILED_MESSAGE && storageF.unexpected &&
+        oddF.error === SEND_FAILED_MESSAGE && oddF.unexpected &&
+        SEND_FAILED_MESSAGE === "Could not create the quote PDF. Try again.",
+      JSON.stringify({ frozenF, ruleF, notFoundF, storageF, oddF }),
     );
 
     // Second send: frozen.

@@ -74,7 +74,14 @@ export async function markQuoteSent(
 
       await tx
         .update(quotes)
-        .set({ status: 'sent', sentAt: sql`now()`, sentBy: userId, pdfDocumentId: doc.id })
+        .set({
+          status: 'sent',
+          sentAt: sql`now()`,
+          sentBy: userId,
+          pdfDocumentId: doc.id,
+          updatedAt: sql`now()`,
+          updatedBy: userId,
+        })
         .where(and(eq(quotes.tenantId, tenantId), eq(quotes.id, id)));
       return { documentId: doc.id };
     });
@@ -82,4 +89,18 @@ export async function markQuoteSent(
     await deps.removeUpload(uploaded.path);
     throw err;
   }
+}
+
+export const SEND_FAILED_MESSAGE = 'Could not create the quote PDF. Try again.';
+
+/**
+ * What the user sees when markQuoteSent throws. Quote rule errors keep their
+ * own message; anything else (render, storage, database) gets a generic one
+ * and `unexpected` so the caller logs the cause.
+ */
+export function sendFailure(err: unknown): { error: string; unexpected: boolean } {
+  if (err instanceof QuoteFrozenError || err instanceof QuoteNotFoundError || err instanceof QuoteRuleError) {
+    return { error: err.message, unexpected: false };
+  }
+  return { error: SEND_FAILED_MESSAGE, unexpected: true };
 }
