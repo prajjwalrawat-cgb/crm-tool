@@ -74,9 +74,10 @@ export function decideCompany(a: {
   matches: Array<{ id: string; label: string; sublabel: string | null; kind: 'exact' | 'fuzzy' }>;
   choice: Choice;
 }): Decision {
+  // An answer naming a company is used as is (actions.ts checks it is still here).
+  if (a.choice && a.choice !== 'new') return { kind: 'use', id: a.choice.id };
   if (a.matches.length === 0) return { kind: 'create', override: false };
   if (a.choice === 'new') return { kind: 'create', override: true };
-  if (a.choice) return { kind: 'use', id: a.choice.id };
   const options = a.matches.slice(0, MAX_OPTIONS).map((m) => ({
     id: m.id,
     label: m.label,

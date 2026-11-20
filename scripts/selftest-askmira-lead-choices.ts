@@ -72,6 +72,10 @@ const asNew = decideCompany({ name: 'Siemens', matches: company(1), choice: 'new
 check('company "new" creates with override', asNew.kind === 'create' && asNew.override);
 const asUse = decideCompany({ name: 'Siemens', matches: company(1), choice: { id: ID } });
 check('company id uses it', asUse.kind === 'use' && asUse.id === ID);
+const idNoMatch = decideCompany({ name: 'Siemens', matches: [], choice: { id: ID } });
+check('company id with no matches still uses it', idNoMatch.kind === 'use' && idNoMatch.id === ID);
+const newNoMatch = decideCompany({ name: 'Siemens', matches: [], choice: 'new' });
+check('company "new" with no matches needs no override', newNoMatch.kind === 'create' && !newNoMatch.override);
 
 // decideContact
 const base = { displayName: 'Viswa Bala', email: 'viswa@siemens.test', hasDetails: true, nameMatches: [] };
