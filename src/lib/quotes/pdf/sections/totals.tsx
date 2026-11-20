@@ -15,14 +15,17 @@ export function TotalsSectionPdf({ section, ctx }: { section: TotalsSection; ctx
   const t = quote.totals;
   const rows: Row[] = [];
 
-  if (settings.showSubtotal) rows.push({ label: 'Subtotal', minor: t.subtotalMinor });
+  // Discounts hidden: the subtotal printed is the taxable value (after
+  // discounts), so Subtotal + GST still adds up to the Total.
+  const hidden = settings.discountDisplay === 'hidden';
+  if (settings.showSubtotal) rows.push({ label: 'Subtotal', minor: hidden ? t.taxableMinor : t.subtotalMinor });
   if (settings.discountDisplay === 'combined' && t.discountMinor > 0) {
     rows.push({ label: 'Discount', minor: -t.discountMinor });
   } else if (settings.discountDisplay === 'split') {
     if (t.lineDiscountMinor > 0) rows.push({ label: 'Line discounts', minor: -t.lineDiscountMinor });
     if (t.overallDiscountMinor > 0) rows.push({ label: 'Overall discount', minor: -t.overallDiscountMinor });
   }
-  if (settings.discountDisplay !== 'hidden' && t.discountMinor > 0) rows.push({ label: 'Taxable value', minor: t.taxableMinor });
+  if (!hidden && t.discountMinor > 0) rows.push({ label: 'Taxable value', minor: t.taxableMinor });
 
   if (settings.showTaxBreakdown) {
     const states = supplyStateCodes(quote);

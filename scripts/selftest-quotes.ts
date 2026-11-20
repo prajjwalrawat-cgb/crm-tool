@@ -9,8 +9,16 @@ import {
   defaultContentFor,
   mergeContentForTemplate,
   findUnknownPlaceholders,
+  isLockedContentSection,
+  effectiveMilestones,
+  effectiveSectionTerms,
+  effectiveSectionText,
+  quoteSectionSchema,
+  type QuoteContent,
   type QuoteTemplateBody,
+  type SectionContent,
 } from '../src/lib/quotes/template-schema';
+import { quoteContentSchema } from '../src/lib/quotes/schema';
 import { richTextDocSchema, richTextFromPlain, type RichTextDoc } from '../src/lib/quotes/rich-text';
 import { defaultTemplateBody } from '../src/lib/quotes/default-template';
 import { can } from '../src/lib/rbac';
@@ -84,6 +92,10 @@ check('remainder never makes taxable negative (4 x 10000, 39999)', (() => {
 })());
 check('huge quantity throws invalid_input', throwsCode(() => computeQuoteTotals([{ ...A, quantity: 1e300 }], { type: 'none' }), 'invalid_input'));
 
+check('qty x rate in integer maths: 1.005 x 100 = 101 (half up of 100.5)', computeQuoteTotals([{ quantity: 1.005, rateMinor: 100, discountBps: 0, taxRateBps: 0 }], { type: 'none' }).subtotalMinor === 101);
+check('qty x rate: 0.015 x 100 = 2 (1.5 half up)', computeQuoteTotals([{ quantity: 0.015, rateMinor: 100, discountBps: 0, taxRateBps: 0 }], { type: 'none' }).subtotalMinor === 2);
+check('qty x rate: large exact product', computeQuoteTotals([{ quantity: 99_999.999, rateMinor: 99_999_999, discountBps: 0, taxRateBps: 0 }], { type: 'none' }).subtotalMinor === 9_999_999_800_000);
+check('quantity with 4 decimals throws invalid_input', throwsCode(() => computeQuoteTotals([{ ...A, quantity: 1.0005 }], { type: 'none' }), 'invalid_input'));
 check('quantity x rate overflowing to Infinity throws invalid_input', throwsCode(() => computeQuoteTotals([{ ...A, quantity: 1e200, rateMinor: 1e200 }], { type: 'none' }), 'invalid_input'));
 
 
@@ -180,6 +192,78 @@ check('mergeContentForTemplate keeps, drops, adds', (() => {
   delete prev[b.sections.find((x) => x.type === 'terms')!.id];
   const m = mergeContentForTemplate(b, prev);
   return m[tx.id].text === edited && !('gone' in m) && !!m[b.sections.find((x) => x.type === 'terms')!.id]?.terms;
+})());
+
+// ---- Final review: locked (repEditable: false) sections always use the template default ----
+const lockedClone = (): QuoteTemplateBody => {
+  const b = clone();
+  for (const x of b.sections) if (x.type === 'text' || x.type === 'terms' || x.type === 'payment_schedule') x.settings.repEditable = false;
+  return b;
+};
+check('isLockedContentSection: only text/terms/payment_schedule with repEditable false', (() => {
+  const unlocked = clone().sections.filter(isLockedContentSection).length === 0;
+  const locked = lockedClone().sections.filter(isLockedContentSection).map((x) => x.type).sort().join();
+  return unlocked && locked === 'payment_schedule,terms,text';
+})());
+check('mergeContentForTemplate: rep content for locked sections is replaced by the defaults', (() => {
+  const b = lockedClone();
+  const forged: QuoteContent = Object.fromEntries(
+    b.sections.flatMap((x): [string, SectionContent][] =>
+      x.type === 'text' ? [[x.id, { text: richTextFromPlain('FORGED') }]]
+      : x.type === 'terms' ? [[x.id, { terms: richTextFromPlain('FORGED') }]]
+      : x.type === 'payment_schedule' ? [[x.id, { milestones: [{ label: 'FORGED', percentBps: 10_000 }] }]]
+      : [],
+    ),
+  );
+  const m = mergeContentForTemplate(b, forged);
+  return !JSON.stringify(m).includes('FORGED') && JSON.stringify(m) === JSON.stringify(defaultContentFor(b));
+})());
+check('defaultContentFor: locked sections carry the template defaults', (() => {
+  const b = lockedClone();
+  const c = defaultContentFor(b);
+  const terms = b.sections.find((x) => x.type === 'terms');
+  return terms?.type === 'terms' && JSON.stringify(c[terms.id].terms) === JSON.stringify(terms.settings.defaultText);
+})());
+check('effective* helpers: rep content when editable, default when locked', (() => {
+  const open = clone();
+  const locked = lockedClone();
+  const pick = <T extends QuoteTemplateBody['sections'][number]['type']>(b: QuoteTemplateBody, t: T) =>
+    b.sections.find((x) => x.type === t) as Extract<QuoteTemplateBody['sections'][number], { type: T }>;
+  const rep = richTextFromPlain('rep');
+  const ms = [{ label: 'All', percentBps: 10_000 }];
+  const content = { intro: { text: rep }, terms: { terms: rep }, payment_schedule: { milestones: ms } };
+  return (
+    effectiveSectionText(pick(open, 'text'), content) === rep &&
+    effectiveSectionTerms(pick(open, 'terms'), content) === rep &&
+    effectiveMilestones(pick(open, 'payment_schedule'), content) === ms &&
+    effectiveSectionText(pick(locked, 'text'), content) === pick(locked, 'text').settings.defaultText &&
+    effectiveSectionTerms(pick(locked, 'terms'), content) === pick(locked, 'terms').settings.defaultText &&
+    effectiveMilestones(pick(locked, 'payment_schedule'), content) === pick(locked, 'payment_schedule').settings.defaultMilestones &&
+    effectiveSectionText(pick(open, 'text'), {}) === pick(open, 'text').settings.defaultText
+  );
+})());
+
+// ---- Final review: quote content milestones must be non-empty and sum to 10000 bps ----
+const msIssue = (milestones: { label: string; percentBps: number }[]) => {
+  const r = quoteContentSchema.safeParse({ ps: { milestones } });
+  return r.success ? null : r.error.issues.map((i) => i.path.join('.')).join('|');
+};
+check('content milestones 50/50/50 rejected at ps.milestones', msIssue([{ label: 'a', percentBps: 5000 }, { label: 'b', percentBps: 5000 }, { label: 'c', percentBps: 5000 }]) === 'ps.milestones');
+check('content milestones 30/30 rejected at ps.milestones', msIssue([{ label: 'a', percentBps: 3000 }, { label: 'b', percentBps: 3000 }]) === 'ps.milestones');
+check('content milestones [] rejected at ps.milestones', msIssue([]) === 'ps.milestones');
+check('content milestones 50/50 accepted', msIssue([{ label: 'a', percentBps: 5000 }, { label: 'b', percentBps: 5000 }]) === null);
+check('content without milestones accepted', quoteContentSchema.safeParse({ t: { text: richTextFromPlain('x') } }).success);
+
+// ---- Final review: header seller email/phone are not offered (never printed) but still parse ----
+check('starter header shows no seller email/phone', (() => {
+  const h = defaultTemplateBody().sections.find((x) => x.type === 'header');
+  return h?.type === 'header' && !h.settings.showSellerFields.some((f) => f === 'email' || f === 'phone');
+})());
+check('header schema still accepts seller email/phone (older templates)', (() => {
+  const h = structuredClone(defaultTemplateBody().sections.find((x) => x.type === 'header')!);
+  if (h.type !== 'header') return false;
+  h.settings.showSellerFields = ['gstin', 'email', 'phone'];
+  return quoteSectionSchema.safeParse(h).success;
 })());
 
 check('fiscalYearLabel 2026-11-20 start 4 = 2026-27', fiscalYearLabel('2026-11-20', 4) === '2026-27');

@@ -12,7 +12,9 @@ import { registerQuoteFonts } from '../src/lib/quotes/pdf/fonts';
 import { QuoteDocument, type QuoteRenderInput } from '../src/lib/quotes/pdf/quote-document';
 import { renderQuotePdfServer } from '../src/lib/quotes/pdf/render-server';
 import { sampleRenderInput } from '../src/lib/quotes/pdf/sample-data';
+import { richTextFromPlain } from '../src/lib/quotes/rich-text';
 import type { QuoteTemplateBody } from '../src/lib/quotes/template-schema';
+import { computeQuoteTotals } from '../src/lib/quotes/totals';
 
 let exitCode = 0;
 const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
@@ -125,6 +127,101 @@ async function main(): Promise<void> {
     const r = await render(sampleRenderInput(b));
     check(`${fontFamily} renders ₹`, r.text.includes('₹'));
   }
+
+  // ---- Final review fixes ----
+  check('formatBps: 18%', formatBps(1800) === '18%');
+  check('formatBps: 2.5%', formatBps(250) === '2.5%');
+  check('formatBps: 3 decimals for half of a 0.25% slab', formatBps(12.5) === '0.125%', formatBps(12.5));
+  check('formatBps: trailing zeros trimmed', formatBps(150) === '1.5%' && formatBps(0) === '0%');
+  const slab = await render(
+    sampleRenderInput(defaultTemplateBody(), {
+      lines: [{ description: 'Rough diamonds', hsnSac: '7102', unit: 'Ct', quantity: 1, rateMinor: 1_000_000, discountBps: 0, taxRateBps: 25, groupLabel: null }],
+    }),
+  );
+  check('0.25% slab intra-state prints CGST @ 0.125% and SGST @ 0.125%', slab.text.includes('CGST @ 0.125%') && slab.text.includes('SGST @ 0.125%'));
+
+  // Totals rows per discount display. The sample has a 10% line discount;
+  // add an overall discount so "split" has both rows.
+  const withOverall = (display: 'combined' | 'split' | 'hidden') => {
+    const b = defaultTemplateBody();
+    for (const s of b.sections) if (s.type === 'totals') s.settings.discountDisplay = display;
+    const input = sampleRenderInput(b);
+    const lines = input.quote.items.map((i) => ({ quantity: Number(i.quantity), rateMinor: i.rateMinor, discountBps: i.discountBps, taxRateBps: i.taxRateBps }));
+    const t = computeQuoteTotals(lines, { type: 'amount', valueMinor: 1_000_000 });
+    input.quote = { ...input.quote, overallDiscountType: 'amount', overallDiscountValue: 1_000_000, totals: t, items: input.quote.items.map((i, k) => ({ ...i, totals: t.lines[k] })) };
+    return input;
+  };
+  const rupees = (s: string) => Math.round(Number(s.replace(/,/g, '')) * 100);
+  const totalsRows = (text: string) =>
+    [...text.matchAll(/(Subtotal|Line discounts|Overall discount|Discount|Taxable value|[CSI]GST @ [\d.]+%|Total) (-?)₹([\d,]+\.\d{2})/g)].map((m) => ({
+      label: m[1],
+      minor: (m[2] ? -1 : 1) * rupees(m[3]),
+    }));
+
+  const hiddenIn = withOverall('hidden');
+  const ht = hiddenIn.quote.totals;
+  const hid = totalsRows((await render(hiddenIn)).text);
+  const hSub = hid.find((r) => r.label === 'Subtotal');
+  const hTax = hid.filter((r) => /GST @/.test(r.label)).reduce((a, r) => a + r.minor, 0);
+  const hTotal = hid.find((r) => r.label === 'Total');
+  check(
+    'hidden discount: printed Subtotal + GST rows = Total, Subtotal is the taxable value, no discount rows',
+    ht.discountMinor > 0 &&
+      hSub?.minor === ht.taxableMinor &&
+      hTotal?.minor === ht.totalMinor &&
+      hSub.minor + hTax === hTotal.minor &&
+      !hid.some((r) => /discount|Taxable value/i.test(r.label)),
+    JSON.stringify(hid),
+  );
+
+  const splitIn = withOverall('split');
+  const st = splitIn.quote.totals;
+  const spl = totalsRows((await render(splitIn)).text);
+  const val = (rows: typeof spl, label: string) => rows.find((r) => r.label === label)?.minor;
+  check(
+    'split discount: Subtotal, Line discounts, Overall discount, Taxable value rows add up',
+    val(spl, 'Subtotal') === st.subtotalMinor &&
+      val(spl, 'Line discounts') === -st.lineDiscountMinor &&
+      val(spl, 'Overall discount') === -st.overallDiscountMinor &&
+      val(spl, 'Taxable value') === st.taxableMinor &&
+      st.subtotalMinor - st.lineDiscountMinor - st.overallDiscountMinor === st.taxableMinor &&
+      val(spl, 'Discount') === undefined,
+    JSON.stringify(spl),
+  );
+
+  const combIn = withOverall('combined');
+  const ct = combIn.quote.totals;
+  const comb = totalsRows((await render(combIn)).text);
+  const combTax = comb.filter((r) => /GST @/.test(r.label)).reduce((a, r) => a + r.minor, 0);
+  check(
+    'combined discount: one Discount row, Taxable value + GST = Total',
+    val(comb, 'Subtotal') === ct.subtotalMinor &&
+      val(comb, 'Discount') === -ct.discountMinor &&
+      val(comb, 'Line discounts') === undefined &&
+      val(comb, 'Taxable value') === ct.taxableMinor &&
+      ct.taxableMinor + combTax === val(comb, 'Total'),
+    JSON.stringify(comb),
+  );
+
+  // Locked sections print the template default whatever the quote content says.
+  const lockedBody = defaultTemplateBody();
+  for (const s of lockedBody.sections) {
+    if (s.type === 'text' || s.type === 'terms' || s.type === 'payment_schedule') s.settings.repEditable = false;
+  }
+  const lockedIn = sampleRenderInput(lockedBody);
+  lockedIn.quote.content = {
+    intro: { text: richTextFromPlain('FORGED intro') },
+    terms: { terms: richTextFromPlain('FORGED terms') },
+    payment_schedule: { milestones: [{ label: 'FORGED milestone', percentBps: 10_000 }] },
+  };
+  const lk = await render(lockedIn);
+  check(
+    'locked text/terms/payment schedule print the template defaults, not quote content',
+    !lk.text.includes('FORGED') && lk.text.includes('Please find our quotation') && lk.text.includes('Prices are in INR') && lk.text.includes('Advance with order'),
+  );
+  const openIn = sampleRenderInput(defaultTemplateBody());
+  openIn.quote.content = { ...openIn.quote.content, terms: { terms: richTextFromPlain('Rep terms') } };
+  check('editable terms print the quote content', (await render(openIn)).text.includes('Rep terms'));
 }
 
 main()

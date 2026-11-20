@@ -22,7 +22,7 @@ export function defaultTemplateBody(): QuoteTemplateBody {
           logoPosition: "left",
           logoHeightMm: 18,
           titleText: "Quotation",
-          showSellerFields: ["gstin", "address", "email", "phone"],
+          showSellerFields: ["gstin", "address"],
           metaFields: ["number", "date", "valid_until", "rep"],
         },
       },

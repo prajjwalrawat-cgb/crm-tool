@@ -157,6 +157,7 @@ async function main() {
 
     await dataLayerChecks(tidA, tidB);
     await sendChecks(tidA);
+    await fixWaveChecks(tidA);
   } catch (err) {
     check("database checks ran", false, String(err));
   } finally {
@@ -643,6 +644,227 @@ async function sendChecks(tidA: string): Promise<void> {
   } finally {
     await db.execute(sql`DELETE FROM users WHERE id = ${creatorId}`);
   }
+}
+
+/** Final-review fixes: locked sections, milestone sums on send, number collisions. */
+async function fixWaveChecks(tidA: string): Promise<void> {
+  const { db } = await import("../src/db/index");
+  const { runWithSystemContext } = await import("../src/lib/db-context");
+  const q = await import("../src/lib/quotes/queries");
+  const { markQuoteSent } = await import("../src/lib/quotes/send");
+  const { buildQuoteRenderInput } = await import("../src/lib/quotes/render-input");
+  const { renderQuotePdfServer } = await import("../src/lib/quotes/pdf/render-server");
+  const { defaultTemplateBody } = await import("../src/lib/quotes/default-template");
+  const { richTextFromPlain } = await import("../src/lib/quotes/rich-text");
+  const { extractText } = await import("unpdf");
+  type SendDeps = import("../src/lib/quotes/send").SendDeps;
+  type QuoteDraftInput = import("../src/lib/quotes/schema").QuoteDraftInput;
+  type QuoteDetail = import("../src/lib/quotes/types").QuoteDetail;
+  const USER = "selftest-user";
+  const asA = <T>(fn: () => Promise<T>) => runWithSystemContext(tidA, fn);
+  const errorOf = async (fn: () => Promise<unknown>): Promise<unknown> => {
+    try {
+      await fn();
+      return null;
+    } catch (err) {
+      return err;
+    }
+  };
+  const pdfText = async (id: string) => {
+    const input = (await asA(() => buildQuoteRenderInput(tidA, id)))!;
+    const bytes = await renderQuotePdfServer(input);
+    const { text } = await extractText(bytes, { mergePages: true });
+    return text.replace(/\s+/g, " ");
+  };
+  const uploads: string[] = [];
+  const deps: SendDeps = {
+    render: async () => new Uint8Array([37, 80, 68, 70]),
+    upload: async (i) => {
+      uploads.push(i.fileName);
+      return { url: "u", path: "p" };
+    },
+    removeUpload: async () => {},
+  };
+
+  const [deal] = (await db.execute(sql`
+    INSERT INTO deals (tenant_id, name, company_name) VALUES (${tidA}, 'Fix wave deal', 'Initech') RETURNING id
+  `)) as unknown as Array<{ id: string }>;
+  const dealId = deal!.id;
+  const draftOf = (cur: QuoteDetail, content = cur.content): QuoteDraftInput => ({
+    quoteDate: cur.quoteDate,
+    validUntil: cur.validUntil,
+    sellerProfileId: null,
+    buyer: cur.buyer,
+    consignee: null,
+    items: [{ description: "Widget", quantity: 1, rateMinor: 10_000, discountBps: 0, taxRateBps: 1800 }],
+    overallDiscount: { type: "none" },
+    content,
+  });
+
+  // A template whose terms are locked (repEditable false).
+  const lockedBody = defaultTemplateBody();
+  for (const s of lockedBody.sections) {
+    if (s.type === "terms") {
+      s.settings.repEditable = false;
+      s.settings.defaultText = richTextFromPlain("Locked terms version one.");
+    }
+  }
+  const { id: lockedTplId } = await asA(() =>
+    q.saveQuoteTemplate(tidA, USER, { name: "Locked terms", body: lockedBody }),
+  );
+  const { id: quoteId } = await asA(() => q.createQuoteFromDeal(tidA, USER, { dealId, templateId: lockedTplId }));
+  const fresh = (await asA(() => q.getQuote(tidA, quoteId)))!;
+
+  // (a) Forged content for the locked section is ignored on save.
+  const forged = {
+    ...fresh.content,
+    terms: { terms: richTextFromPlain("FORGED terms the template does not allow.") },
+    intro: { text: richTextFromPlain("Rep-written intro.") },
+  };
+  const saved = await asA(() => q.updateQuoteDraft(tidA, USER, quoteId, draftOf(fresh, forged)));
+  const savedJson = JSON.stringify(saved.content);
+  const textA = await pdfText(quoteId);
+  check(
+    "repEditable: forged content for a locked terms section is not stored or printed; editable intro is kept",
+    !savedJson.includes("FORGED") &&
+      savedJson.includes("Locked terms version one.") &&
+      savedJson.includes("Rep-written intro.") &&
+      !textA.includes("FORGED") &&
+      textA.includes("Locked terms version one.") &&
+      textA.includes("Rep-written intro."),
+    JSON.stringify({ savedJson: savedJson.slice(0, 300), textA: textA.slice(0, 300) }),
+  );
+
+  // Content written straight to the row (e.g. an older draft) still prints the snapshot default.
+  await db.execute(sql`
+    UPDATE quotes SET content = jsonb_set(content, '{terms}', ${JSON.stringify({ terms: richTextFromPlain("STALE row terms.") })}::jsonb)
+    WHERE id = ${quoteId}
+  `);
+  const textStale = await pdfText(quoteId);
+  check(
+    "repEditable: the PDF uses the snapshot default for a locked section whatever the stored content",
+    !textStale.includes("STALE row terms.") && textStale.includes("Locked terms version one."),
+    textStale.slice(0, 300),
+  );
+
+  // (b) Admin changes the locked default; the rep re-applies and gets it.
+  const v2 = structuredClone(lockedBody);
+  for (const s of v2.sections) if (s.type === "terms") s.settings.defaultText = richTextFromPlain("Locked terms version two.");
+  await asA(() => q.saveQuoteTemplate(tidA, USER, { id: lockedTplId, name: "Locked terms", body: v2 }));
+  await asA(() => q.reapplyTemplate(tidA, USER, quoteId));
+  const reapplied = (await asA(() => q.getQuote(tidA, quoteId)))!;
+  const reJson = JSON.stringify(reapplied.content);
+  const textB = await pdfText(quoteId);
+  check(
+    "reapplyTemplate: a changed locked terms default is stored and printed; the rep's intro survives",
+    reJson.includes("Locked terms version two.") &&
+      !reJson.includes("version one") &&
+      !reJson.includes("STALE") &&
+      reJson.includes("Rep-written intro.") &&
+      textB.includes("Locked terms version two.") &&
+      !textB.includes("version one"),
+    JSON.stringify({ reJson: reJson.slice(0, 300) }),
+  );
+
+  // (d) The quote's own template archived: re-apply falls back to the tenant default.
+  const [def] = (await db.execute(sql`
+    SELECT id FROM quote_templates WHERE tenant_id = ${tidA} AND is_default AND archived_at IS NULL
+  `)) as unknown as Array<{ id: string }>;
+  await asA(() => q.archiveQuoteTemplate(tidA, lockedTplId));
+  await asA(() => q.reapplyTemplate(tidA, USER, quoteId));
+  const fellBack = (await asA(() => q.getQuote(tidA, quoteId)))!;
+  const fbTerms = fellBack.templateSnapshot.sections.find((s) => s.type === "terms");
+  check(
+    "reapplyTemplate: with the quote's template archived, it re-snapshots the default template",
+    !!def &&
+      fellBack.templateId === def.id &&
+      fbTerms?.type === "terms" &&
+      fbTerms.settings.repEditable === true &&
+      // terms are editable in the default, so the stored text carries over
+      JSON.stringify(fellBack.content).includes("Locked terms version two."),
+    JSON.stringify({ templateId: fellBack.templateId, def }),
+  );
+
+  // (c) Re-apply on a sent quote is refused.
+  await asA(() => markQuoteSent(tidA, USER, quoteId, deps));
+  check(
+    "reapplyTemplate on a sent quote throws QuoteFrozenError",
+    (await errorOf(() => asA(() => q.reapplyTemplate(tidA, USER, quoteId)))) instanceof q.QuoteFrozenError,
+  );
+
+  // Milestones: updateQuoteDraft rejects a schedule that doesn't sum to 100%.
+  const { id: msId } = await asA(() => q.createQuoteFromDeal(tidA, USER, { dealId }));
+  const msQuote = (await asA(() => q.getQuote(tidA, msId)))!;
+  const psId = msQuote.templateSnapshot.sections.find((s) => s.type === "payment_schedule")!.id;
+  const badMs = await errorOf(() =>
+    asA(() =>
+      q.updateQuoteDraft(
+        tidA,
+        USER,
+        msId,
+        draftOf(msQuote, {
+          ...msQuote.content,
+          [psId]: {
+            milestones: [
+              { label: "A", percentBps: 5000 },
+              { label: "B", percentBps: 5000 },
+              { label: "C", percentBps: 5000 },
+            ],
+          },
+        }),
+      ),
+    ),
+  );
+  const badPaths = ((badMs as { issues?: Array<{ path: unknown[] }> } | null)?.issues ?? []).map((i) => i.path.join("."));
+  check(
+    "updateQuoteDraft: milestones 50/50/50 are a field error on content.<id>.milestones",
+    badPaths.includes(`content.${psId}.milestones`),
+    JSON.stringify(badPaths),
+  );
+
+  // markQuoteSent refuses an enabled schedule whose effective milestones don't sum to 100%.
+  await asA(() => q.updateQuoteDraft(tidA, USER, msId, draftOf(msQuote)));
+  await db.execute(sql`
+    UPDATE quotes SET content = jsonb_set(content, ${`{${psId}}`}::text[],
+      ${JSON.stringify({ milestones: [{ label: "A", percentBps: 3000 }, { label: "B", percentBps: 3000 }] })}::jsonb)
+    WHERE id = ${msId}
+  `);
+  const before = uploads.length;
+  const sendErr = await errorOf(() => asA(() => markQuoteSent(tidA, USER, msId, deps)));
+  const msAfter = await asA(() => q.getQuote(tidA, msId));
+  check(
+    "markQuoteSent: a payment schedule summing to 60% throws QuoteRuleError before upload; quote stays draft",
+    sendErr instanceof q.QuoteRuleError &&
+      sendErr.message.includes("100%") &&
+      uploads.length === before &&
+      msAfter?.status === "draft",
+    String(sendErr),
+  );
+
+  // Numbering: numbers already taken (e.g. after a format change) are skipped.
+  const takeNumber = async (n: string) => {
+    await db.execute(sql`
+      INSERT INTO quotes (tenant_id, deal_id, quote_number, template_snapshot, seller, buyer, quote_date, valid_until)
+      VALUES (${tidA}, ${dealId}, ${n}, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '2026-01-01', '2026-01-31')
+    `);
+  };
+  const tail = /^(.*?)(\d+)$/.exec(msQuote.quoteNumber)!;
+  const numberAt = (k: number) => `${tail[1]}${String(Number(tail[2]) + k).padStart(tail[2]!.length, "0")}`;
+  await takeNumber(numberAt(1));
+  await takeNumber(numberAt(2));
+  const skipped = await errorOf(async () => {
+    const r = await asA(() => q.createQuoteFromDeal(tidA, USER, { dealId }));
+    if (r.quoteNumber !== numberAt(3)) throw new Error(`got ${r.quoteNumber}, want ${numberAt(3)}`);
+  });
+  check("createQuoteFromDeal: skips two pre-taken numbers and gets the following one", skipped === null, String(skipped));
+
+  for (let k = 4; k < 24; k++) await takeNumber(numberAt(k));
+  const exhausted = await errorOf(() => asA(() => q.createQuoteFromDeal(tidA, USER, { dealId })));
+  check(
+    "createQuoteFromDeal: 20 taken numbers in a row ends in a QuoteRuleError",
+    exhausted instanceof q.QuoteRuleError,
+    String(exhausted),
+  );
 }
 
 function report(): void {

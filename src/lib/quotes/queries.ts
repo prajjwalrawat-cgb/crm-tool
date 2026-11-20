@@ -199,6 +199,19 @@ export async function listQuoteTemplates(
   return rows as QuoteTemplateRow[];
 }
 
+/** Active templates' ids and names only (the "New quote" picker), same order as listQuoteTemplates. */
+export async function listQuoteTemplateOptions(
+  tenantId: string,
+): Promise<{ id: string; name: string; isDefault: boolean }[]> {
+  return tenantTransaction((tx) =>
+    tx
+      .select({ id: quoteTemplates.id, name: quoteTemplates.name, isDefault: quoteTemplates.isDefault })
+      .from(quoteTemplates)
+      .where(and(eq(quoteTemplates.tenantId, tenantId), isNull(quoteTemplates.archivedAt)))
+      .orderBy(desc(quoteTemplates.isDefault), asc(quoteTemplates.name), asc(quoteTemplates.createdAt)),
+  );
+}
+
 export async function getQuoteTemplate(tenantId: string, id: string): Promise<QuoteTemplateRow | null> {
   if (!isUuid(id)) return null;
   const [row] = await tenantTransaction((tx) =>
@@ -434,6 +447,17 @@ export async function getQuote(tenantId: string, id: string): Promise<QuoteDetai
   return tenantTransaction((tx) => loadDetail(tx, tenantId, id));
 }
 
+const MAX_NUMBER_ATTEMPTS = 20;
+
+/** Postgres unique violation on (tenant_id, quote_number, revision). */
+function isQuoteNumberTaken(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && depth < 3; e = (e as { cause?: unknown }).cause, depth++) {
+    const pg = e as { code?: string; constraint_name?: string; constraint?: string };
+    if (pg.code === '23505' && (pg.constraint_name ?? pg.constraint) === 'quotes_number_revision_uq') return true;
+  }
+  return false;
+}
+
 export async function createQuoteFromDeal(
   tenantId: string,
   userId: string,
@@ -476,27 +500,38 @@ export async function createQuoteFromDeal(
     const seller = profile?.seller ?? (await sellerFromOrgSettings(tx, tenantId));
 
     const quoteDate = todayIst();
-    const quoteNumber = await allocateQuoteNumber(tx, tenantId, quoteDate);
-    const [row] = await tx
-      .insert(quotes)
-      .values({
-        tenantId,
-        dealId: input.dealId,
-        quoteNumber,
-        templateId: template.id,
-        templateSnapshot: template.body,
-        content: defaultContentFor(template.body),
-        sellerProfileId: profile?.id ?? null,
-        seller,
-        buyer,
-        consignee: null,
-        quoteDate,
-        validUntil: addDays(quoteDate, settings.defaultValidityDays),
-        createdBy: userId,
-        updatedBy: userId,
-      })
-      .returning({ id: quotes.id });
-    return { id: row!.id, quoteNumber };
+    const values = {
+      tenantId,
+      dealId: input.dealId,
+      templateId: template.id,
+      templateSnapshot: template.body,
+      content: defaultContentFor(template.body),
+      sellerProfileId: profile?.id ?? null,
+      seller,
+      buyer,
+      consignee: null,
+      quoteDate,
+      validUntil: addDays(quoteDate, settings.defaultValidityDays),
+      createdBy: userId,
+      updatedBy: userId,
+    };
+    // A number-format change can make the sequence produce a number that
+    // already exists; skip past taken numbers. Each insert runs in a savepoint
+    // so a duplicate doesn't abort the transaction.
+    for (let attempt = 0; attempt < MAX_NUMBER_ATTEMPTS; attempt++) {
+      const quoteNumber = await allocateQuoteNumber(tx, tenantId, quoteDate);
+      try {
+        const [row] = await tx.transaction((sp) =>
+          sp.insert(quotes).values({ ...values, quoteNumber }).returning({ id: quotes.id }),
+        );
+        return { id: row!.id, quoteNumber };
+      } catch (err) {
+        if (!isQuoteNumberTaken(err)) throw err;
+      }
+    }
+    throw new QuoteRuleError(
+      'Could not find a free quote number. Check the number format in quote settings, or try again.',
+    );
   });
 }
 

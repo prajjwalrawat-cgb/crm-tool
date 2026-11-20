@@ -70,9 +70,9 @@ export function formatMoney(minor: number): string {
   return `${minor < 0 ? '-' : ''}₹${s}`;
 }
 
-/** Basis points as a percent: 1800 → "18%", 250 → "2.5%". */
+/** Basis points as a percent, up to 3 decimals: 1800 → "18%", 250 → "2.5%", 12.5 → "0.125%" (half of a 0.25% slab). */
 export function formatBps(bps: number): string {
-  return `${Number((bps / 100).toFixed(2))}%`;
+  return `${Number((bps / 100).toFixed(3))}%`;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

@@ -7,6 +7,7 @@ import { tenantTransaction } from '@/lib/db-context';
 import type { deleteDealDocument, uploadDealDocument } from '@/lib/storage/supabase';
 
 import { QuoteFrozenError, QuoteNotFoundError, QuoteRuleError, getQuote } from './queries';
+import { effectiveMilestones } from './template-schema';
 import type { QuoteDetail } from './types';
 
 /** Injected so the send flow can be tested without react-pdf or Supabase. */
@@ -31,6 +32,13 @@ export async function markQuoteSent(
   if (!quote) throw new QuoteNotFoundError();
   if (quote.status !== 'draft') throw new QuoteFrozenError();
   if (quote.items.length === 0) throw new QuoteRuleError('Add at least one line item before sending.');
+  for (const s of quote.templateSnapshot.sections) {
+    if (s.type !== 'payment_schedule' || !s.enabled) continue;
+    const sum = effectiveMilestones(s, quote.content).reduce((a, m) => a + m.percentBps, 0);
+    if (sum !== 10_000) {
+      throw new QuoteRuleError(`The payment schedule must add up to 100% before sending (now ${sum / 100}%).`);
+    }
+  }
 
   const bytes = await deps.render(quote);
   const fileName = `${quote.quoteNumber} Rev ${quote.revision}.pdf`;

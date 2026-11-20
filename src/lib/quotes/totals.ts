@@ -51,6 +51,22 @@ function bpsOf(a: number, bps: number): number {
   return Number((BigInt(a) * BigInt(bps) * BigInt(2) + BigInt(10_000)) / BigInt(20_000));
 }
 
+/**
+ * round(quantity × rate), half up, in integer maths. Quantity is scaled to
+ * thousandths first (it has at most 3 decimals: 1.005 is 1005 milli-units,
+ * though 1.005 × 1000 is 1004.9999… in floating point).
+ */
+function grossOf(quantity: number, rateMinor: number): number {
+  const scaled = quantity * 1000;
+  const qtyMilli = Math.round(scaled);
+  if (!Number.isSafeInteger(qtyMilli)) invalid('line amount is too large');
+  // Same tolerance as the quantity rule in schema.ts.
+  if (Math.abs(qtyMilli - scaled) >= 1e-6) invalid('quantity must have at most 3 decimal places');
+  const gross = Number((BigInt(qtyMilli) * BigInt(rateMinor) * BigInt(2) + BigInt(1000)) / BigInt(2000));
+  if (!Number.isSafeInteger(gross)) invalid('line amount is too large');
+  return gross;
+}
+
 export function computeQuoteTotals(lines: QuoteLineInput[], overall: OverallDiscount): QuoteTotals {
   for (const l of lines) {
     if (!Number.isFinite(l.quantity) || l.quantity < 0) invalid('quantity must be a non-negative number');
@@ -60,8 +76,7 @@ export function computeQuoteTotals(lines: QuoteLineInput[], overall: OverallDisc
   }
 
   const base = lines.map((l) => {
-    const grossMinor = Math.round(l.quantity * l.rateMinor);
-    if (!Number.isSafeInteger(grossMinor)) invalid('line amount is too large');
+    const grossMinor = grossOf(l.quantity, l.rateMinor);
     const lineDiscountMinor = bpsOf(grossMinor, l.discountBps);
     return { grossMinor, lineDiscountMinor, amountMinor: grossMinor - lineDiscountMinor };
   });

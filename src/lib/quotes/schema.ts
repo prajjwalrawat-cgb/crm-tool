@@ -55,7 +55,18 @@ export const sectionContentSchema = z.object({
     .optional(),
 });
 
-export const quoteContentSchema = z.record(z.string(), sectionContentSchema);
+/** Milestones, when given, need at least one row and must add up to exactly 100% (10000 bps). */
+export const quoteContentSchema = z.record(z.string(), sectionContentSchema).superRefine((content, ctx) => {
+  for (const [sectionId, c] of Object.entries(content)) {
+    if (!c.milestones) continue;
+    const sum = c.milestones.reduce((a, m) => a + m.percentBps, 0);
+    if (c.milestones.length === 0) {
+      ctx.addIssue({ code: 'custom', path: [sectionId, 'milestones'], message: 'Add at least one milestone' });
+    } else if (sum !== 10_000) {
+      ctx.addIssue({ code: 'custom', path: [sectionId, 'milestones'], message: `Milestones must add up to 100% (now ${sum / 100}%)` });
+    }
+  }
+});
 
 export const quoteDraftInputSchema = z
   .object({

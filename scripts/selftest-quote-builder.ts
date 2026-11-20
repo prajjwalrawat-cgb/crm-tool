@@ -5,6 +5,7 @@
  */
 import { getSchema } from '@tiptap/react';
 
+import { SELLER_FIELDS } from '../src/app/dashboard/settings/quote-templates/_components/section-settings/header';
 import { groupTemplateErrors, issuesToFieldErrors } from '../src/app/dashboard/settings/quote-templates/_components/template-errors';
 import { defaultTemplateBody } from '../src/lib/quotes/default-template';
 import { richTextDocSchema, type RichTextDoc } from '../src/lib/quotes/rich-text';
@@ -94,6 +95,11 @@ const g2 = groupTemplateErrors(
 check('name errors', same(g2.name, ['Name is required']));
 check('body. prefix stripped', same(g2.sections[ids[1]], ['x']));
 check('section-level and out-of-range go to general', same(g2.general, ['Template needs exactly one totals section', 'y', 'z']));
+
+/* --------------------------- header seller fields -------------------------- */
+
+const sellerKeys = SELLER_FIELDS.map((f) => f.key as string);
+check('builder offers seller GSTIN / PAN / address only (email/phone never print)', same(sellerKeys, ['gstin', 'pan', 'address']), sellerKeys.join(','));
 
 /* --------------------------------- report -------------------------------- */
 

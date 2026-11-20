@@ -183,6 +183,15 @@ export function defaultContentFor(body: QuoteTemplateBody): QuoteContent {
   return out;
 }
 
+/**
+ * A text / terms / payment schedule section the template locks
+ * (`repEditable: false`): it always uses the template default, whatever
+ * content a quote carries for it.
+ */
+export function isLockedContentSection(s: QuoteSection): boolean {
+  return (s.type === 'text' || s.type === 'terms' || s.type === 'payment_schedule') && !s.settings.repEditable;
+}
+
 function fitsType(type: QuoteSection['type'], c: SectionContent): boolean {
   if (type === 'text') return c.text !== undefined;
   if (type === 'terms') return c.terms !== undefined;
@@ -190,14 +199,36 @@ function fitsType(type: QuoteSection['type'], c: SectionContent): boolean {
   return false;
 }
 
-/** Keep content for section ids that still exist (and still fit the section type), drop removed ids, add defaults for the rest. */
+/**
+ * Keep content for section ids that still exist (and still fit the section
+ * type), drop removed ids, add defaults for the rest. Sections the template
+ * locks always get its default: rep content for them is never kept.
+ */
 export function mergeContentForTemplate(body: QuoteTemplateBody, previous: QuoteContent): QuoteContent {
   const defaults = defaultContentFor(body);
   const out: QuoteContent = {};
   for (const s of body.sections) {
     if (!Object.hasOwn(defaults, s.id)) continue;
-    const prev = Object.hasOwn(previous, s.id) ? previous[s.id] : undefined;
+    const prev = Object.hasOwn(previous, s.id) && !isLockedContentSection(s) ? previous[s.id] : undefined;
     out[s.id] = prev && fitsType(s.type, prev) ? prev : defaults[s.id];
   }
   return out;
+}
+
+/** The text a text section prints: the rep's, unless the template locks it. */
+export function effectiveSectionText(s: Extract<QuoteSection, { type: 'text' }>, content: QuoteContent): RichTextDoc {
+  return (!isLockedContentSection(s) && Object.hasOwn(content, s.id) ? content[s.id].text : undefined) ?? s.settings.defaultText;
+}
+
+/** The terms a terms section prints: the rep's, unless the template locks it. */
+export function effectiveSectionTerms(s: Extract<QuoteSection, { type: 'terms' }>, content: QuoteContent): RichTextDoc {
+  return (!isLockedContentSection(s) && Object.hasOwn(content, s.id) ? content[s.id].terms : undefined) ?? s.settings.defaultText;
+}
+
+/** The milestones a payment schedule prints: the rep's, unless the template locks them. */
+export function effectiveMilestones(
+  s: Extract<QuoteSection, { type: 'payment_schedule' }>,
+  content: QuoteContent,
+): { label: string; percentBps: number }[] {
+  return (!isLockedContentSection(s) && Object.hasOwn(content, s.id) ? content[s.id].milestones : undefined) ?? s.settings.defaultMilestones;
 }
