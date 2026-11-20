@@ -163,18 +163,21 @@ async function sellerFromOrgSettings(tx: DbExecutor, tenantId: string): Promise<
 
 /* ------------------------------------------------------------- templates */
 
-export async function ensureStarterTemplate(tenantId: string, userId: string): Promise<void> {
+/** Insert the starter template when the tenant has none (inside the caller's transaction). */
+async function insertStarterIfNone(tx: DbExecutor, tenantId: string, userId: string): Promise<void> {
   const body = JSON.stringify(defaultTemplateBody());
   // NOT EXISTS + ON CONFLICT (the one-default partial unique index) makes
   // concurrent first visits create exactly one starter.
-  await tenantTransaction((tx) =>
-    tx.execute(sql`
-      INSERT INTO quote_templates (tenant_id, name, is_default, body, updated_by)
-      SELECT ${tenantId}, ${STARTER_TEMPLATE_NAME}, true, ${body}::jsonb, ${userId}
-      WHERE NOT EXISTS (SELECT 1 FROM quote_templates WHERE tenant_id = ${tenantId})
-      ON CONFLICT DO NOTHING
-    `),
-  );
+  await tx.execute(sql`
+    INSERT INTO quote_templates (tenant_id, name, is_default, body, updated_by)
+    SELECT ${tenantId}, ${STARTER_TEMPLATE_NAME}, true, ${body}::jsonb, ${userId}
+    WHERE NOT EXISTS (SELECT 1 FROM quote_templates WHERE tenant_id = ${tenantId})
+    ON CONFLICT DO NOTHING
+  `);
+}
+
+export async function ensureStarterTemplate(tenantId: string, userId: string): Promise<void> {
+  await tenantTransaction((tx) => insertStarterIfNone(tx, tenantId, userId));
 }
 
 export async function listQuoteTemplates(
@@ -284,14 +287,16 @@ export async function duplicateQuoteTemplate(
 export async function setDefaultQuoteTemplate(tenantId: string, id: string): Promise<void> {
   if (!isUuid(id)) throw new QuoteNotFoundError('Quote template');
   await tenantTransaction(async (tx) => {
-    const [target] = await tx
+    // Lock every active template (in a fixed order, so concurrent callers
+    // queue instead of deadlocking): two setDefault calls on different
+    // targets then serialize rather than racing into the unique index.
+    const active = await tx
       .select({ id: quoteTemplates.id })
       .from(quoteTemplates)
-      .where(
-        and(eq(quoteTemplates.tenantId, tenantId), eq(quoteTemplates.id, id), isNull(quoteTemplates.archivedAt)),
-      )
+      .where(and(eq(quoteTemplates.tenantId, tenantId), isNull(quoteTemplates.archivedAt)))
+      .orderBy(asc(quoteTemplates.id))
       .for('update');
-    if (!target) throw new QuoteNotFoundError('Quote template');
+    if (!active.some((t) => t.id === id)) throw new QuoteNotFoundError('Quote template');
     // Clear first: the one-default partial unique index is not deferrable.
     await tx
       .update(quoteTemplates)
@@ -435,7 +440,6 @@ export async function createQuoteFromDeal(
   input: { dealId: string; templateId?: string },
 ): Promise<{ id: string; quoteNumber: string }> {
   if (!isUuid(input.dealId)) throw new QuoteNotFoundError('Deal');
-  await ensureStarterTemplate(tenantId, userId);
 
   return tenantTransaction(async (tx) => {
     const [d] = await tx
@@ -455,6 +459,8 @@ export async function createQuoteFromDeal(
       .limit(1);
     if (!d) throw new QuoteNotFoundError('Deal');
 
+    // Only after the deal is confirmed, so a bad id leaves no starter behind.
+    await insertStarterIfNone(tx, tenantId, userId);
     const template = await loadActiveTemplate(tx, tenantId, input.templateId);
     const settings = await loadSettings(tx, tenantId);
 
@@ -661,6 +667,9 @@ export async function createQuoteRevision(
       .limit(1);
     if (newer) throw new QuoteRuleError('This quote already has a newer revision.');
 
+    const settings = await loadSettings(tx, tenantId);
+    const today = todayIst();
+
     const [row] = await tx
       .insert(quotes)
       .values({
@@ -677,8 +686,9 @@ export async function createQuoteRevision(
         seller: src.seller,
         buyer: src.buyer,
         consignee: src.consignee,
-        quoteDate: src.quoteDate,
-        validUntil: src.validUntil,
+        // A revision is re-issued today with the tenant's standard validity.
+        quoteDate: today,
+        validUntil: addDays(today, settings.defaultValidityDays),
         currency: src.currency,
         overallDiscountType: src.overallDiscountType,
         overallDiscountValue: src.overallDiscountValue,
@@ -739,7 +749,20 @@ export async function listQuotesForDeal(tenantId: string, dealId: string): Promi
   );
 }
 
-const cursorSchema = z.object({ t: z.string().min(1), id: z.uuid() });
+const cursorSchema = z.object({
+  // created_at::text, e.g. '2026-11-20 10:11:12.123456+05:30'.
+  t: z.string().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}(:?\d{2}){0,2}|Z)$/),
+  id: z.uuid(),
+});
+
+function decodeCursor(cursor: string): z.infer<typeof cursorSchema> | null {
+  try {
+    const parsed = cursorSchema.safeParse(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 const isoDateSchema = z.iso.date();
 
 /**
@@ -757,8 +780,9 @@ export async function listQuotes(
   if (f.from) where.push(gte(quotes.quoteDate, isoDateSchema.parse(f.from)));
   if (f.to) where.push(lte(quotes.quoteDate, isoDateSchema.parse(f.to)));
   if (f.cursor) {
-    const c = cursorSchema.parse(JSON.parse(Buffer.from(f.cursor, 'base64url').toString('utf8')));
-    where.push(sql`(${quotes.createdAt}, ${quotes.id}) < (${c.t}::timestamptz, ${c.id}::uuid)`);
+    const c = decodeCursor(f.cursor);
+    // An unparseable cursor is treated as the first page.
+    if (c) where.push(sql`(${quotes.createdAt}, ${quotes.id}) < (${c.t}::timestamptz, ${c.id}::uuid)`);
   }
 
   const rows = await tenantTransaction((tx) =>

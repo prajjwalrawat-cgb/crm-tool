@@ -10,6 +10,9 @@ import { sql } from "drizzle-orm";
 
 config({ path: ".env.local" });
 config();
+// The deal patch path queues a score recompute; without a local Inngest it
+// logs a one-time "delivery unavailable" warning. Keep test output clean.
+process.env.LOG_LEVEL ??= "error";
 
 let exitCode = 0;
 const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
@@ -232,9 +235,18 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
     JSON.stringify({ created, status: quote?.status, buyer: quote?.buyer, n: templates.length }),
   );
 
+  await db.execute(sql`DELETE FROM quote_templates WHERE tenant_id = ${tidB}`);
+  const crossTenantThrows = await throwsAs(
+    () => asB(() => q.createQuoteFromDeal(tidB, USER, { dealId })),
+    q.QuoteNotFoundError,
+  );
+  const [bTemplates] = (await db.execute(sql`
+    SELECT count(*)::int AS n FROM quote_templates WHERE tenant_id = ${tidB}
+  `)) as unknown as Array<{ n: number }>;
   check(
-    "createQuoteFromDeal: tenant A's deal under tenant B throws QuoteNotFoundError",
-    await throwsAs(() => asB(() => q.createQuoteFromDeal(tidB, USER, { dealId })), q.QuoteNotFoundError),
+    "createQuoteFromDeal: tenant A's deal under tenant B throws QuoteNotFoundError, no starter left in B",
+    crossTenantThrows && bTemplates?.n === 0,
+    JSON.stringify(bTemplates),
   );
 
   // updateQuoteDraft: Task 2 A/B lines with an overall discount of 19000.
@@ -305,7 +317,8 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
   );
 
   // Locking: a sent quote refuses draft edits.
-  await db.execute(sql`UPDATE quotes SET status = 'sent', sent_at = now() WHERE id = ${created.id}`);
+  await db.execute(sql`UPDATE quotes SET status = 'sent', sent_at = now(), quote_date = '2026-01-01', valid_until = '2026-01-31'
+    WHERE id = ${created.id}`);
   const frozen = await throwsAs(
     () => asA(() => q.updateQuoteDraft(tidA, USER, created.id, { ...draftInput, items: [draftInput.items[0]!] })),
     q.QuoteFrozenError,
@@ -319,16 +332,25 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
   const rev = await asA(() => q.createQuoteRevision(tidA, USER, created.id));
   const revQuote = await asA(() => q.getQuote(tidA, rev.id));
   const source = await asA(() => q.getQuote(tidA, created.id));
+  const validity = (await asA(() => q.getQuoteSettings(tidA))).defaultValidityDays;
+  const plus = (iso: string, n: number) => {
+    const d = new Date(`${iso}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
   check(
-    "createQuoteRevision: revision 2, same number, draft, items copied; source superseded",
+    "createQuoteRevision: revision 2, same number, draft, re-dated today + validity, items copied; source superseded",
     revQuote?.revision === 2 &&
       revQuote.quoteNumber === expectedNumber &&
       revQuote.status === "draft" &&
       revQuote.parentQuoteId === created.id &&
       revQuote.items.length === 2 &&
       revQuote.totalMinor === 191_250 &&
-      source?.status === "superseded",
-    JSON.stringify({ rev: revQuote?.revision, status: source?.status }),
+      revQuote.quoteDate === today &&
+      revQuote.validUntil === plus(today, validity) &&
+      source?.status === "superseded" &&
+      source.quoteDate === "2026-01-01",
+    JSON.stringify({ rev: revQuote?.revision, d: revQuote?.quoteDate, v: revQuote?.validUntil, status: source?.status }),
   );
   check(
     "createQuoteRevision on the superseded source throws",
@@ -349,6 +371,19 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
     defaults.length === 1 && defaults[0]!.id === third.id,
     JSON.stringify(active.map((t) => [t.name, t.isDefault])),
   );
+  const fourth = await asA(() => q.duplicateQuoteTemplate(tidA, USER, second.id));
+  const raced = await Promise.allSettled([
+    asA(() => q.setDefaultQuoteTemplate(tidA, second.id)),
+    asA(() => q.setDefaultQuoteTemplate(tidA, fourth.id)),
+  ]);
+  const afterRace = (await asA(() => q.listQuoteTemplates(tidA))).filter((t) => t.isDefault);
+  check(
+    "concurrent setDefaultQuoteTemplate on two templates: both succeed, exactly one default",
+    raced.every((r) => r.status === "fulfilled") &&
+      afterRace.length === 1 &&
+      [second.id, fourth.id].includes(afterRace[0]!.id),
+    JSON.stringify(raced.map((r) => (r.status === "rejected" ? String(r.reason) : "ok"))),
+  );
 
   // Lists.
   const forDeal = await asA(() => q.listQuotesForDeal(tidA, dealId));
@@ -363,6 +398,15 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
       page2.rows.length === 1 &&
       page2.rows[0]!.id !== page.rows[0]!.id,
     JSON.stringify({ forDeal: forDeal.length, p1: page.rows.length, p2: page2.rows.length }),
+  );
+  const badCursors = await Promise.all(
+    ["not-a-cursor!!", Buffer.from('{"t":"x","id":"y"}').toString("base64url")].map((cursor) =>
+      asA(() => q.listQuotes(tidA, { limit: 1, cursor })),
+    ),
+  );
+  check(
+    "listQuotes: a malformed cursor returns the first page",
+    badCursors.every((r) => r.rows.length === 1 && r.rows[0]!.id === page.rows[0]!.id),
   );
 
   // Deal amount from quote goes through the deal patch path (taxable value).
