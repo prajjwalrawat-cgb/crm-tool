@@ -72,6 +72,8 @@ check('remainder never makes taxable negative (4 x 10000, 39999)', (() => {
 })());
 check('huge quantity throws invalid_input', throwsCode(() => computeQuoteTotals([{ ...A, quantity: 1e300 }], { type: 'none' }), 'invalid_input'));
 
+check('quantity x rate overflowing to Infinity throws invalid_input', throwsCode(() => computeQuoteTotals([{ ...A, quantity: 1e200, rateMinor: 1e200 }], { type: 'none' }), 'invalid_input'));
+
 for (const x of results) console.log(`${x.ok ? 'PASS' : 'FAIL'}  ${x.name}${!x.ok && x.detail ? `\n      ${x.detail}` : ''}`);
 const failed = results.filter((x) => !x.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

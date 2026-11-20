@@ -61,8 +61,8 @@ export function computeQuoteTotals(lines: QuoteLineInput[], overall: OverallDisc
 
   const base = lines.map((l) => {
     const grossMinor = Math.round(l.quantity * l.rateMinor);
-    const lineDiscountMinor = bpsOf(grossMinor, l.discountBps);
     if (!Number.isSafeInteger(grossMinor)) invalid('line amount is too large');
+    const lineDiscountMinor = bpsOf(grossMinor, l.discountBps);
     return { grossMinor, lineDiscountMinor, amountMinor: grossMinor - lineDiscountMinor };
   });
   const amountSum = base.reduce((s, b) => s + b.amountMinor, 0);
