@@ -40,7 +40,7 @@ export function ProspectDrawer({
   currentUserId,
   onClose,
 }: Props) {
-  const [now] = useState(() => now);
+  const [now] = useState(() => Date.now());
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
