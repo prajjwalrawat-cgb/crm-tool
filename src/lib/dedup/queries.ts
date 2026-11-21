@@ -117,6 +117,8 @@ export async function findContactNameMatches(
   firstName: string | null,
   lastName: string | null,
   limit = 5,
+  /** Only this company's contacts (AskMiraa's lead.save), when given. */
+  companyId?: string,
 ): Promise<DedupMatch[]> {
   const norm = normalizeContactName(firstName, lastName);
   if (norm.length < 3) return [];
@@ -126,6 +128,7 @@ export async function findContactNameMatches(
         similarity(normalized_name, ${norm})::float8 AS score
       FROM contacts
       WHERE tenant_id = ${tenantId}::uuid
+        ${companyId ? sql`AND company_id = ${companyId}::uuid` : sql``}
         AND deleted_at IS NULL AND merged_into_id IS NULL
         AND normalized_name IS NOT NULL AND normalized_name <> ''
         AND similarity(normalized_name, ${norm}) >= ${SIM_THRESHOLD}

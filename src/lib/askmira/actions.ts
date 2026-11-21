@@ -4,7 +4,8 @@ import 'server-only';
 //
 //   lead.save    a new lead from what they typed (company, contact, deal at
 //                Lead, follow-up task, note), or changes to one (a new title, a
-//                new number)
+//                new number). A company or contact already here makes it stop
+//                and ask (409 needs_choice; docs/askmira/lead-save-choices.md)
 //   deal.stage   move a deal, with what the move needs (margin, close date,
 //                Hold's reason and revisit date, why it was lost, why it goes back)
 //   deal.decide  a manager approves or rejects a Won that waits on them
@@ -36,10 +37,10 @@ import {
 import { updateDealFieldAction } from '@/app/dashboard/deals/[id]/actions';
 import { createNoteAction } from '@/app/dashboard/notes/actions';
 import { createTaskAction } from '@/app/dashboard/tasks/actions';
-import { deals } from '@/db/schema';
+import { companies, contacts, deals } from '@/db/schema';
 import { runAsPerson } from '@/lib/auth/acting-as';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
-import { findCompanyMatches, findContactByEmail } from '@/lib/dedup/queries';
+import { findCompanyMatches, findContactByEmail, findContactNameMatches } from '@/lib/dedup/queries';
 import { HOLD_REASON_LABELS, isHoldReason } from '@/lib/deals/hold';
 import { DEAL_STAGE_LABELS, DEAL_STAGES, type DealStage } from '@/lib/deals/schema';
 import { isRollbackReason, ROLLBACK_REASON_LABELS } from '@/lib/deals/stage-governance';
@@ -47,6 +48,16 @@ import { isOfferingsEnabled, listOfferingOptions } from '@/lib/offerings/queries
 import { can } from '@/lib/rbac';
 
 import { clean, httpError, type Linked, type Person } from './core';
+import {
+  ChoiceError,
+  type ContactFields,
+  type Decision,
+  decideCompany,
+  decideContact,
+  fillBlanks,
+  type NeedsChoice,
+  parseChoice,
+} from './lead-choices';
 import { dealFor } from './queries';
 
 export type ActArgs = { found: Linked; me: Person; params: Record<string, unknown> };
@@ -150,6 +161,71 @@ async function offeringIds(me: Person, wanted: unknown): Promise<string[]> {
 
 /* ── lead.save ─────────────────────────────────────────────── */
 
+/** lead-choices' refusals, as AskMiraa's error replies. */
+function decided<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof ChoiceError) throw httpError(err.status, err.message);
+    throw err;
+  }
+}
+
+/** Stop and ask: AskMiraa shows `message` and calls again with the answer. */
+function ask(needs: NeedsChoice): never {
+  throw httpError(409, needs.message, { needs_choice: needs });
+}
+
+/** The answered company, if it is still a live one in this workspace. */
+async function liveCompany(me: Person, id: string): Promise<string> {
+  const [row] = await inScope(me, () =>
+    tenantTransaction((tx) =>
+      tx
+        .select({ id: companies.id })
+        .from(companies)
+        .where(
+          and(
+            eq(companies.id, id),
+            eq(companies.tenantId, me.tenantId),
+            isNull(companies.deletedAt),
+            isNull(companies.mergedIntoId),
+          ),
+        )
+        .limit(1),
+    ),
+  );
+  if (!row) throw httpError(422, "That company isn't in Saleinx any more. Ask again without company_choice.");
+  return row.id;
+}
+
+/** The answered contact's fields, if it is still a live one in this workspace. */
+async function liveContact(me: Person, id: string): Promise<ContactFields> {
+  const [row] = await inScope(me, () =>
+    tenantTransaction((tx) =>
+      tx
+        .select({
+          firstName: contacts.firstName,
+          lastName: contacts.lastName,
+          email: contacts.email,
+          phone: contacts.phone,
+          title: contacts.title,
+        })
+        .from(contacts)
+        .where(
+          and(
+            eq(contacts.id, id),
+            eq(contacts.tenantId, me.tenantId),
+            isNull(contacts.deletedAt),
+            isNull(contacts.mergedIntoId),
+          ),
+        )
+        .limit(1),
+    ),
+  );
+  if (!row) throw httpError(422, "That contact isn't in Saleinx any more. Ask again without contact_choice.");
+  return row;
+}
+
 async function saveLead({ me, params }: ActArgs) {
   needsManage(me);
   const contact = obj(params.contact);
@@ -162,12 +238,21 @@ async function saveLead({ me, params }: ActArgs) {
   const contactName = splitName(clean(contact.name, 200), contact.first_name, contact.last_name);
   const dueDate = day(followUp.due_date, 'The follow-up date');
   const amount = amountOf(dealIn.amount, 'The deal amount');
+  const companyChoice = decided(() => parseChoice(params.company_choice, 'company_choice'));
+  const contactChoice = decided(() => parseChoice(params.contact_choice, 'contact_choice'));
   const done: string[] = [];
 
   return await asPerson(me, async () => {
     let dealId = clean(params.deal_id, 40);
     let companyId: string | null = null;
     let contactId: string | null = null;
+    // A new lead's contact, decided before anything is written (lead-choices).
+    let contactPlan: Decision | null = null;
+    let existingContact: ContactFields | null = null;
+    // The same lead found already here with its own contact: that link stays.
+    let dealContactId: string | null = null;
+    // What a new deal sells, settled with the rest before anything is written.
+    let offerings: string[] = [];
 
     if (dealId) {
       // An existing lead: its company and contact are the ones to change.
@@ -189,77 +274,153 @@ async function saveLead({ me, params }: ActArgs) {
       if (!companyName || !name) {
         throw httpError(422, 'A new lead needs the company and a name for the deal.');
       }
-      // The company: the one already here by that name, else a new one.
-      const found = await inScope(me, () => findCompanyMatches(me.tenantId, companyName, 3));
-      const exact = found.find((m) => m.kind === 'exact');
-      if (exact) {
-        companyId = exact.id;
-      } else {
-        const made = await createCompanyAction(form({ name: companyName }));
+      // Nothing is written until the company and the contact are both settled:
+      // an existing one (or a similar name) stops here and asks.
+      // The company: an existing one only when the person chose it.
+      const matches = await inScope(me, () => findCompanyMatches(me.tenantId, companyName, 3));
+      const companyPlan = decided(() =>
+        decideCompany({ name: companyName, matches, choice: companyChoice }),
+      );
+      if (companyPlan.kind === 'ask') ask(companyPlan.needs);
+      if (companyPlan.kind === 'use') companyId = await liveCompany(me, companyPlan.id);
+
+      // The same open deal for this company already here (the same message sent twice).
+      if (companyId) {
+        const [open] = await inScope(me, () =>
+          tenantTransaction((tx) =>
+            tx
+              .select({ id: deals.id, contactId: deals.contactId })
+              .from(deals)
+              .where(
+                and(
+                  eq(deals.tenantId, me.tenantId),
+                  eq(deals.companyId, companyId!),
+                  isNull(deals.deletedAt),
+                  notInArray(deals.stage, ['won', 'lost']),
+                  sql`lower(${deals.name}) = lower(${name})`,
+                ),
+              )
+              .limit(1),
+          ),
+        );
+        if (open) {
+          dealId = open.id;
+          dealContactId = open.contactId;
+          done.push('found the lead already here, so nothing was added twice');
+        }
+      }
+
+      // The contact: same email anywhere here, or a similar name at the chosen
+      // company. Asked even for a lead found already here, so the card's person
+      // never overwrites someone else.
+      {
+        const emailMatch = contactEmail
+          ? await inScope(me, () => findContactByEmail(me.tenantId, contactEmail))
+          : null;
+        const nameMatches = companyId
+          ? await inScope(me, () => findContactNameMatches(me.tenantId, contactName.first, contactName.last, 3, companyId!))
+          : [];
+        contactPlan = decided(() =>
+          decideContact({
+            displayName:
+              [contactName.first, contactName.last].filter(Boolean).join(' ') || contactEmail || 'this contact',
+            email: contactEmail,
+            hasDetails: Boolean(contactName.first || contactEmail),
+            emailMatch,
+            nameMatches,
+            choice: contactChoice,
+          }),
+        );
+        if (contactPlan.kind === 'ask') ask(contactPlan.needs);
+        if (contactPlan.kind === 'use') {
+          existingContact = await liveContact(me, contactPlan.id);
+          contactId = contactPlan.id;
+        }
+      }
+
+      // A new deal must say what it sells; a refusal here must come before any write.
+      if (!dealId) offerings = await offeringIds(me, dealIn.offerings);
+
+      // Settled: now the writes, company first.
+      if (companyPlan.kind === 'create') {
+        const made = await createCompanyAction(
+          form({ name: companyName, dedupOverride: companyPlan.override ? '1' : null }),
+        );
         if (!made.ok) refuse(made, 'The company could not be added');
         companyId = made.company.id;
         done.push(`company ${companyName} added`);
       }
-      // The same open deal for this company already here (the same message sent twice).
-      const [open] = await inScope(me, () =>
-        tenantTransaction((tx) =>
-          tx
-            .select({ id: deals.id, contactId: deals.contactId })
-            .from(deals)
-            .where(
-              and(
-                eq(deals.tenantId, me.tenantId),
-                eq(deals.companyId, companyId!),
-                isNull(deals.deletedAt),
-                notInArray(deals.stage, ['won', 'lost']),
-                sql`lower(${deals.name}) = lower(${name})`,
-              ),
-            )
-            .limit(1),
-        ),
-      );
-      if (open) {
-        dealId = open.id;
-        contactId = open.contactId;
-        done.push('found the lead already here, so nothing was added twice');
-      }
     }
 
-    // The contact: matched by email, else the deal's own, else a new one.
-    if (contactEmail && !contactId) {
-      const byEmail = await inScope(me, () => findContactByEmail(me.tenantId, contactEmail));
-      if (byEmail) contactId = byEmail.id;
-    }
-    if (contactId) {
-      const patch: Record<string, unknown> = { id: contactId };
-      if (contactTitle) patch.title = contactTitle;
-      if (contactPhone) patch.phone = contactPhone;
-      if (contactEmail) patch.email = contactEmail;
-      if (contactName.first) patch.firstName = contactName.first;
-      if (contactName.last) patch.lastName = contactName.last;
-      if (Object.keys(patch).length > 1) {
-        const changed = await patchContactAction(patch);
+    if (contactPlan?.kind === 'use' && existingContact) {
+      // A contact the person chose: fill its blanks, never overwrite.
+      const { patch, kept } = fillBlanks(existingContact, {
+        firstName: contactName.first,
+        lastName: contactName.last,
+        email: contactEmail,
+        phone: contactPhone,
+        title: contactTitle,
+      });
+      if (Object.keys(patch).length > 0) {
+        const changed = await patchContactAction({ id: contactId, ...patch });
         if (!changed.ok) refuse(changed, 'The contact could not be updated');
         done.push('contact updated');
       }
-    } else if (contactName.first || contactEmail) {
-      const made = await createContactAction(
-        form({
-          firstName: contactName.first,
-          lastName: contactName.last,
-          email: contactEmail,
-          phone: contactPhone,
-          title: contactTitle,
-          companyId,
-        }),
-      );
-      if (!made.ok) refuse(made, 'The contact could not be added');
-      contactId = made.contact.id;
-      done.push('contact added');
+      done.push(...kept);
+    } else if (contactPlan) {
+      if (contactPlan.kind === 'create') {
+        const made = await createContactAction(
+          form({
+            firstName: contactName.first,
+            lastName: contactName.last,
+            email: contactEmail,
+            phone: contactPhone,
+            title: contactTitle,
+            companyId,
+          }),
+        );
+        if (!made.ok) refuse(made, 'The contact could not be added');
+        contactId = made.contact.id;
+        done.push('contact added');
+      }
+    } else {
+      // An existing lead (deal_id, or the same lead sent twice): as before,
+      // its contact is matched by email and updated from what was sent.
+      if (contactEmail && !contactId) {
+        const byEmail = await inScope(me, () => findContactByEmail(me.tenantId, contactEmail));
+        if (byEmail) contactId = byEmail.id;
+      }
+      if (contactId) {
+        const patch: Record<string, unknown> = { id: contactId };
+        if (contactTitle) patch.title = contactTitle;
+        if (contactPhone) patch.phone = contactPhone;
+        if (contactEmail) patch.email = contactEmail;
+        if (contactName.first) patch.firstName = contactName.first;
+        if (contactName.last) patch.lastName = contactName.last;
+        if (Object.keys(patch).length > 1) {
+          const changed = await patchContactAction(patch);
+          if (!changed.ok) refuse(changed, 'The contact could not be updated');
+          done.push('contact updated');
+        }
+      } else if (contactName.first || contactEmail) {
+        const made = await createContactAction(
+          form({
+            firstName: contactName.first,
+            lastName: contactName.last,
+            email: contactEmail,
+            phone: contactPhone,
+            title: contactTitle,
+            companyId,
+          }),
+        );
+        if (!made.ok) refuse(made, 'The contact could not be added');
+        contactId = made.contact.id;
+        done.push('contact added');
+      }
     }
 
     if (!dealId) {
-      const ids = await offeringIds(me, dealIn.offerings);
+      const ids = offerings;
       const made = await createDealAction(
         form({
           name: clean(dealIn.name, 200),
@@ -282,7 +443,10 @@ async function saveLead({ me, params }: ActArgs) {
     } else {
       const patch: Record<string, unknown> = { id: dealId };
       if (amount) patch.amount = amount;
-      if (contactId) patch.contactId = contactId;
+      if (contactId && !dealContactId) patch.contactId = contactId;
+      else if (contactId && contactId !== dealContactId) {
+        done.push('the lead keeps its own contact; this person was saved at the company');
+      }
       if (Object.keys(patch).length > 1) {
         const changed = await patchDealAction(patch);
         if (!changed.ok) refuse(changed, 'The lead could not be updated');
