@@ -108,7 +108,7 @@ export function LiveRiskFlagsCard(
       state={resolveState(live.state, props.modeOverride)}
       generatedAt={live.generatedAt}
     >
-      <RiskFlagsBody flags={live.content?.flags ?? []} />
+      <RiskFlagsBody flags={live.content?.flags ?? []} showConfidence={!props.modeOverride} />
     </AiInsightCard>
   );
 }
@@ -163,7 +163,7 @@ export function LiveDealSummaryCard(
       state={resolveState(live.state, props.modeOverride)}
       generatedAt={live.generatedAt}
     >
-      <DealSummaryBody data={live.content} />
+      <DealSummaryBody data={live.content} showConfidence={!props.modeOverride} />
     </AiInsightCard>
   );
 }
@@ -187,7 +187,7 @@ export function LiveThreadSummaryCard(
       state={resolveState(live.state, props.modeOverride)}
       generatedAt={live.generatedAt}
     >
-      <ThreadSummaryBody data={live.content} />
+      <ThreadSummaryBody data={live.content} showConfidence={!props.modeOverride} />
     </AiInsightCard>
   );
 }

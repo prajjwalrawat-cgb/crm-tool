@@ -29,28 +29,34 @@ export function buildOpsChecks({
   inbox,
 }: {
   workflowStats: { totalRuns: number; running: number; failed: number };
-  aiStats: { totalCalls: number; errorCount: number };
+  /** Null while AI isn't live (mock calls aren't real) — the AI check is skipped. */
+  aiStats: { totalCalls: number; errorCount: number } | null;
   emailStats: { sent: number; failed: number; exhausted: number };
   inbox: { active: number; unread: number; failed: number };
 }): OpsCheck[] {
   const aiErrorRate =
-    aiStats.totalCalls > 0 ? aiStats.errorCount / aiStats.totalCalls : 0;
+    aiStats && aiStats.totalCalls > 0 ? aiStats.errorCount / aiStats.totalCalls : 0;
+  const aiCheck: OpsCheck[] = aiStats
+    ? [
+        {
+          label: 'AI calls',
+          detail: `${Math.round(aiErrorRate * 100)}% error rate`,
+          severity:
+            aiStats.errorCount > 0 && aiErrorRate > 0.1
+              ? 'danger'
+              : aiStats.errorCount > 0
+                ? 'warning'
+                : 'ok',
+        },
+      ]
+    : [];
   return [
     {
       label: 'Workflows',
       detail: `${workflowStats.failed} failed run${workflowStats.failed === 1 ? '' : 's'}`,
       severity: workflowStats.failed > 0 ? 'danger' : 'ok',
     },
-    {
-      label: 'AI calls',
-      detail: `${Math.round(aiErrorRate * 100)}% error rate`,
-      severity:
-        aiStats.errorCount > 0 && aiErrorRate > 0.1
-          ? 'danger'
-          : aiStats.errorCount > 0
-            ? 'warning'
-            : 'ok',
-    },
+    ...aiCheck,
     {
       label: 'Email',
       detail:
