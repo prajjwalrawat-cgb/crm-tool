@@ -8,9 +8,10 @@ import {
   DragOverlay,
   type DragStartEvent,
   KeyboardSensor,
+  MouseSensor,
   pointerWithin,
-  PointerSensor,
   rectIntersection,
+  TouchSensor,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -155,7 +156,12 @@ export function ProspectBoard({
   }, []);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8, delay: 80, tolerance: 4 } }),
+    // Mouse: a drag starts only after 8px of movement, so a click always opens
+    // the card. (With `delay` set, dnd-kit ignores `distance`: a click held
+    // >80ms became a zero-move drag and its click event was swallowed.)
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    // Touch: press-and-hold to drag, so a finger swipe still scrolls the board.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
     useSensor(KeyboardSensor),
   );
 
@@ -220,6 +226,10 @@ export function ProspectBoard({
       ) : null}
 
       <DndContext
+        // Stable id: otherwise dnd-kit numbers `aria-describedby` from a module
+        // counter that differs between the server process and the browser,
+        // and every card hydration-mismatches (same fix as the deals board).
+        id="prospect-board"
         sensors={sensors}
         collisionDetection={collisionDetection}
         onDragStart={handleDragStart}

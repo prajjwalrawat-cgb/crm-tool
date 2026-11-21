@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { MembershipRole, Prospect, ProspectStage } from '@/db/schema';
 import { editBlock } from '@/lib/prospects/rules';
 import type { Teammate } from '@/lib/teammates/queries';
 
+import { Drawer } from '../../_components/drawer';
 import { STAGE_LABELS } from './prospect-column';
 import { ProspectForm } from './prospect-form';
 
@@ -41,11 +42,6 @@ export function ProspectDrawer({
   onClose,
 }: Props) {
   const [now] = useState(() => Date.now());
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const block = editBlock(prospect, { userId: currentUserId, role });
   const nameOf = (id: string | null) => {
@@ -58,23 +54,7 @@ export function ProspectDrawer({
     prospect.claimedBy && (!prospect.claimExpiresAt || new Date(prospect.claimExpiresAt).getTime() > now);
 
   return (
-    <div role="dialog" aria-modal="true" aria-label={prospect.companyName} className="fixed inset-0 z-40 flex justify-end">
-      <button type="button" aria-label="Close drawer" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-black/30" />
-      <aside className="relative flex h-full w-full max-w-xl flex-col overflow-y-auto bg-white p-5 shadow-xl">
-        <header className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-[16px] font-semibold text-slate-900">{prospect.companyName}</h2>
-            <p className="text-[12px] text-slate-500">{STAGE_LABELS[prospect.stage]}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-slate-300 px-2 py-1 text-[13px] text-slate-600 hover:bg-slate-50"
-          >
-            Close
-          </button>
-        </header>
-
+    <Drawer open onClose={onClose} title={prospect.companyName} description={STAGE_LABELS[prospect.stage]} widthClass="max-w-xl">
         {block === 'promoted' && prospect.promotedDealId ? (
           <p className="mb-4 rounded-md bg-indigo-50 px-3 py-2 text-[13px] text-indigo-800">
             Promoted to a lead.{' '}
@@ -134,7 +114,6 @@ export function ProspectDrawer({
             </ul>
           )}
         </section>
-      </aside>
-    </div>
+    </Drawer>
   );
 }
