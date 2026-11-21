@@ -18,6 +18,15 @@ import type {
  * (no client interactivity) so the page can stream them.
  */
 
+/**
+ * Insights generated before AI went live end with a "(mock)" tag. The mock
+ * generators no longer add it, but rows already cached still carry it, so it
+ * is stripped at render time too.
+ */
+function stripMockTag(text: string): string {
+  return text.replace(/\s*\(mock\)\s*$/i, '');
+}
+
 export function DailyExecBody({ data }: { data: DailyExecSummary | null }) {
   if (!data) return <EmptyBody label="No summary yet. Refreshing in the background…" />;
   return (
@@ -33,7 +42,7 @@ export function DailyExecBody({ data }: { data: DailyExecSummary | null }) {
                 className="mt-1 inline-block h-1 w-1 flex-shrink-0 rounded-full bg-indigo-500"
                 aria-hidden
               />
-              <span>{b}</span>
+              <span>{stripMockTag(b)}</span>
             </li>
           ))}
         </ul>
@@ -64,7 +73,14 @@ const calloutTone: Record<RiskSeverity, string> = {
     'border-rose-200 bg-rose-50/60 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300',
 };
 
-export function RiskFlagsBody({ flags }: { flags: RiskFlag[] }) {
+export function RiskFlagsBody({
+  flags,
+  showConfidence = true,
+}: {
+  flags: RiskFlag[];
+  /** False while AI isn't live — the mock confidence is a fixed placeholder. */
+  showConfidence?: boolean;
+}) {
   if (flags.length === 0)
     return <EmptyBody label="Nothing flagged. Pipeline looks healthy." />;
   return (
@@ -95,9 +111,11 @@ export function RiskFlagsBody({ flags }: { flags: RiskFlag[] }) {
                   {f.title}
                 </span>
               )}
-              <span className="font-mono text-[10px] tabular-nums text-slate-400 dark:text-[#A1A1AA]">
-                {Math.round(f.confidence * 100)}%
-              </span>
+              {showConfidence ? (
+                <span className="font-mono text-[10px] tabular-nums text-slate-400 dark:text-[#A1A1AA]">
+                  {Math.round(f.confidence * 100)}%
+                </span>
+              ) : null}
             </div>
             <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-slate-600 dark:text-[#A1A1AA]">
               {f.reason}
@@ -253,7 +271,7 @@ export function PipelineSummaryBody({
               className="mt-1 inline-block h-1 w-1 flex-shrink-0 rounded-full bg-indigo-500"
               aria-hidden
             />
-            <span>{b}</span>
+            <span>{stripMockTag(b)}</span>
           </li>
         ))}
       </ul>
@@ -276,12 +294,19 @@ export function PipelineSummaryBody({
   );
 }
 
-export function DealSummaryBody({ data }: { data: DealAiSummary | null }) {
+export function DealSummaryBody({
+  data,
+  showConfidence = true,
+}: {
+  data: DealAiSummary | null;
+  /** False while AI isn't live — the mock confidence is a placeholder. */
+  showConfidence?: boolean;
+}) {
   if (!data) return <EmptyBody label="No summary yet. Refreshing in the background…" />;
   return (
     <div className="space-y-2.5">
       <p className="text-[12.5px] leading-snug text-slate-700 dark:text-[#FAFAFA]">
-        {data.narrative}
+        {stripMockTag(data.narrative)}
       </p>
       {data.risks.length > 0 ? (
         <div>
@@ -319,12 +344,14 @@ export function DealSummaryBody({ data }: { data: DealAiSummary | null }) {
           </ul>
         </div>
       ) : null}
-      <div className="flex items-center justify-between border-t border-slate-200/60 pt-1.5 text-[10.5px] text-slate-500 dark:border-[#1F1F1F]/60 dark:text-[#A1A1AA]">
-        <span>Model confidence</span>
-        <span className="font-mono tabular-nums">
-          {Math.round(data.confidence * 100)}%
-        </span>
-      </div>
+      {showConfidence ? (
+        <div className="flex items-center justify-between border-t border-slate-200/60 pt-1.5 text-[10.5px] text-slate-500 dark:border-[#1F1F1F]/60 dark:text-[#A1A1AA]">
+          <span>Model confidence</span>
+          <span className="font-mono tabular-nums">
+            {Math.round(data.confidence * 100)}%
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -337,7 +364,14 @@ function EmptyBody({ label }: { label: string }) {
   );
 }
 
-export function ThreadSummaryBody({ data }: { data: ThreadAiSummary | null }) {
+export function ThreadSummaryBody({
+  data,
+  showConfidence = true,
+}: {
+  data: ThreadAiSummary | null;
+  /** False while AI isn't live — the mock confidence is a placeholder. */
+  showConfidence?: boolean;
+}) {
   if (!data) {
     return <EmptyBody label="No summary yet. Generates as the thread grows." />;
   }
@@ -352,12 +386,14 @@ export function ThreadSummaryBody({ data }: { data: ThreadAiSummary | null }) {
         >
           {data.sentiment}
         </span>
-        <span className="font-mono text-[10px] tabular-nums text-slate-400 dark:text-[#71717A]">
-          {Math.round(data.confidence * 100)}% confidence
-        </span>
+        {showConfidence ? (
+          <span className="font-mono text-[10px] tabular-nums text-slate-400 dark:text-[#71717A]">
+            {Math.round(data.confidence * 100)}% confidence
+          </span>
+        ) : null}
       </div>
       <p className="text-[12.5px] leading-snug text-slate-700 dark:text-[#A1A1AA]">
-        {data.narrative}
+        {stripMockTag(data.narrative)}
       </p>
       {data.unresolved.length > 0 ? (
         <div>

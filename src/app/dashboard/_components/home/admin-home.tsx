@@ -36,6 +36,7 @@ import { getOrgSettings } from '@/lib/org-settings/queries';
 import { pipelineByStageRunner } from '@/lib/reports/queries/pipeline-by-stage';
 import type { DateRangePreset, OwnerScope } from '@/lib/reports/types';
 import { listTeammates } from '@/lib/teammates/queries';
+import { aiLive } from '@/lib/ai/config';
 import { cn } from '@/lib/utils';
 import { isFeatureEnabled } from '@/lib/workspace-settings/queries';
 
@@ -196,9 +197,13 @@ export async function AdminHome({
   const recsCount = recs.content?.recommendations.length ?? 0;
   const risksCount = risks.content?.flags.length ?? 0;
 
+  // Without a live OpenAI key the AI usage numbers are mock (fake calls,
+  // estimated tokens), so they are shown only once AI is live.
+  const liveAiStats = aiLive() ? aiStats : null;
+
   const opsChecks = buildOpsChecks({
     workflowStats,
-    aiStats,
+    aiStats: liveAiStats,
     emailStats,
     inbox,
   });
@@ -309,7 +314,7 @@ export async function AdminHome({
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <AISignalsCard recsCount={recsCount} risksCount={risksCount} aiStats={aiStats} />
+        <AISignalsCard recsCount={recsCount} risksCount={risksCount} aiStats={liveAiStats} />
         <AdminQuickLinks />
       </div>
     </main>
@@ -381,7 +386,8 @@ function AISignalsCard({
 }: {
   recsCount: number;
   risksCount: number;
-  aiStats: { totalCalls: number; totalTokens: number };
+  /** Null while AI isn't live — the usage chips are hidden. */
+  aiStats: { totalCalls: number; totalTokens: number } | null;
 }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
@@ -403,15 +409,19 @@ function AISignalsCard({
         </Link>
       </header>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className={cn('grid grid-cols-2 gap-2', aiStats && 'sm:grid-cols-4')}>
         <SignalChip label="Recommendations" value={recsCount} />
         <SignalChip label="Risk flags" value={risksCount} tone="warning" />
-        <SignalChip label="AI calls · 24h" value={aiStats.totalCalls} />
-        <SignalChip
-          label="Tokens · 24h"
-          value={aiStats.totalTokens}
-          format={compactNumber}
-        />
+        {aiStats ? (
+          <>
+            <SignalChip label="AI calls · 24h" value={aiStats.totalCalls} />
+            <SignalChip
+              label="Tokens · 24h"
+              value={aiStats.totalTokens}
+              format={compactNumber}
+            />
+          </>
+        ) : null}
       </div>
     </section>
   );

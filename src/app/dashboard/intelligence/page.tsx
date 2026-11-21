@@ -65,17 +65,20 @@ export default async function IntelligenceDashboardPage() {
               refresh needed.
             </p>
           </div>
-          <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-right dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
-              AI mode
+          {/* Shown only when AI is live, so the page never reads "mock". */}
+          {aiMode === 'live' ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-right dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
+                AI mode
+              </div>
+              <div className="font-mono text-sm font-semibold text-slate-900 dark:text-[#FAFAFA]">
+                {aiMode}
+              </div>
+              <div className="mt-0.5 text-[10px] text-slate-500 dark:text-[#A1A1AA]">
+                {tenant.name}
+              </div>
             </div>
-            <div className="font-mono text-sm font-semibold text-slate-900 dark:text-[#FAFAFA]">
-              {aiMode}
-            </div>
-            <div className="mt-0.5 text-[10px] text-slate-500 dark:text-[#A1A1AA]">
-              {tenant.name}
-            </div>
-          </div>
+          ) : null}
         </header>
 
         <div className="grid gap-4 lg:grid-cols-12">

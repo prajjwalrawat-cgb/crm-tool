@@ -122,14 +122,17 @@ export default async function CommandCenterPage() {
               reads. Every signal explains itself.
             </p>
           </div>
-          <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-right dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
-              AI mode
+          {/* Shown only when AI is live, so the page never reads "mock". */}
+          {aiMode === 'live' ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-right dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">
+                AI mode
+              </div>
+              <div className="font-mono text-sm font-semibold text-slate-900 dark:text-[#FAFAFA]">
+                {aiMode}
+              </div>
             </div>
-            <div className="font-mono text-sm font-semibold text-slate-900 dark:text-[#FAFAFA]">
-              {aiMode}
-            </div>
-          </div>
+          ) : null}
         </header>
 
         {/* ----- KPI strip ----- */}
@@ -380,9 +383,12 @@ export default async function CommandCenterPage() {
                         {flag.reason}
                       </div>
                     </div>
-                    <span className="font-mono text-[10px] tabular-nums text-slate-400 dark:text-[#71717A]">
-                      {Math.round(flag.confidence * 100)}%
-                    </span>
+                    {/* Mock confidence is a fixed placeholder, not a real score — live AI only. */}
+                    {aiMode === 'live' ? (
+                      <span className="font-mono text-[10px] tabular-nums text-slate-400 dark:text-[#71717A]">
+                        {Math.round(flag.confidence * 100)}%
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>

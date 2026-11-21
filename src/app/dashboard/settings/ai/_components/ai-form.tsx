@@ -96,12 +96,12 @@ export function AiForm({
               {aiMode === 'live'
                 ? 'OpenAI API key configured — real generations are running.'
                 : aiMode === 'mock'
-                  ? 'AI_ENABLED is off — deterministic mock outputs are served.'
-                  : 'AI_ENABLED is on but OPENAI_API_KEY is missing — falling back to mock.'}
+                  ? 'AI is off — insights are rule-based summaries of your CRM data.'
+                  : 'AI_ENABLED is on but OPENAI_API_KEY is missing — insights stay rule-based.'}
             </div>
           </div>
           <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-slate-700 dark:bg-[#181818] dark:text-[#FAFAFA]">
-            {aiMode}
+            {aiMode === 'live' ? 'live' : 'off'}
           </span>
         </div>
       </SettingsForm>

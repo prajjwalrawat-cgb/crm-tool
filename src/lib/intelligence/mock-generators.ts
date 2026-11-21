@@ -30,8 +30,6 @@ import type {
  * model would emit.
  */
 
-const MOCK_NOTICE = '(mock)';
-
 export function generateMockDailyExec(
   payload: DailyExecSourcePayload,
   ctx: TenantCurrencyContext,
@@ -58,7 +56,7 @@ export function generateMockDailyExec(
     );
   }
   bullets.push(
-    `${payload.recent.length} recent activity events covered in this snapshot. ${MOCK_NOTICE}`,
+    `${payload.recent.length} recent activity events covered in this snapshot.`,
   );
 
   const headline =
@@ -161,7 +159,7 @@ export function generateMockDealSummary(
       : 'no stakeholders mapped';
 
   return {
-    narrative: `Deal is in ${stage} at ${formatTenantCurrency(payload.deal.amount_minor, ctx)}. ${s.activityCount} activity event${s.activityCount === 1 ? '' : 's'}, ${s.emailCount} email${s.emailCount === 1 ? '' : 's'} logged, ${stakeholderNote}. ${MOCK_NOTICE}`,
+    narrative: `Deal is in ${stage} at ${formatTenantCurrency(payload.deal.amount_minor, ctx)}. ${s.activityCount} activity event${s.activityCount === 1 ? '' : 's'}, ${s.emailCount} email${s.emailCount === 1 ? '' : 's'} logged, ${stakeholderNote}.`,
     risks,
     nextActions: nextActions.slice(0, 3),
     confidence,
@@ -300,8 +298,8 @@ export function generateMockThreadSummary(payload: {
 
   const narrative =
     messages.length === 0
-      ? `No messages on this thread yet. ${MOCK_NOTICE}`
-      : `Thread "${thread.subject || 'no subject'}" has ${thread.messageCount} message${thread.messageCount === 1 ? '' : 's'}. Latest from ${lastSender}. ${MOCK_NOTICE}`;
+      ? `No messages on this thread yet.`
+      : `Thread "${thread.subject || 'no subject'}" has ${thread.messageCount} message${thread.messageCount === 1 ? '' : 's'}. Latest from ${lastSender}.`;
 
   const unresolved: string[] = [];
   if (messages.length > 1 && replyEvents === 0) {

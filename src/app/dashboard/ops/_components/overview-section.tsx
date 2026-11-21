@@ -6,11 +6,14 @@ import { fmtNumber, Section, StatTile } from './primitives';
 
 export function OverviewSection({
   aiMode,
+  showAi,
   aiStats,
   runStats,
   metrics,
 }: {
   aiMode: AIMode;
+  /** False while AI is switched off — hides the AI tiles (no MOCK on screen). */
+  showAi: boolean;
   aiStats: AIInvocationStats;
   runStats: WorkflowStats;
   metrics: MetricsSnapshot;
@@ -30,25 +33,35 @@ export function OverviewSection({
       title="Overview"
       description="Last 24h tenant-scoped from Postgres + live in-process gauges."
     >
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <StatTile
-          label="AI mode"
-          value={aiMode.toUpperCase()}
-          tone={aiTone}
-          hint={aiMode === 'mock' ? 'AI_ENABLED=false' : aiMode === 'disabled' ? 'no API key' : 'live OpenAI'}
-        />
-        <StatTile
-          label="AI calls (24h)"
-          value={fmtNumber(aiStats.totalCalls)}
-          hint={`${aiStats.errorCount} errors · ${aiStats.skippedCount} skipped`}
-          tone={aiStats.errorCount > 0 ? 'warn' : 'default'}
-        />
-        <StatTile
-          label="Tokens (24h)"
-          value={fmtNumber(aiStats.totalTokens)}
-          hint={aiMode === 'live' ? 'billed' : 'intended'}
-          tone="muted"
-        />
+      <div
+        className={
+          showAi
+            ? 'grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6'
+            : 'grid grid-cols-2 gap-3'
+        }
+      >
+        {showAi ? (
+          <>
+            <StatTile
+              label="AI mode"
+              value={aiMode.toUpperCase()}
+              tone={aiTone}
+              hint={aiMode === 'mock' ? 'AI_ENABLED=false' : aiMode === 'disabled' ? 'no API key' : 'live OpenAI'}
+            />
+            <StatTile
+              label="AI calls (24h)"
+              value={fmtNumber(aiStats.totalCalls)}
+              hint={`${aiStats.errorCount} errors · ${aiStats.skippedCount} skipped`}
+              tone={aiStats.errorCount > 0 ? 'warn' : 'default'}
+            />
+            <StatTile
+              label="Tokens (24h)"
+              value={fmtNumber(aiStats.totalTokens)}
+              hint={aiMode === 'live' ? 'billed' : 'intended'}
+              tone="muted"
+            />
+          </>
+        ) : null}
         <StatTile
           label="Workflow runs (24h)"
           value={fmtNumber(runStats.totalRuns)}
@@ -60,11 +73,13 @@ export function OverviewSection({
           value={fmtNumber(sseConnections)}
           hint="open right now"
         />
-        <StatTile
-          label="Chat in flight"
-          value={fmtNumber(inFlightChat)}
-          hint="streams currently open"
-        />
+        {showAi ? (
+          <StatTile
+            label="Chat in flight"
+            value={fmtNumber(inFlightChat)}
+            hint="streams currently open"
+          />
+        ) : null}
       </div>
     </Section>
   );

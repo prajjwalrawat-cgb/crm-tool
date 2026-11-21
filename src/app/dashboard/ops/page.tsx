@@ -52,6 +52,9 @@ export default async function OpsPage() {
     const errors = recentErrors.recent(50);
     const logs = recentLogs.recent(50);
     const aiMode = getAIMode();
+    // No OpenAI key yet: every AI number here would be mock (fake calls,
+    // estimated tokens), so the AI tiles and section show only when AI is live.
+    const showAi = aiMode === 'live';
     const emailProviderStatus = readEmailProviderStatus();
 
     return (
@@ -68,6 +71,7 @@ export default async function OpsPage() {
         <div className="grid gap-6">
           <OverviewSection
             aiMode={aiMode}
+            showAi={showAi}
             aiStats={aiStats}
             runStats={runStats}
             metrics={metrics}
@@ -77,7 +81,9 @@ export default async function OpsPage() {
             runStats={runStats}
             emailStats={emailStats}
           />
-          <AiSection mode={aiMode} stats={aiStats} recent={recentAi} metrics={metrics} />
+          {showAi ? (
+            <AiSection mode={aiMode} stats={aiStats} recent={recentAi} metrics={metrics} />
+          ) : null}
           <WorkflowsSection stats={runStats} recent={recentRuns} metrics={metrics} />
           <EmailProviderSection status={emailProviderStatus} />
           <EmailSection stats={emailStats} />
