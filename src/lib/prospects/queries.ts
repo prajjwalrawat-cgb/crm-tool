@@ -1,8 +1,15 @@
 import 'server-only';
 
-import { and, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
 
-import { offerings, prospects, prospectVotes, type Prospect } from '@/db/schema';
+import {
+  offerings,
+  prospects,
+  prospectStageHistory,
+  prospectVotes,
+  type Prospect,
+  type ProspectStage,
+} from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
 import type { ProspectCard, ProspectFilters } from './rules';
@@ -101,4 +108,23 @@ export async function listSourceTags(tenantId: string): Promise<string[]> {
       .orderBy(prospects.sourceTag);
     return rows.map((r) => r.sourceTag);
   });
+}
+
+export async function listProspectStageHistory(
+  tenantId: string,
+  prospectId: string,
+): Promise<{ fromStage: ProspectStage | null; toStage: ProspectStage; changedBy: string; changedAt: Date }[]> {
+  if (!UUID_RE.test(prospectId)) return [];
+  return tenantTransaction(async (tx) =>
+    tx
+      .select({
+        fromStage: prospectStageHistory.fromStage,
+        toStage: prospectStageHistory.toStage,
+        changedBy: prospectStageHistory.changedBy,
+        changedAt: prospectStageHistory.changedAt,
+      })
+      .from(prospectStageHistory)
+      .where(and(eq(prospectStageHistory.tenantId, tenantId), eq(prospectStageHistory.prospectId, prospectId)))
+      .orderBy(asc(prospectStageHistory.changedAt)),
+  );
 }

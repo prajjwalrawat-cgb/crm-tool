@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { GROUP_BY_KEYS, PROSPECT_STAGES, type GroupByKey, type ProspectFilters } from '@/lib/prospects/rules';
 
@@ -24,9 +24,11 @@ type Props = {
   sourceTags: string[];
   /** Writes the next filter set to the URL query string. */
   onChange: (next: ProspectFilters) => void;
+  /** Right-aligned slot (e.g. the New prospect button). */
+  actions?: ReactNode;
 };
 
-export function BoardToolbar({ filters, sourceTags, onChange }: Props) {
+export function BoardToolbar({ filters, sourceTags, onChange, actions }: Props) {
   const [q, setQ] = useState(filters.q ?? '');
   const [lastUrlQ, setLastUrlQ] = useState(filters.q);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -116,6 +118,7 @@ export function BoardToolbar({ filters, sourceTags, onChange }: Props) {
         />
         Show promoted
       </label>
+      {actions}
     </div>
   );
 }

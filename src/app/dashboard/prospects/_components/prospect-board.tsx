@@ -17,7 +17,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 
-import type { MembershipRole, ProspectStage } from '@/db/schema';
+import type { MembershipRole, Prospect, ProspectStage } from '@/db/schema';
 import {
   groupKeyOf,
   PROSPECT_STAGES,
@@ -30,6 +30,8 @@ import type { Teammate } from '@/lib/teammates/queries';
 import { bulkMoveStageAction, moveProspectStageAction } from '../actions';
 import { BoardToolbar } from './board-toolbar';
 import { BulkBar, type BulkResult } from './bulk-bar';
+import { NewProspectButton } from './new-prospect-button';
+import { ProspectDrawer, type StageHistoryEntry } from './prospect-drawer';
 import { type BoardCard, ProspectCardView } from './prospect-card';
 import { ProspectColumn } from './prospect-column';
 
@@ -38,10 +40,13 @@ type Props = {
   filters: ProspectFilters;
   sourceTags: string[];
   teammates: Teammate[];
-  /** Active offerings; used by the create dialog and drawer (Task 5). */
+  /** Active offerings; used by the create dialog and drawer. */
   offerings: { id: string; name: string }[];
   role: MembershipRole;
   currentUserId: string;
+  /** The prospect named by `?p=`, when it exists. */
+  openProspect: Prospect | null;
+  openHistory: StageHistoryEntry[];
 };
 
 type Lane = { key: string; label: string; cards: BoardCard[] };
@@ -71,8 +76,17 @@ const collisionDetection: CollisionDetection = (args) => {
   return closestCorners(args);
 };
 
-export function ProspectBoard({ cards: serverCards, filters, sourceTags, teammates, role, currentUserId }: Props) {
-  void currentUserId;
+export function ProspectBoard({
+  cards: serverCards,
+  filters,
+  sourceTags,
+  teammates,
+  offerings,
+  role,
+  currentUserId,
+  openProspect,
+  openHistory,
+}: Props) {
   const router = useRouter();
   const interactive = can(role, 'manageProspects');
   const canPark = can(role, 'bulkParkProspects');
@@ -122,9 +136,13 @@ export function ProspectBoard({ cards: serverCards, filters, sourceTags, teammat
     },
     [router],
   );
-  // Card click sets ?p=<id>; the drawer (Task 5) reads it.
+  // Card click sets ?p=<id>; the page loads that prospect for the drawer.
   const openCard = useCallback(
     (id: string) => router.replace(`/dashboard/prospects${toQuery(filters, id)}`),
+    [router, filters],
+  );
+  const closeCard = useCallback(
+    () => router.replace(`/dashboard/prospects${toQuery(filters)}`),
     [router, filters],
   );
   const toggleSelect = useCallback((id: string) => {
@@ -188,7 +206,12 @@ export function ProspectBoard({ cards: serverCards, filters, sourceTags, teammat
 
   return (
     <div className="flex flex-1 flex-col">
-      <BoardToolbar filters={filters} sourceTags={sourceTags} onChange={writeFilters} />
+      <BoardToolbar
+        filters={filters}
+        sourceTags={sourceTags}
+        onChange={writeFilters}
+        actions={interactive ? <NewProspectButton offerings={offerings} sourceTags={sourceTags} /> : null}
+      />
 
       {error ? (
         <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -240,6 +263,19 @@ export function ProspectBoard({ cards: serverCards, filters, sourceTags, teammat
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {openProspect ? (
+        <ProspectDrawer
+          prospect={openProspect}
+          history={openHistory}
+          teammates={teammates}
+          offerings={offerings}
+          sourceTags={sourceTags}
+          role={role}
+          currentUserId={currentUserId}
+          onClose={closeCard}
+        />
+      ) : null}
 
       {interactive ? (
         <BulkBar

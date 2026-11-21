@@ -1,7 +1,12 @@
 import { withTenantSession } from '@/lib/auth-guard';
 import { requireMembership } from '@/lib/membership';
 import { listOfferingOptions } from '@/lib/offerings/queries';
-import { listProspectsForBoard, listSourceTags } from '@/lib/prospects/queries';
+import {
+  getProspect,
+  listProspectsForBoard,
+  listProspectStageHistory,
+  listSourceTags,
+} from '@/lib/prospects/queries';
 import { parseProspectFilters } from '@/lib/prospects/rules';
 import { listTeammates } from '@/lib/teammates/queries';
 
@@ -16,12 +21,16 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 export default async function ProspectsPage({ searchParams }: { searchParams: SearchParams }) {
   return await withTenantSession(async ({ tenant, userId }) => {
     const membership = await requireMembership();
-    const filters = parseProspectFilters(await searchParams);
-    const [cards, sourceTags, teammates, offerings] = await Promise.all([
+    const sp = await searchParams;
+    const filters = parseProspectFilters(sp);
+    const p = Array.isArray(sp.p) ? sp.p[0] : sp.p;
+    const [cards, sourceTags, teammates, offerings, openProspect, openHistory] = await Promise.all([
       listProspectsForBoard(tenant.id, userId, filters),
       listSourceTags(tenant.id),
       listTeammates(tenant.id, tenant.name),
       listOfferingOptions(tenant.id, { activeOnly: true }),
+      p ? getProspect(tenant.id, p) : Promise.resolve(null),
+      p ? listProspectStageHistory(tenant.id, p) : Promise.resolve([]),
     ]);
 
     return (
@@ -41,6 +50,8 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
           offerings={offerings.map((o) => ({ id: o.id, name: o.name }))}
           role={membership.role}
           currentUserId={userId}
+          openProspect={openProspect}
+          openHistory={openHistory}
         />
       </main>
     );
