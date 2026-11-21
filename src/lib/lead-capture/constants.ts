@@ -14,6 +14,7 @@ export const LEAD_SOURCE_TYPES = [
   'meta_ads',
   'google_ads',
   'portal',
+  'prospect_board',
 ] as const;
 export type LeadSourceType = (typeof LEAD_SOURCE_TYPES)[number];
 

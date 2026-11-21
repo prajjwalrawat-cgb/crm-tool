@@ -55,6 +55,7 @@ const TYPE_LABEL: Record<LeadSourceType, string> = {
   meta_ads: 'Meta lead ads',
   google_ads: 'Google ads',
   portal: 'Portal (IndiaMART, JustDial …)',
+  prospect_board: 'Prospect Board',
 };
 
 const FIELD_LABEL: Record<string, string> = {

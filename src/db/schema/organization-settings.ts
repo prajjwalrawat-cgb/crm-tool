@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm';
 import {
   boolean,
+  integer,
   jsonb,
   pgTable,
   smallint,
@@ -106,6 +107,14 @@ export const organizationSettings = pgTable('organization_settings', {
   aiEnabled: boolean('ai_enabled').notNull().default(true),
   /** 0077: AI field suggestions from calls and emails (review queue). OFF by default. */
   aiSuggestionsEnabled: boolean('ai_suggestions_enabled').notNull().default(false),
+
+  /** 0079: Prospect Board. */
+  prospectClaimDays: integer('prospect_claim_days').notNull().default(14),
+  prospectClaimExpiryEnabled: boolean('prospect_claim_expiry_enabled').notNull().default(true),
+  prospectAutoParkDays: integer('prospect_auto_park_days').notNull().default(45),
+  prospectAutoParkEnabled: boolean('prospect_auto_park_enabled').notNull().default(true),
+  prospectEnrichmentEnabled: boolean('prospect_enrichment_enabled').notNull().default(false),
+
   aiAggressiveness: text('ai_aggressiveness').notNull().default('balanced'),
   insightRefresh: text('insight_refresh').notNull().default('on_change'),
 
