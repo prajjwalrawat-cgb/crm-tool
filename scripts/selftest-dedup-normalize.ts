@@ -3,6 +3,8 @@
  *   pnpm tsx scripts/selftest-dedup-normalize.ts
  */
 import {
+  companyNameCore,
+  GENERIC_COMPANY_WORDS_PG_RE,
   normalizeCompanyName,
   normalizeContactName,
   normalizeEmail,
@@ -31,6 +33,15 @@ eq('email null', normalizeEmail(null), '');
 
 eq('contact name', normalizeContactName('John', 'Doe'), 'john doe');
 eq('contact name punctuation', normalizeContactName("O'Brien", 'Smith'), 'o brien smith');
+
+// Fuzzy matching compares only the distinctive part (AskMiraa's "L&T Technology"
+// was offered Speridian Technology, Yash Technologies and Dixon Technologies).
+eq('core drops generic word', companyNameCore(normalizeCompanyName('L&T Technology')), 'l t');
+eq('core keeps the name', companyNameCore(normalizeCompanyName('Yash Technologies Pvt Ltd')), 'yash');
+eq('core of all-generic is empty', companyNameCore(normalizeCompanyName('Technology Solutions')), '');
+eq('core keeps Godawari', companyNameCore(normalizeCompanyName('Godawari Power and Ispat Ltd')), 'godawari power ispat');
+eq('core whole tokens only', companyNameCore('techmahindra it'), 'techmahindra');
+eq('pg regex has word bounds', GENERIC_COMPANY_WORDS_PG_RE.slice(0, 5), '\\m(?:');
 
 console.log('\n─── Dedup normalize unit self-test ───');
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? `  (${r.detail})` : ''}`);

@@ -11,6 +11,8 @@ import {
 } from '@/lib/db-context';
 
 import {
+  companyNameCore,
+  GENERIC_COMPANY_WORDS_PG_RE,
   normalizeCompanyName,
   normalizeContactName,
   normalizeEmail,
@@ -34,7 +36,9 @@ export type DedupMatch = {
 
 /**
  * Similar existing companies for a typed name — exact-normalized OR trigram
- * (similarity / word_similarity ≥ 0.55). Excludes soft-deleted + merged rows.
+ * (similarity / word_similarity ≥ 0.55) on the names' distinctive part, their
+ * generic words ("technology", "solutions", …) taken out on both sides, so a
+ * shared generic word alone is never a match. Excludes soft-deleted + merged rows.
  */
 export async function findCompanyMatches(
   tenantId: string,
@@ -43,23 +47,34 @@ export async function findCompanyMatches(
 ): Promise<DedupMatch[]> {
   const norm = normalizeCompanyName(name);
   if (norm.length < 2) return [];
+  const core = companyNameCore(norm);
+  // Too little left to compare ("Technology Solutions", "A Tech"): same name only.
+  const fuzzy = core.replace(/ /g, '').length >= 2;
+  // The stored name with the same words out. Normalized names hold single plain
+  // spaces only, so ' +' collapses the gaps (no backslash: Drizzle would eat it).
+  const stored = sql`btrim(regexp_replace(regexp_replace(normalized_name, ${GENERIC_COMPANY_WORDS_PG_RE}, ' ', 'g'), ' +', ' ', 'g'))`;
 
   const rows = (await tenantTransaction((tx) =>
     tx.execute(sql`
       SELECT id, name, domain,
         (normalized_name = ${norm}) AS exact,
-        greatest(
-          similarity(normalized_name, ${norm}),
-          word_similarity(${norm}, normalized_name)
-        )::float8 AS score
+        ${
+          fuzzy
+            ? sql`greatest(similarity(${stored}, ${core}), word_similarity(${core}, ${stored}))`
+            : sql`1`
+        }::float8 AS score
       FROM companies
       WHERE tenant_id = ${tenantId}::uuid
         AND deleted_at IS NULL AND merged_into_id IS NULL
         AND normalized_name IS NOT NULL AND normalized_name <> ''
         AND (
           normalized_name = ${norm}
-          OR similarity(normalized_name, ${norm}) >= ${SIM_THRESHOLD}
-          OR word_similarity(${norm}, normalized_name) >= ${SIM_THRESHOLD}
+          ${
+            fuzzy
+              ? sql`OR similarity(${stored}, ${core}) >= ${SIM_THRESHOLD}
+                    OR word_similarity(${core}, ${stored}) >= ${SIM_THRESHOLD}`
+              : sql``
+          }
         )
       ORDER BY exact DESC, score DESC
       LIMIT ${limit}
