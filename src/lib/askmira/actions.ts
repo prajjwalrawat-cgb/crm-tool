@@ -10,6 +10,8 @@ import 'server-only';
 //                Hold's reason and revisit date, why it was lost, why it goes back)
 //   deal.decide  a manager approves or rejects a Won that waits on them
 //   deal.note    a note on a deal
+//   deal.activity  a call or meeting in the deal's Activity (its "Log activity"),
+//                and for one still to come, a task on that day as a reminder
 //
 // Nothing here re-implements a rule. Each kind runs Saleinx's own server
 // actions — createDealAction, updateDealStageAction, approveDealAction and the
@@ -34,7 +36,10 @@ import {
   rejectDealAction,
   updateDealStageAction,
 } from '@/app/dashboard/deals/actions';
-import { updateDealFieldAction } from '@/app/dashboard/deals/[id]/actions';
+import {
+  logDealActivityAction,
+  updateDealFieldAction,
+} from '@/app/dashboard/deals/[id]/actions';
 import { createNoteAction } from '@/app/dashboard/notes/actions';
 import { createTaskAction } from '@/app/dashboard/tasks/actions';
 import { companies, contacts, deals } from '@/db/schema';
@@ -598,6 +603,66 @@ async function decideDeal({ me, params }: ActArgs) {
   });
 }
 
+/* ── deal.activity ─────────────────────────────────────────── */
+
+/**
+ * A call or a meeting in the deal's Activity, exactly as its "Log activity"
+ * form writes it (logDealActivityAction). One still to come ("schedule a call
+ * on the 23rd") may also carry `task`: a call or meeting task on that day,
+ * the person's own, so it reminds them. A task that cannot be added does not
+ * undo the logged activity: its reason comes back in `task_error`, so a retry
+ * never logs the same call twice.
+ */
+async function logActivity({ me, params }: ActArgs) {
+  needsManage(me);
+  const type = String(params.type ?? '').toLowerCase();
+  if (type !== 'call' && type !== 'meeting') {
+    throw httpError(422, 'Log a call or a meeting?');
+  }
+  const on = day(params.date, 'The date');
+  const notes = clean(params.notes, 4000);
+  const task = obj(params.task);
+  const taskTitle = clean(task.title, 280);
+  const taskDue = day(task.due_date, 'The task date');
+
+  return await asPerson(me, async () => {
+    const deal = await dealFor(me, params.deal_id);
+    const logged = await logDealActivityAction({
+      dealId: deal.id,
+      type,
+      occurredAt: on,
+      notes,
+    });
+    if (!logged.ok) refuse(logged, 'The activity could not be logged');
+    const done = [`${type} logged in the deal's Activity${on ? ` for ${on}` : ''}`];
+
+    let taskId: string | null = null;
+    let taskError: string | null = null;
+    if (taskTitle) {
+      const made = await createTaskAction(
+        form({
+          title: taskTitle,
+          description: notes,
+          status: 'todo',
+          priority: 'medium',
+          type,
+          dueDate: taskDue,
+          assignedUserId: me.userId,
+          entityType: 'deal',
+          entityId: deal.id,
+        }),
+      );
+      if (made.ok) {
+        taskId = made.task.id;
+        done.push(`${type} task${taskDue ? ` due ${taskDue}` : ''} added to your Tasks`);
+      } else {
+        taskError = made.message ?? 'Saleinx refused it.';
+      }
+    }
+    return { deal, done, task_id: taskId, task_error: taskError };
+  });
+}
+
 /* ── deal.note ─────────────────────────────────────────────── */
 
 async function noteDeal({ me, params }: ActArgs) {
@@ -617,4 +682,5 @@ export const ACTIONS: Record<string, (args: ActArgs) => Promise<Record<string, u
   'deal.stage': moveDeal,
   'deal.decide': decideDeal,
   'deal.note': noteDeal,
+  'deal.activity': logActivity,
 };
