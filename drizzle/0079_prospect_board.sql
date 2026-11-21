@@ -179,32 +179,69 @@ ALTER TABLE "organization_settings"
   ADD COLUMN IF NOT EXISTS "prospect_enrichment_enabled" boolean NOT NULL DEFAULT false;
 --> statement-breakpoint
 
--- Widen the AI-suggestion CHECKs (existing values + prospect / enrichment).
-ALTER TABLE "ai_suggestions" DROP CONSTRAINT IF EXISTS "ai_suggestions_entity_type_check";
+-- Widen the AI-suggestion / lead-source CHECKs (existing values + prospect / enrichment).
+-- REPLAY TRAP: every build replays all migrations. A plain DROP + ADD here would
+-- re-add this (narrower) list after a later migration widened it, and the
+-- validation scan would fail on rows holding the newer values. So each block only
+-- rewrites the constraint when it is missing or lacks this migration's marker
+-- value. A later migration that widens one of these must keep the same guard.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ai_suggestions_entity_type_check' AND conrelid = '"ai_suggestions"'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%''prospect''%'
+  ) THEN
+    ALTER TABLE "ai_suggestions" DROP CONSTRAINT IF EXISTS "ai_suggestions_entity_type_check";
+    ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_entity_type_check" CHECK ("entity_type" IN ('deal', 'contact', 'lead', 'prospect'));
+  END IF;
+END $$;
 --> statement-breakpoint
-ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_entity_type_check"
-  CHECK ("entity_type" IN ('deal', 'contact', 'lead', 'prospect'));
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ai_suggestions_field_check' AND conrelid = '"ai_suggestions"'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%''icp_score''%'
+  ) THEN
+    ALTER TABLE "ai_suggestions" DROP CONSTRAINT IF EXISTS "ai_suggestions_field_check";
+    ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_field_check" CHECK ("field" IN (
+      'stage', 'amount', 'close_date', 'next_step',
+      'contact_name', 'contact_email', 'contact_phone', 'contact_designation',
+      'follow_up_task',
+      'industry', 'size_band', 'product_fit', 'icp_score'));
+  END IF;
+END $$;
 --> statement-breakpoint
-ALTER TABLE "ai_suggestions" DROP CONSTRAINT IF EXISTS "ai_suggestions_field_check";
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ai_suggestions_source_type_check' AND conrelid = '"ai_suggestions"'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%''enrichment''%'
+  ) THEN
+    ALTER TABLE "ai_suggestions" DROP CONSTRAINT IF EXISTS "ai_suggestions_source_type_check";
+    ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_source_type_check" CHECK ("source_type" IN ('call', 'email', 'enrichment'));
+  END IF;
+END $$;
 --> statement-breakpoint
-ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_field_check" CHECK ("field" IN (
-  'stage', 'amount', 'close_date', 'next_step',
-  'contact_name', 'contact_email', 'contact_phone', 'contact_designation',
-  'follow_up_task',
-  'industry', 'size_band', 'product_fit', 'icp_score'));
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ai_suggestion_sources_type_check' AND conrelid = '"ai_suggestion_sources"'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%''enrichment''%'
+  ) THEN
+    ALTER TABLE "ai_suggestion_sources" DROP CONSTRAINT IF EXISTS "ai_suggestion_sources_type_check";
+    ALTER TABLE "ai_suggestion_sources" ADD CONSTRAINT "ai_suggestion_sources_type_check" CHECK ("source_type" IN ('call', 'email', 'enrichment'));
+  END IF;
+END $$;
 --> statement-breakpoint
-ALTER TABLE "ai_suggestions" DROP CONSTRAINT IF EXISTS "ai_suggestions_source_type_check";
---> statement-breakpoint
-ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_source_type_check"
-  CHECK ("source_type" IN ('call', 'email', 'enrichment'));
---> statement-breakpoint
-ALTER TABLE "ai_suggestion_sources" DROP CONSTRAINT IF EXISTS "ai_suggestion_sources_type_check";
---> statement-breakpoint
-ALTER TABLE "ai_suggestion_sources" ADD CONSTRAINT "ai_suggestion_sources_type_check"
-  CHECK ("source_type" IN ('call', 'email', 'enrichment'));
---> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'lead_sources_type_check' AND conrelid = '"lead_sources"'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%''prospect_board''%'
+  ) THEN
+    ALTER TABLE "lead_sources" DROP CONSTRAINT IF EXISTS "lead_sources_type_check";
+    ALTER TABLE "lead_sources" ADD CONSTRAINT "lead_sources_type_check" CHECK ("type" IN
+      ('web_form', 'landing_page', 'webhook', 'csv_import', 'api', 'manual', 'meta_ads', 'google_ads', 'portal', 'prospect_board'));
+  END IF;
+END $$;
 
-ALTER TABLE "lead_sources" DROP CONSTRAINT IF EXISTS "lead_sources_type_check";
---> statement-breakpoint
-ALTER TABLE "lead_sources" ADD CONSTRAINT "lead_sources_type_check" CHECK ("type" IN
-  ('web_form', 'landing_page', 'webhook', 'csv_import', 'api', 'manual', 'meta_ads', 'google_ads', 'portal', 'prospect_board'));
