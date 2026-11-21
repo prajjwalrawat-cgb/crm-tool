@@ -35,6 +35,8 @@ const fail = (error: keyof typeof MESSAGES): MutationResult => ({ ok: false, err
 
 const MAX_BULK = 500;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function createProspect(
   tenantId: string,
   actor: Actor,
@@ -66,6 +68,7 @@ export async function updateProspect(
   id: string,
   input: Partial<ProspectInput>,
 ): Promise<MutationResult> {
+  if (!UUID_RE.test(id)) return fail('not_found');
   return tenantTransaction(async (tx) => {
     const [cur] = await tx
       .select()
@@ -114,6 +117,7 @@ export async function moveProspectStage(
   id: string,
   to: ProspectStage,
 ): Promise<MutationResult> {
+  if (!UUID_RE.test(id)) return fail('not_found');
   return tenantTransaction(async (tx) => {
     const [cur] = await tx
       .select()
@@ -161,9 +165,14 @@ export async function bulkMoveStage(
   const moved: string[] = [];
   const skipped: { id: string; reason: string }[] = [];
   for (const id of ids) {
-    const r = await moveProspectStage(tenantId, actor, id, to);
-    if (r.ok) moved.push(id);
-    else skipped.push({ id, reason: r.error });
+    try {
+      const r = await moveProspectStage(tenantId, actor, id, to);
+      if (r.ok) moved.push(id);
+      else skipped.push({ id, reason: r.error });
+    } catch (err) {
+      console.error('bulkMoveStage: move failed', id, err);
+      skipped.push({ id, reason: 'error' });
+    }
   }
   return { moved, skipped };
 }

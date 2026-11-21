@@ -8,6 +8,7 @@ import { tenantTransaction } from '@/lib/db-context';
 import type { ProspectCard, ProspectFilters } from './rules';
 
 const BOARD_LIMIT = 1000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -80,6 +81,7 @@ export async function listProspectsForBoard(
 }
 
 export async function getProspect(tenantId: string, id: string): Promise<Prospect | null> {
+  if (!UUID_RE.test(id)) return null;
   return tenantTransaction(async (tx) => {
     const [row] = await tx
       .select()

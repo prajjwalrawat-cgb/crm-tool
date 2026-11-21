@@ -152,6 +152,16 @@ async function main() {
     const bpm = await asA(() => m.bulkMoveStage(A, mgr, [c10, c11], 'parked'));
     check('bulk: manager can park', bpm.moved.length === 2, bpm);
 
+    let badMove: Awaited<ReturnType<typeof m.moveProspectStage>> | null = null;
+    let badThrew = false;
+    try { badMove = await asA(() => m.moveProspectStage(A, member, 'abc', 'ready')); } catch { badThrew = true; }
+    check('move: malformed id', !badThrew && badMove !== null && !badMove.ok && badMove.error === 'not_found', badMove);
+    const c12 = await mk('Bulk Bad 1');
+    const c13 = await mk('Bulk Bad 2');
+    const bb = await asA(() => m.bulkMoveStage(A, member, [c12, 'abc', c13], 'researching'));
+    check('bulk: malformed id among valid', bb.moved.length === 2 && bb.skipped.length === 1 && bb.skipped[0]!.id === 'abc' && bb.skipped[0]!.reason === 'not_found', bb);
+    check('get: malformed id is null', (await asA(() => q.getProspect(A, 'abc'))) === null);
+
     const upd = await asA(() => m.updateProspect(A, member, c1, { industry: 'Steel' }));
     check('update: ok and merges', upd.ok && (await stageOf(c1)).industry === 'Steel' && (await stageOf(c1)).companyName === 'Create Co');
     const gone = await asA(() => q.getProspect(A, c8));
