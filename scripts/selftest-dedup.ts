@@ -54,6 +54,7 @@ async function main() {
 
   const TAG = `DEDUPTEST-${Date.now()}`;
   let godawariId = '', winnerId = '', loserId = '', dealId = '', contactId = '';
+  const extraCompanyIds: string[] = [];
 
   try {
     await txAs(tenantId, async (tx) => {
@@ -69,6 +70,40 @@ async function main() {
     });
     const matches = await runWithSystemContext(tenantId, () => findCompanyMatches(tenantId, `Godavari Power ${TAG}`));
     check('trigram match finds Godawari', matches.some((m) => m.id === godawariId), `matches=${matches.map((m) => m.label).join(' | ')}`);
+
+    // 1b. A shared generic word is not a match: "L&T Technology" is not
+    //     "Speridian Technology", but it is "L&T Technology Services".
+    //     Random letters per name: a shared tag, numeric or not, would itself look alike.
+    const word = (n: number) => Array.from({ length: n }, () => 'bcdfghjkmnpqrstvwxz'[Math.floor(Math.random() * 19)]).join('');
+    // Short first words, like real ones ("Tata", "CGB"): long random ones would carry the score alone.
+    const [spWord, cgbWord, tataWord, fooWord] = [word(9), word(3), word(4), word(4)];
+    for (const n of [`Speridian${spWord} Technology`, `L&T Technology Services`]) {
+      const id = await txAs(tenantId, async (tx) => {
+        const [c] = await tx.insert(companies).values({ tenantId, name: n, normalizedName: normalizeCompanyName(n) }).returning({ id: companies.id });
+        return c!.id;
+      });
+      extraCompanyIds.push(id);
+    }
+    const lt = await runWithSystemContext(tenantId, () => findCompanyMatches(tenantId, 'L&T Technology'));
+    check('generic word alone does not match', !lt.some((m) => m.id === extraCompanyIds[0]), `matches=${lt.map((m) => m.label).join(' | ')}`);
+    check('same distinctive name still matches', lt.some((m) => m.id === extraCompanyIds[1]), `matches=${lt.map((m) => m.label).join(' | ')}`);
+
+    // 1c. The same first word is the same company name, whatever follows:
+    //     "<X> Solutions" for "<X> Services", "<Y> Consultancy Services" for "<Y> Motors".
+    const firstWordFixtures = [`${cgbWord} Solutions`, `${tataWord} Consultancy Services`];
+    for (const n of firstWordFixtures) {
+      const id = await txAs(tenantId, async (tx) => {
+        const [c] = await tx.insert(companies).values({ tenantId, name: n, normalizedName: normalizeCompanyName(n) }).returning({ id: companies.id });
+        return c!.id;
+      });
+      extraCompanyIds.push(id);
+    }
+    const cgb = await runWithSystemContext(tenantId, () => findCompanyMatches(tenantId, `${cgbWord} Services`));
+    check('same first word, different generic ending matches', cgb.some((m) => m.id === extraCompanyIds[2]), `matches=${cgb.map((m) => m.label).join(' | ')}`);
+    const tata = await runWithSystemContext(tenantId, () => findCompanyMatches(tenantId, `${tataWord} Motors Healthcare`));
+    check('same first word, different distinctive ending matches', tata.some((m) => m.id === extraCompanyIds[3]), `matches=${tata.map((m) => m.label).join(' | ')}`);
+    const other = await runWithSystemContext(tenantId, () => findCompanyMatches(tenantId, `${fooWord} Consultancy Services`));
+    check('different first word does not match', !other.some((m) => m.id === extraCompanyIds[3]), `matches=${other.map((m) => m.label).join(' | ')}`);
 
     // 2. Email exact block (case-insensitive).
     const email = `dedup-${Date.now()}@sync-selftest.example`;
@@ -120,7 +155,7 @@ async function main() {
     await txAs(tenantId, async (tx) => {
       if (dealId) await tx.delete(deals).where(and(eq(deals.id, dealId), eq(deals.tenantId, tenantId)));
       if (loserId) await tx.delete(mergeAudit).where(and(eq(mergeAudit.tenantId, tenantId), eq(mergeAudit.loserId, loserId)));
-      for (const id of [godawariId, winnerId, loserId]) if (id) await tx.delete(companies).where(and(eq(companies.id, id), eq(companies.tenantId, tenantId)));
+      for (const id of [godawariId, winnerId, loserId, ...extraCompanyIds]) if (id) await tx.delete(companies).where(and(eq(companies.id, id), eq(companies.tenantId, tenantId)));
       if (contactId) await tx.delete(contacts).where(and(eq(contacts.id, contactId), eq(contacts.tenantId, tenantId)));
       if (prior === null) await tx.delete(workspaceSettings).where(eq(workspaceSettings.tenantId, tenantId));
       else await tx.update(workspaceSettings).set({ dedupEnabled: prior }).where(eq(workspaceSettings.tenantId, tenantId));

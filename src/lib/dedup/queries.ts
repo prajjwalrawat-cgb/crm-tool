@@ -39,6 +39,9 @@ export type DedupMatch = {
  * (similarity / word_similarity ≥ 0.55) on the names' distinctive part, their
  * generic words ("technology", "solutions", …) taken out on both sides, so a
  * shared generic word alone is never a match. Excludes soft-deleted + merged rows.
+ * The same first distinctive word is a match on its own ("CGB Services" →
+ * "CGB Solutions", "Tata Motors" → "Tata Consultancy Services"); a one-letter
+ * first word ("L&T" → "l t") doesn't count for that rule.
  */
 export async function findCompanyMatches(
   tenantId: string,
@@ -53,11 +56,17 @@ export async function findCompanyMatches(
   // The stored name with the same words out. Normalized names hold single plain
   // spaces only, so ' +' collapses the gaps (no backslash: Drizzle would eat it).
   const stored = sql`btrim(regexp_replace(regexp_replace(normalized_name, ${GENERIC_COMPANY_WORDS_PG_RE}, ' ', 'g'), ' +', ' ', 'g'))`;
+  // Same first distinctive word: short real names ("Tata", "Wipro") score too
+  // low on trigrams when the rest differs, so this is its own test.
+  const firstWord = core.split(' ')[0] ?? '';
+  const sameFirst =
+    fuzzy && firstWord.length >= 2 ? sql`split_part(${stored}, ' ', 1) = ${firstWord}` : sql`false`;
 
   const rows = (await tenantTransaction((tx) =>
     tx.execute(sql`
       SELECT id, name, domain,
         (normalized_name = ${norm}) AS exact,
+        (${sameFirst}) AS same_first,
         ${
           fuzzy
             ? sql`greatest(similarity(${stored}, ${core}), word_similarity(${core}, ${stored}))`
@@ -69,6 +78,7 @@ export async function findCompanyMatches(
         AND normalized_name IS NOT NULL AND normalized_name <> ''
         AND (
           normalized_name = ${norm}
+          OR ${sameFirst}
           ${
             fuzzy
               ? sql`OR similarity(${stored}, ${core}) >= ${SIM_THRESHOLD}
@@ -76,7 +86,7 @@ export async function findCompanyMatches(
               : sql``
           }
         )
-      ORDER BY exact DESC, score DESC
+      ORDER BY exact DESC, same_first DESC, score DESC
       LIMIT ${limit}
     `),
   )) as unknown as Array<{
