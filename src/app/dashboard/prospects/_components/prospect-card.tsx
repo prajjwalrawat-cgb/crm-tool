@@ -13,7 +13,9 @@ const DAY_MS = 86_400_000;
 
 export function daysLeft(expires: Date | null, now = Date.now()): number | null {
   if (!expires) return null;
-  return Math.max(0, Math.ceil((new Date(expires).getTime() - now) / DAY_MS));
+  const ms = new Date(expires).getTime() - now;
+  if (ms <= 0) return null; // expired claim: shown as unclaimed, like the drawer
+  return Math.ceil(ms / DAY_MS);
 }
 
 function initials(name: string): string {
@@ -46,6 +48,7 @@ function ProspectCardImpl({ card, teammates, interactive, selected, overlay, onS
   });
   const claimer = card.claimedBy ? teammates.get(card.claimedBy) : null;
   const left = daysLeft(card.claimExpiresAt);
+  const claimActive = Boolean(card.claimedBy) && (!card.claimExpiresAt || left !== null);
   const territory = [card.city, card.state].filter(Boolean).join(', ');
 
   return (
@@ -105,7 +108,7 @@ function ProspectCardImpl({ card, teammates, interactive, selected, overlay, onS
 
       <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
         <span className="flex items-center gap-1.5">
-          {card.claimedBy ? (
+          {claimActive ? (
             <>
               <span
                 title={claimer?.displayName ?? 'Claimed'}

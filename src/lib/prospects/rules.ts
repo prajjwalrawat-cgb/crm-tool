@@ -104,18 +104,21 @@ export type Actor = { userId: string; role: MembershipRole };
 export const isManagerRole = (role: MembershipRole): boolean =>
   role === 'owner' || role === 'admin' || role === 'manager';
 
-type GuardRow = Pick<Prospect, 'claimedBy' | 'promotedDealId' | 'deletedAt' | 'stage'>;
+type GuardRow = Pick<Prospect, 'claimedBy' | 'claimExpiresAt' | 'promotedDealId' | 'deletedAt' | 'stage'>;
 
 export function stageMoveBlock(
   p: GuardRow,
   to: ProspectStage,
   actor: Actor,
+  now: Date = new Date(),
 ): null | 'promoted' | 'deleted' | 'claimed_by_other' | 'same_stage' | 'no_permission' {
   if (!can(actor.role, 'manageProspects')) return 'no_permission';
   if (p.deletedAt) return 'deleted';
   if (p.promotedDealId) return 'promoted';
   if (p.stage === to) return 'same_stage';
-  if (p.claimedBy && p.claimedBy !== actor.userId && !isManagerRole(actor.role)) return 'claimed_by_other';
+  // An expired claim (claimExpiresAt <= now) counts as unclaimed.
+  const claimExpired = p.claimExpiresAt != null && new Date(p.claimExpiresAt).getTime() <= now.getTime();
+  if (p.claimedBy && !claimExpired && p.claimedBy !== actor.userId && !isManagerRole(actor.role)) return 'claimed_by_other';
   return null;
 }
 

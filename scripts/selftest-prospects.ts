@@ -45,10 +45,15 @@ check('input: blank company rejected', prospectInputSchema.safeParse({ companyNa
   }
 }
 
-const mk = (o: Partial<{ claimedBy: string | null; promotedDealId: string | null; deletedAt: Date | null; stage: 'dump' | 'researching' | 'qualified' | 'ready' | 'parked' }> = {}) => ({
-  claimedBy: null, promotedDealId: null, deletedAt: null, stage: 'dump' as const, ...o,
+const mk = (o: Partial<{ claimedBy: string | null; claimExpiresAt: Date | null; promotedDealId: string | null; deletedAt: Date | null; stage: 'dump' | 'researching' | 'qualified' | 'ready' | 'parked' }> = {}) => ({
+  claimedBy: null, claimExpiresAt: null, promotedDealId: null, deletedAt: null, stage: 'dump' as const, ...o,
 });
 const me = { userId: 'u1', role: 'member' as const };
+{
+  const day = 86_400_000;
+  check("move: member moves other's EXPIRED claim -> null", stageMoveBlock(mk({ claimedBy: 'u2', claimExpiresAt: new Date(Date.now() - day) }), 'qualified', me) === null);
+  check("move: member moves other's active claim -> 'claimed_by_other'", stageMoveBlock(mk({ claimedBy: 'u2', claimExpiresAt: new Date(Date.now() + day) }), 'qualified', me) === 'claimed_by_other');
+}
 check('move: member moves own claimed card', stageMoveBlock(mk({ claimedBy: 'u1' }), 'qualified', me) === null);
 check("move: member moves other's claimed", stageMoveBlock(mk({ claimedBy: 'u2' }), 'qualified', me) === 'claimed_by_other');
 check("move: manager moves other's claimed", stageMoveBlock(mk({ claimedBy: 'u2' }), 'qualified', { userId: 'm', role: 'manager' }) === null);
