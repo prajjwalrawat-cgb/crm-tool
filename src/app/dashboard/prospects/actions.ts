@@ -7,6 +7,7 @@ import type { ProspectStage } from '@/db/schema';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext } from '@/lib/db-context';
 import { bulkReleaseClaims, claimProspect, reassignClaim, releaseProspect } from '@/lib/prospects/claims';
+import { confirmImport, discardImport } from '@/lib/prospects/import/imports';
 import { toggleVote, type VoteKind } from '@/lib/prospects/votes';
 import type { Permission } from '@/lib/rbac';
 import {
@@ -151,4 +152,29 @@ export async function bulkReleaseClaimsAction(
   );
   revalidatePath(BOARD_PATH);
   return { ok: true, data: { released: r.released.length, skipped: r.skipped } };
+}
+
+/* ---------------- Quick Dump imports ---------------- */
+
+export async function confirmImportAction(
+  importId: string,
+  rows: unknown[],
+): Promise<ActionResult<{ inserted: number }> | { ok: false; message: string; rowErrors: { index: number; message: string }[] }> {
+  const g = await gate();
+  if (!g.ok) return g;
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    confirmImport(g.tenantId, g.actor, String(importId), Array.isArray(rows) ? rows : []),
+  );
+  if (!r.ok) return r.rowErrors ? { ok: false, message: r.message, rowErrors: r.rowErrors } : { ok: false, message: r.message };
+  revalidatePath(BOARD_PATH);
+  return { ok: true, data: { inserted: r.inserted } };
+}
+
+export async function discardImportAction(importId: string): Promise<ActionResult> {
+  const g = await gate();
+  if (!g.ok) return g;
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    discardImport(g.tenantId, g.actor, String(importId)),
+  );
+  return r.ok ? { ok: true } : { ok: false, message: r.message };
 }

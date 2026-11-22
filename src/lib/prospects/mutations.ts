@@ -3,7 +3,7 @@ import 'server-only';
 import { and, eq } from 'drizzle-orm';
 
 import { prospects, prospectStageHistory, type ProspectStage } from '@/db/schema';
-import { tenantTransaction } from '@/lib/db-context';
+import { tenantTransaction, type DbExecutor } from '@/lib/db-context';
 import { can } from '@/lib/rbac';
 
 import {
@@ -13,6 +13,7 @@ import {
   stageMoveBlock,
   type Actor,
   type ProspectInput,
+  type ProspectRowValues,
 } from './rules';
 
 export type MutationResult =
@@ -50,19 +51,33 @@ export async function createProspect(
   if (!parsed.success) return { ok: false, error: parsed.error.message };
   const values = normalizeProspectInput(parsed.data);
   return tenantTransaction(async (tx) => {
-    const [row] = await tx
-      .insert(prospects)
-      .values({ ...values, tenantId, createdBy: actor.userId, lastActivityAt: new Date() })
-      .returning({ id: prospects.id });
-    await tx.insert(prospectStageHistory).values({
-      tenantId,
-      prospectId: row!.id,
-      fromStage: null,
-      toStage: 'dump',
-      changedBy: actor.userId,
-    });
-    return { ok: true as const, id: row!.id };
+    const [id] = await insertProspectRows(tx, tenantId, actor, [values]);
+    return { ok: true as const, id: id! };
   });
+}
+
+/**
+ * Inserts already-validated, normalised prospect rows in stage `dump` and
+ * writes one history row each (null -> 'dump'). Shared by createProspect and
+ * the Quick Dump confirm; runs inside the caller's transaction.
+ */
+export async function insertProspectRows(
+  tx: DbExecutor,
+  tenantId: string,
+  actor: Actor,
+  rows: ProspectRowValues[],
+  opts: { importId?: string } = {},
+): Promise<string[]> {
+  if (rows.length === 0) return [];
+  const now = new Date();
+  const inserted = await tx
+    .insert(prospects)
+    .values(rows.map((values) => ({ ...values, tenantId, importId: opts.importId ?? null, createdBy: actor.userId, lastActivityAt: now })))
+    .returning({ id: prospects.id });
+  await tx.insert(prospectStageHistory).values(
+    inserted.map((r) => ({ tenantId, prospectId: r.id, fromStage: null, toStage: 'dump' as const, changedBy: actor.userId })),
+  );
+  return inserted.map((r) => r.id);
 }
 
 export async function updateProspect(

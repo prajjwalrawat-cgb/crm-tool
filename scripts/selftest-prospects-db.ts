@@ -366,6 +366,112 @@ async function main() {
     const ea = await editComment(actv, cmtA, 'changed');
     const cBody2 = (await inA((tx) => tx.select().from(s.comments).where(eq(s.comments.id, cmtA))))[0]!.body;
     check('touch: edit on active prospect bumps last_activity_at', ea === 'ok' && cBody2 === 'changed' && (await row(actv)).lastActivityAt!.getTime() > lastBefore2 + DAY, { ea, cBody2 });
+
+    /* ---------------- imports (Stage 2 Task 6) ---------------- */
+    const imp = await import('../src/lib/prospects/import/imports');
+    const { normalizeCompanyName } = await import('../src/lib/dedup/normalize');
+    process.env.ANTHROPIC_API_KEY = 'test-key-not-used'; // Claude is always stubbed below
+    const dumpRow = (o: Record<string, unknown> = {}) => ({
+      companyName: 'Dump Co', contactName: null, contactDesignation: null, contactEmail: null, contactPhone: null,
+      domain: null, industry: null, sizeBand: null, city: null, state: null, clusterTags: [], notes: null,
+      confidence: 0.9, note: null, ...o,
+    });
+    const stubParse = (rows: unknown[]) => ({
+      create: (async () => ({
+        id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [],
+        stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 },
+        parsed_output: { rows },
+      })) as never,
+    });
+    const failParse = { create: (async () => { throw new Error('boom'); }) as never };
+    const importRow = async (id: string) => (await inA((tx) => tx.select().from(s.prospectImports).where(eq(s.prospectImports.id, id))))[0];
+    const importCount = async () => (await inA((tx) => tx.select({ id: s.prospectImports.id }).from(s.prospectImports))).length;
+    const prospectCount = async () => (await inA((tx) => tx.select({ id: s.prospects.id }).from(s.prospects))).length;
+
+    const it1 = await asA(() => imp.createImport(A, member, { sourceTag: 'expo-26', kind: 'text', text: 'Dump Co and Two Co met at the expo' }, stubParse([dumpRow(), dumpRow({ companyName: 'Two Co' })])));
+    const it1row = it1.ok ? await importRow(it1.importId) : undefined;
+    check('import: text parsed and stored', it1.ok && it1.rows.length === 2 && it1row?.status === 'parsed' && (it1row?.parserOutput as unknown[]).length === 2 && it1row?.rowsParsed === 2 && it1row?.rawText === 'Dump Co and Two Co met at the expo' && it1row?.sourceTag === 'expo-26' && it1row?.createdBy === memberU && it1row?.parserModel === 'claude-opus-5-5', { it1, it1row });
+
+    const ifl = await asA(() => imp.createImport(A, member, { sourceTag: 'expo-26', kind: 'text', text: 'Some dump' }, failParse));
+    const failedRows = (await inA((tx) => tx.select().from(s.prospectImports).where(eq(s.prospectImports.status, 'failed'))));
+    check('import: parse failure stored as failed', !ifl.ok && failedRows.length === 1 && !!failedRows[0]!.error && failedRows[0]!.rawText === 'Some dump' && failedRows[0]!.rowsParsed === 0, { ifl, failedRows });
+
+    const n0 = await importCount();
+    const ins = await asA(() => imp.createImport(A, member, { sourceTag: '  ', kind: 'text', text: 'Dump Co' }, stubParse([dumpRow()])));
+    const ins2 = await asA(() => imp.createImport(A, member, { sourceTag: 'x'.repeat(81), kind: 'text', text: 'Dump Co' }, stubParse([dumpRow()])));
+    check('import: missing sourceTag rejected, no row', !ins.ok && !ins2.ok && (await importCount()) === n0, { ins, ins2 });
+
+    const big = Buffer.alloc(6 * 1024 * 1024, 1);
+    const iimg = await asA(() => imp.createImport(A, member, { sourceTag: 'cards', kind: 'image', file: { bytes: big, mediaType: 'image/png', name: 'card.png' } }, stubParse([dumpRow()])));
+    const ilong = await asA(() => imp.createImport(A, member, { sourceTag: 'cards', kind: 'text', text: 'a'.repeat(60_001) }, stubParse([dumpRow()])));
+    const icsv = await asA(() => imp.createImport(A, member, { sourceTag: 'cards', kind: 'csv', file: { bytes: Buffer.alloc(4 * 1024 * 1024 + 1, 97), mediaType: 'text/csv', name: 'a.csv' } }, stubParse([dumpRow()])));
+    const igif = await asA(() => imp.createImport(A, member, { sourceTag: 'cards', kind: 'image', file: { bytes: Buffer.from('x'), mediaType: 'image/tiff', name: 'a.tif' } }, stubParse([dumpRow()])));
+    check('import: 6MB image rejected', !iimg.ok && iimg.status === 413 && (await importCount()) === n0, iimg);
+    check('import: 60,001-char text, 4MB+ CSV and tiff rejected, no row', !ilong.ok && ilong.status === 413 && !icsv.ok && icsv.status === 413 && !igif.ok && igif.status === 400 && (await importCount()) === n0, { ilong, icsv, igif });
+
+    const viewerImp = await asA(() => imp.createImport(A, viewer, { sourceTag: 'x', kind: 'text', text: 'Dump Co' }, stubParse([dumpRow()])));
+    check('import: viewer denied, no row', !viewerImp.ok && viewerImp.status === 403 && (await importCount()) === n0, viewerImp);
+
+    const img = await asA(() => imp.createImport(A, member, { sourceTag: 'cards', kind: 'image', file: { bytes: Buffer.from('png'), mediaType: 'image/png', name: 'card.png' } }, { ...stubParse([dumpRow({ companyName: 'Card Co' })]), upload: async () => { throw new Error('storage down'); } }));
+    const imgRow = img.ok ? await importRow(img.importId) : undefined;
+    check('import: image parsed even when upload fails, raw_file_path null', img.ok && imgRow?.status === 'parsed' && imgRow?.rawFilePath === null && imgRow?.rawText === null, { img, imgRow });
+
+    const csvBody = 'Company,Email\nCsv One,a@csv1.in\nCsv Two,b@csv2.in\n';
+    const csvImp = await asA(() => imp.createImport(A, member, { sourceTag: 'csv-list', kind: 'csv', file: { bytes: Buffer.from(csvBody), mediaType: 'text/csv', name: 'l.csv' } }, failParse));
+    const csvRow = csvImp.ok ? await importRow(csvImp.importId) : undefined;
+    check('import: csv mapped without Claude, raw_text stored', csvImp.ok && csvImp.rows.length === 2 && csvRow?.rawText === csvBody && csvRow?.parserModel === null, { csvImp, csvRow });
+
+    // hints: a seeded company + a seeded prospect share the name; domain/email/phone hit a company/contact.
+    await mk('Hintco Industries');
+    await inA(async (tx) => {
+      const [co] = await tx.insert(s.companies).values({ tenantId: A, name: 'Hintco Industries', normalizedName: normalizeCompanyName('Hintco Industries') }).returning();
+      await tx.insert(s.companies).values({ tenantId: A, name: 'Domainly', domain: 'https://www.domainly.in/', normalizedName: normalizeCompanyName('Domainly') });
+      await tx.insert(s.contacts).values({ tenantId: A, firstName: 'Priya', lastName: 'Shah', email: 'Priya@Mailed.in', phone: '+91 98765 43210', phoneNormalized: '+919876543210', companyId: co!.id } as never);
+    });
+    const ih = await asA(() => imp.createImport(A, member, { sourceTag: 'hints', kind: 'text', text: 'hint dump' }, stubParse([
+      dumpRow({ companyName: 'Hintco Industries' }),
+      dumpRow({ companyName: 'Zzqx Unrelated', domain: 'domainly.in' }),
+      dumpRow({ companyName: 'Yyqv Unrelated', contactEmail: 'priya@mailed.in' }),
+      dumpRow({ companyName: 'Wwqk Unrelated', contactPhone: '098765 43210' }),
+      dumpRow({ companyName: 'Vvqj Nothing' }),
+    ])));
+    const hk = (i: number) => (ih.ok ? ih.hints.filter((h) => h.index === i).map((h) => h.kind).sort().join(',') : '');
+    check('import: hints', ih.ok && hk(0) === 'company,prospect' && hk(1) === 'company' && hk(2) === 'contact' && hk(3) === 'contact' && hk(4) === '', ih.ok ? ih.hints : ih);
+    check('dedup: findCompanyByDomain / findContactByPhone', ih.ok && ih.hints.some((h) => h.index === 1 && h.label === 'Domainly') && ih.hints.some((h) => h.index === 3 && h.label === 'Priya Shah'), ih.ok ? ih.hints : ih);
+
+    // confirm
+    const before1 = await prospectCount();
+    const cf = it1.ok ? await asA(() => imp.confirmImport(A, member, it1.importId, it1.rows)) : null;
+    const inserted = await inA((tx) => tx.select().from(s.prospects).where(eq(s.prospects.importId, it1.ok ? it1.importId : A)));
+    const hist1 = inserted.length ? await hist(inserted[0]!.id) : [];
+    const cfRow = it1.ok ? await importRow(it1.importId) : undefined;
+    check('confirm: inserts with import_id + history', !!cf?.ok && cf.inserted === 2 && inserted.length === 2 && (await prospectCount()) === before1 + 2 && inserted.every((p) => p.sourceTag === 'expo-26' && p.stage === 'dump' && p.createdBy === memberU) && hist1.length === 1 && hist1[0]!.fromStage === null && hist1[0]!.toStage === 'dump' && hist1[0]!.changedBy === memberU && cfRow?.status === 'confirmed' && cfRow?.rowsInserted === 2 && !!cfRow?.confirmedAt, { cf, n: inserted.length, cfRow });
+
+    const it2 = await asA(() => imp.createImport(A, member, { sourceTag: 'twice', kind: 'text', text: 'twice' }, stubParse([dumpRow({ companyName: 'Twice Co' })])));
+    const before2 = await prospectCount();
+    const [ca, cb] = it2.ok
+      ? await Promise.all([
+          asA(() => imp.confirmImport(A, member, it2.importId, it2.rows)),
+          asA(() => imp.confirmImport(A, member, it2.importId, it2.rows)),
+        ])
+      : [null, null];
+    const okN = [ca, cb].filter((r) => r?.ok).length;
+    const loser = [ca, cb].find((r) => r && !r.ok);
+    check('confirm: twice', okN === 1 && !!loser && !loser.ok && loser.message === 'This import was already confirmed or discarded.' && (await prospectCount()) === before2 + 1, { ca, cb });
+
+    const it3 = await asA(() => imp.createImport(A, member, { sourceTag: 'invalid', kind: 'text', text: 'inv' }, stubParse([dumpRow({ companyName: 'Valid Co' }), dumpRow({ companyName: 'Other Valid' })])));
+    const before3 = await prospectCount();
+    const ci = it3.ok ? await asA(() => imp.confirmImport(A, member, it3.importId, [it3.rows[0], { ...it3.rows[1], companyName: '' }])) : null;
+    check('confirm: invalid row rejects all with rowErrors', !!ci && !ci.ok && ci.rowErrors?.length === 1 && ci.rowErrors[0]!.index === 1 && (await prospectCount()) === before3 && (it3.ok ? (await importRow(it3.importId))?.status === 'parsed' : false), ci);
+
+    const cx = it3.ok ? await asB(() => imp.confirmImport(B, { userId: 'usr_b', role: 'member' }, it3.importId, it3.rows)) : null;
+    const dx = it3.ok ? await asB(() => imp.discardImport(B, { userId: 'usr_b', role: 'member' }, it3.importId)) : null;
+    const cmal = await asA(() => imp.confirmImport(A, member, 'abc', []));
+    check('confirm: cross-tenant import id -> not found', !!cx && !cx.ok && cx.message === 'Import not found.' && !!dx && !dx.ok && dx.message === 'Import not found.' && !cmal.ok && (await prospectCount()) === before3 && (it3.ok ? (await importRow(it3.importId))?.status === 'parsed' : false), { cx, dx, cmal });
+
+    const dd = it3.ok ? await asA(() => imp.discardImport(A, member, it3.importId)) : null;
+    const cd = it3.ok ? await asA(() => imp.confirmImport(A, member, it3.importId, it3.rows)) : null;
+    check('discard: then confirm refused', !!dd?.ok && !!cd && !cd.ok && cd.message === 'This import was already confirmed or discarded.' && (it3.ok ? (await importRow(it3.importId))?.status === 'discarded' : false) && (await prospectCount()) === before3, { dd, cd });
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {

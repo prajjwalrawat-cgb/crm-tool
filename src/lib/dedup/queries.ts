@@ -136,6 +136,72 @@ export async function findContactByEmail(
   return { id: row.id, name: name || norm };
 }
 
+/** Lower-case host: no scheme, `www.`, path, query or port (null when nothing is left). */
+function domainHost(raw: string): string | null {
+  const host = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+    .replace(/^www\./, '')
+    .split(/[/?#]/)[0]!
+    .replace(/:\d+$/, '');
+  return host.includes('.') ? host : null;
+}
+
+/**
+ * An existing, active company on this exact domain, or null. The stored
+ * domain is compared with its scheme, `www.`, path and port taken off, so
+ * "https://www.acme.in/" matches "acme.in".
+ */
+export async function findCompanyByDomain(tenantId: string, domain: string): Promise<DedupMatch | null> {
+  const host = domainHost(domain);
+  if (!host) return null;
+  // Character classes instead of backslashes (Drizzle would eat them).
+  const stored = sql`regexp_replace(split_part(split_part(split_part(regexp_replace(lower(btrim(${companies.domain})), '^[a-z][a-z0-9+.-]*://', ''), '/', 1), '?', 1), '#', 1), '^www[.]|:[0-9]+$', '', 'g')`;
+  const [row] = await tenantTransaction((tx) =>
+    tx
+      .select({ id: companies.id, name: companies.name, domain: companies.domain })
+      .from(companies)
+      .where(
+        and(
+          eq(companies.tenantId, tenantId),
+          isNull(companies.deletedAt),
+          isNull(companies.mergedIntoId),
+          sql`${companies.domain} IS NOT NULL`,
+          sql`${stored} = ${host}`,
+        ),
+      )
+      .limit(1),
+  );
+  return row ? { id: row.id, label: row.name, sublabel: row.domain, similarity: 1, kind: 'exact' } : null;
+}
+
+/** An existing, active contact with this E.164 phone (contacts.phone_normalized), or null. */
+export async function findContactByPhone(
+  tenantId: string,
+  phoneNormalized: string,
+): Promise<{ id: string; label: string } | null> {
+  const phone = phoneNormalized.trim();
+  if (!phone) return null;
+  const [row] = await tenantTransaction((tx) =>
+    tx
+      .select({ id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName })
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.tenantId, tenantId),
+          eq(contacts.phoneNormalized, phone),
+          isNull(contacts.deletedAt),
+          isNull(contacts.mergedIntoId),
+        ),
+      )
+      .limit(1),
+  );
+  if (!row) return null;
+  const name = [row.firstName, row.lastName].filter(Boolean).join(' ').trim();
+  return { id: row.id, label: name || phone };
+}
+
 /** Fuzzy name matches for a contact being created (warning, not blocking). */
 export async function findContactNameMatches(
   tenantId: string,

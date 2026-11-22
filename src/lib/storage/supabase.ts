@@ -104,3 +104,31 @@ export async function deleteDealDocument(path: string): Promise<void> {
     // The DB row is the source of truth; a dangling object is tolerable.
   }
 }
+
+/* ---------------- private buckets ---------------- */
+
+/** Private bucket for Prospect Board Quick Dump images (never public URLs). */
+export function prospectImportsBucket(): string {
+  return process.env.SUPABASE_PROSPECT_IMPORTS_BUCKET ?? 'prospect-imports';
+}
+
+/** Upload to a private bucket and return the object path (never a public URL). */
+export async function uploadPrivateFile(
+  bucket: string,
+  path: string,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<string> {
+  const { error } = await getClient()
+    .storage.from(bucket)
+    .upload(path, bytes, { contentType, upsert: false });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  return path;
+}
+
+/** A short-lived signed URL for a private object (default 5 minutes). */
+export async function signedUrl(bucket: string, path: string, seconds = 300): Promise<string> {
+  const { data, error } = await getClient().storage.from(bucket).createSignedUrl(path, seconds);
+  if (error || !data?.signedUrl) throw new Error(`Signed URL failed: ${error?.message ?? 'no URL'}`);
+  return data.signedUrl;
+}
