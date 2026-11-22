@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, eq } from 'drizzle-orm';
 
-import { memberships, organizationSettings, prospects, users } from '@/db/schema';
+import { memberships, prospects, users } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 import { recordNotificationsSafe } from '@/lib/notifications/recorder';
 import { can } from '@/lib/rbac';
@@ -10,19 +10,16 @@ import { scopeUsers, type ReportScope } from '@/lib/reports/manager/scope';
 
 import { fail, MAX_BULK, MESSAGES, UUID_RE, type MutationResult } from './mutations';
 import { claimBlock, isClaimActive, releaseBlock, type Actor } from './rules';
+import { getProspectSettingsTx } from './settings';
 
 const DAY_MS = 86_400_000;
-const DEFAULT_CLAIM_DAYS = 14;
 
 type Tx = Parameters<Parameters<typeof tenantTransaction>[0]>[0];
 
-async function claimWindowDays(tx: Tx, tenantId: string): Promise<number> {
-  const [settings] = await tx
-    .select({ days: organizationSettings.prospectClaimDays })
-    .from(organizationSettings)
-    .where(eq(organizationSettings.tenantId, tenantId))
-    .limit(1);
-  return settings?.days ?? DEFAULT_CLAIM_DAYS;
+/** The new claim's expiry: null (never expires) when the tenant turned expiry off. */
+async function newClaimExpiry(tx: Tx, tenantId: string, now: Date): Promise<Date | null> {
+  const s = await getProspectSettingsTx(tx, tenantId);
+  return s.claimExpiryEnabled ? new Date(now.getTime() + s.claimDays * DAY_MS) : null;
 }
 
 /** Claim: the row is locked FOR UPDATE, so two simultaneous claimers serialize. */
@@ -44,13 +41,13 @@ export async function claimProspect(
     const block = claimBlock(cur, actor, now);
     if (block) return fail(block);
 
-    const days = await claimWindowDays(tx, tenantId);
+    const claimExpiresAt = await newClaimExpiry(tx, tenantId, now);
     await tx
       .update(prospects)
       .set({
         claimedBy: actor.userId,
         claimedAt: now,
-        claimExpiresAt: new Date(now.getTime() + days * DAY_MS),
+        claimExpiresAt,
         lastActivityAt: now,
         updatedAt: now,
       })
@@ -131,13 +128,13 @@ export async function reassignClaim(
       return { res: fail('out_of_scope') };
     }
 
-    const days = await claimWindowDays(tx, tenantId);
+    const claimExpiresAt = await newClaimExpiry(tx, tenantId, now);
     await tx
       .update(prospects)
       .set({
         claimedBy: toUserId,
         claimedAt: now,
-        claimExpiresAt: new Date(now.getTime() + days * DAY_MS),
+        claimExpiresAt,
         lastActivityAt: now,
         updatedAt: now,
       })

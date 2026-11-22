@@ -291,6 +291,45 @@ async function main() {
     const rx = await runWithTenantContext({ tenantId: B, userId: bOnlyU }, () => cl.claimProspect(B, { userId: bOnlyU, role: 'member' }, kx));
     check('claim: cross-tenant id -> not_found', !rx.ok && rx.error === 'not_found' && (await row(kx)).claimedBy === null, rx);
 
+    /* ---------------- settings + claim-expiry flag (Stage 3 Task 4) ---------------- */
+    const ps = await import('../src/lib/prospects/settings');
+    const rules = await import('../src/lib/prospects/rules');
+    const defs = await runWithTenantContext({ tenantId: B, userId: 'usr_b' }, () => ps.getProspectSettings(B));
+    check('settings: defaults with no row', JSON.stringify(defs) === JSON.stringify({ claimDays: 14, claimExpiryEnabled: true, autoParkDays: 45, autoParkEnabled: true, enrichmentEnabled: false, aiSuggestionsEnabled: false }), defs);
+
+    const full = { claimDays: 30, claimExpiryEnabled: true, autoParkDays: 60, autoParkEnabled: false, enrichmentEnabled: true };
+    const setUpd = await asU(ownerU, () => ps.updateProspectSettings(A, owner, full));
+    const back = await asU(ownerU, () => ps.getProspectSettings(A));
+    check('settings: update + read back', setUpd.ok && back.claimDays === 30 && back.autoParkDays === 60 && back.autoParkEnabled === false && back.enrichmentEnabled === true && back.claimExpiryEnabled === true, { setUpd, back });
+    const upB = await runWithTenantContext({ tenantId: B, userId: 'usr_b' }, () => ps.updateProspectSettings(B, { userId: 'usr_b', role: 'admin' }, full));
+    const rowB = await runWithTenantContext({ tenantId: B, userId: 'usr_b' }, () => ps.getProspectSettings(B));
+    check('settings: update upserts when no row', upB.ok && rowB.claimDays === 30, { upB, rowB });
+
+    const bad = await Promise.all([
+      { ...full, claimDays: 0 }, { ...full, claimDays: 91 }, { ...full, claimDays: 1.5 },
+      { ...full, autoParkDays: 6 }, { ...full, autoParkDays: 366 },
+    ].map((i) => asU(ownerU, () => ps.updateProspectSettings(A, owner, i))));
+    const backBad = await asU(ownerU, () => ps.getProspectSettings(A));
+    check('settings: out of range rejected', bad.every((r) => !r.ok && r.error === 'invalid') && backBad.claimDays === 30 && backBad.autoParkDays === 60, { bad, backBad });
+
+    const denied = await asU(memberU, () => ps.updateProspectSettings(A, member, { ...full, claimDays: 5 }));
+    const mgrDenied = await asU(mgrU, () => ps.updateProspectSettings(A, mgr, { ...full, claimDays: 5 }));
+    const backDenied = await asU(ownerU, () => ps.getProspectSettings(A));
+    check('settings: member denied', !denied.ok && denied.error === 'no_permission' && !mgrDenied.ok && mgrDenied.error === 'no_permission' && backDenied.claimDays === 30, { denied, mgrDenied, backDenied });
+
+    await asU(ownerU, () => ps.updateProspectSettings(A, owner, { ...full, claimDays: 7, claimExpiryEnabled: false }));
+    const kn = await mk('Claim No Expiry');
+    const tNoExp = new Date();
+    const knr = await asU(memberU, () => cl.claimProspect(A, member, kn, tNoExp));
+    const knRow = await row(kn);
+    const farFuture = new Date(tNoExp.getTime() + 3650 * DAY);
+    check('claim: expiry disabled → claim_expires_at null and claim stays active', knr.ok && knRow.claimedBy === memberU && knRow.claimExpiresAt === null && rules.isClaimActive(knRow, farFuture), { knr, exp: knRow.claimExpiresAt });
+    const kn2 = await mk('Reassign No Expiry');
+    const kn2r = await asU(ownerU, () => cl.reassignClaim(A, owner, kn2, memberU, tNoExp));
+    const kn2Row = await row(kn2);
+    check('reassign: expiry disabled → claim_expires_at null', kn2r.ok && kn2Row.claimedBy === memberU && kn2Row.claimExpiresAt === null, { kn2r, exp: kn2Row.claimExpiresAt });
+    await asU(ownerU, () => ps.updateProspectSettings(A, owner, { ...full, claimDays: 7, claimExpiryEnabled: true }));
+
     const rel = await asU(memberU, () => cl.releaseProspect(A, member, k1));
     const relRow = await row(k1);
     check('release: clears columns', rel.ok && relRow.claimedBy === null && relRow.claimedAt === null && relRow.claimExpiresAt === null, { rel, relRow });
