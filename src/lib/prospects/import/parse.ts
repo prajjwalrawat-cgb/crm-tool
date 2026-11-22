@@ -9,6 +9,7 @@ import { captureError } from '@/lib/observability';
 import { prospectInputSchema, SIZE_BANDS } from '@/lib/prospects/rules';
 
 import { csvRowsToCandidates, type DumpRow, mapCsvHeaders } from './csv-map';
+import { MAX_DUMP_CHARS, MAX_DUMP_ROWS } from './limits';
 
 export type { DumpRow } from './csv-map';
 
@@ -41,9 +42,7 @@ export type { DumpRow } from './csv-map';
  * anything is saved.
  */
 
-export const MAX_DUMP_ROWS = 500;
-/** Free-text dumps longer than this are rejected rather than silently cut. */
-export const MAX_DUMP_CHARS = 60_000;
+export { MAX_DUMP_CHARS, MAX_DUMP_ROWS } from './limits';
 const MAX_TOKENS = 16_000;
 const EFFORT = 'low' as const;
 /** Text dumps are read in chunks of about this many characters (split on blank lines, then lines). */

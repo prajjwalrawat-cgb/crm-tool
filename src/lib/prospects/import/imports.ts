@@ -14,8 +14,14 @@ import { insertProspectRows, MESSAGES, UUID_RE } from '../mutations';
 import { normalizeProspectInput, prospectInputSchema, type Actor, type ProspectRowValues } from '../rules';
 import { computeDedupHints, type DedupHint } from './dedup-hints';
 import {
+  IMPORT_MESSAGES,
+  MAX_CSV_BYTES,
   MAX_DUMP_CHARS,
   MAX_DUMP_ROWS,
+  MAX_IMAGE_BYTES,
+  MAX_SOURCE_TAG,
+} from './limits';
+import {
   parseDumpCsv,
   parseDumpImage,
   parseDumpText,
@@ -26,6 +32,7 @@ import {
 } from './parse';
 
 export type { DedupHint } from './dedup-hints';
+export { IMPORT_MESSAGES, MAX_CSV_BYTES, MAX_IMAGE_BYTES, MAX_SOURCE_TAG } from './limits';
 
 /**
  * Quick Dump imports: parse a dump into a `prospect_imports` row for review,
@@ -33,9 +40,7 @@ export type { DedupHint } from './dedup-hints';
  * discard it. Nothing reaches `prospects` until a person confirms.
  */
 
-export const MAX_SOURCE_TAG = 80;
-export const MAX_CSV_BYTES = 4 * 1024 * 1024;
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Keyed by DUMP_IMAGE_TYPES. */
 const IMAGE_TYPES: Record<string, { type: DumpImageMediaType; ext: string }> = {
   'image/png': { type: 'image/png', ext: 'png' },
   'image/jpeg': { type: 'image/jpeg', ext: 'jpg' },
@@ -43,22 +48,6 @@ const IMAGE_TYPES: Record<string, { type: DumpImageMediaType; ext: string }> = {
   'image/webp': { type: 'image/webp', ext: 'webp' },
   'image/gif': { type: 'image/gif', ext: 'gif' },
 };
-
-export const IMPORT_MESSAGES = {
-  sourceTag: `Add a source tag (up to ${MAX_SOURCE_TAG} characters).`,
-  kind: 'Choose text, CSV or image.',
-  emptyText: 'Paste something to read first.',
-  textTooLong: `This dump is too long. Keep it under ${MAX_DUMP_CHARS.toLocaleString('en-IN')} characters, or split it into parts.`,
-  noFile: 'Choose a file to upload.',
-  csvTooLarge: 'This CSV is larger than 4 MB. Split it into smaller files.',
-  imageTooLarge: 'This image is larger than 5 MB. Use a smaller photo.',
-  imageType: 'Use a PNG, JPEG, WebP or GIF image.',
-  notFound: 'Import not found.',
-  alreadyDone: 'This import was already confirmed or discarded.',
-  noRows: 'Select at least one row to add.',
-  tooManyRows: `An import can add at most ${MAX_DUMP_ROWS} rows.`,
-  invalidRows: 'Some rows need fixing before they can be added.',
-} as const;
 
 export type ImportDeps = ParseDeps & {
   /** Storage seam (selftests): defaults to uploadPrivateFile when storage is configured. */

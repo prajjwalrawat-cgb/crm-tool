@@ -4,13 +4,86 @@ import { useEffect, useMemo, useState } from 'react';
 
 import type { DumpRow } from '@/lib/prospects/import/csv-map';
 import type { DedupHint } from '@/lib/prospects/import/dedup-hints';
+import {
+  DUMP_IMAGE_TYPES,
+  IMPORT_MESSAGES,
+  MAX_CSV_BYTES,
+  MAX_DUMP_CHARS,
+  MAX_IMAGE_BYTES,
+} from '@/lib/prospects/import/limits';
 import { cn } from '@/lib/utils';
 
 import { Button, Card, Field, inputCls } from '../../../settings/lead-capture/_components/ui';
 import { PreviewGrid } from './preview-grid';
 
 type Kind = 'text' | 'csv' | 'image';
-type Parsed = { importId: string; rows: DumpRow[]; dropped: number; hints: DedupHint[]; sourceTag: string };
+type Parsed = { importId: string; rows: DumpRow[]; dropped: number; capped: number; hints: DedupHint[]; sourceTag: string };
+
+const TOO_SLOW = 'This dump took too long — split it into smaller parts and try again.';
+
+/** Longest image edge sent to the server (larger photos are scaled down first). */
+const MAX_EDGE = 1568;
+/** Images within MAX_EDGE and this size are sent as they are. */
+const KEEP_BYTES = 1.5 * 1024 * 1024;
+const JPEG_QUALITY = 0.85;
+
+/**
+ * Scales a photo down to MAX_EDGE on its long side and re-encodes it as JPEG,
+ * so phone photos stay well under the upload limits. Images already within
+ * MAX_EDGE and KEEP_BYTES are returned unchanged, as is anything the browser
+ * can't decode (the server checks it).
+ */
+async function prepareImage(file: File): Promise<File> {
+  let bmp: ImageBitmap;
+  try {
+    bmp = await createImageBitmap(file);
+  } catch {
+    return file;
+  }
+  try {
+    const long = Math.max(bmp.width, bmp.height);
+    if (long <= MAX_EDGE && file.size <= KEEP_BYTES) return file;
+    const scale = Math.min(1, MAX_EDGE / long);
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    let blob: Blob | null;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const canvas = new OffscreenCanvas(w, h);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return file;
+      ctx.fillStyle = '#fff'; // JPEG has no transparency
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(bmp, 0, 0, w, h);
+      blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: JPEG_QUALITY });
+    } else {
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return file;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(bmp, 0, 0, w, h);
+      blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
+    }
+    if (!blob) return file;
+    return new File([blob], `${file.name.replace(/\.[^.]*$/, '') || 'image'}.jpg`, { type: 'image/jpeg' });
+  } finally {
+    bmp.close();
+  }
+}
+
+/** The server's own size/type checks, run in the browser first with the same messages. */
+function precheck(kind: Kind, text: string, file: File | null): string | null {
+  if (kind === 'text') {
+    const t = text.trim();
+    if (!t) return IMPORT_MESSAGES.emptyText;
+    return t.length > MAX_DUMP_CHARS ? IMPORT_MESSAGES.textTooLong : null;
+  }
+  if (!file) return IMPORT_MESSAGES.noFile;
+  if (kind === 'csv') return file.size > MAX_CSV_BYTES ? IMPORT_MESSAGES.csvTooLarge : null;
+  return (DUMP_IMAGE_TYPES as readonly string[]).includes(file.type.toLowerCase()) ? null : IMPORT_MESSAGES.imageType;
+}
 
 const TABS: { kind: Kind; label: string }[] = [
   { kind: 'text', label: 'Paste text' },
@@ -44,23 +117,41 @@ export function DumpInput({
 
   async function submit() {
     setError(null);
+    const problem = precheck(kind, text, file);
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setBusy(true);
     try {
       const fd = new FormData();
       fd.set('sourceTag', sourceTag.trim());
       fd.set('kind', kind);
       if (kind === 'text') fd.set('text', text);
-      else if (file) fd.set('file', file);
+      else if (file) {
+        const upload = kind === 'image' ? await prepareImage(file) : file;
+        if (kind === 'image' && upload.size > MAX_IMAGE_BYTES) {
+          setError(IMPORT_MESSAGES.imageTooLarge);
+          return;
+        }
+        fd.set('file', upload);
+      }
       const res = await fetch('/api/prospects/import', { method: 'POST', body: fd });
-      const body = (await res.json().catch(() => null)) as
-        | { importId: string; rows: DumpRow[]; dropped: number; hints: DedupHint[]; error?: string }
+      const isJson = (res.headers.get('content-type') ?? '').includes('application/json');
+      const body = (isJson ? await res.json().catch(() => null) : null) as
+        | { importId: string; rows: DumpRow[]; dropped: number; capped?: number; hints: DedupHint[]; error?: string }
         | { error: string }
         | null;
-      if (!res.ok || !body || 'error' in body) {
+      // No JSON back (a platform timeout page, a 502/504 from the proxy): the dump took too long.
+      if (!body) {
+        setError(TOO_SLOW);
+        return;
+      }
+      if (!res.ok || 'error' in body) {
         setError((body && 'error' in body && body.error) || 'Could not read prospects. Try again.');
         return;
       }
-      setParsed({ ...body, sourceTag: sourceTag.trim() });
+      setParsed({ ...body, capped: body.capped ?? 0, sourceTag: sourceTag.trim() });
     } catch {
       setError('Could not reach the server. Try again.');
     } finally {
@@ -76,6 +167,7 @@ export function DumpInput({
         sourceTag={parsed.sourceTag}
         initialRows={parsed.rows}
         dropped={parsed.dropped}
+        capped={parsed.capped}
         hints={parsed.hints}
         offerings={offerings}
         onDiscarded={() => setParsed(null)}

@@ -1,11 +1,13 @@
 'use client';
 
 import { Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
 import type { DumpRow } from '@/lib/prospects/import/csv-map';
 import type { DedupHint } from '@/lib/prospects/import/dedup-hints';
+import { IMPORT_MESSAGES, MAX_DUMP_ROWS } from '@/lib/prospects/import/limits';
 import { prospectInputSchema, SIZE_BANDS } from '@/lib/prospects/rules';
 import { cn } from '@/lib/utils';
 
@@ -28,10 +30,14 @@ type Props = {
   sourceTag: string;
   initialRows: DumpRow[];
   dropped: number;
+  /** Rows past MAX_DUMP_ROWS that were not kept. */
+  capped: number;
   hints: DedupHint[];
   offerings: { id: string; name: string }[];
   onDiscarded: () => void;
 };
+
+const FAILED = 'Something went wrong. Try again.';
 
 const HINT_PREFIX: Record<DedupHint['kind'], string> = {
   prospect: 'Already a prospect',
@@ -74,7 +80,7 @@ function invalidFields(r: Row, sourceTag: string): Set<string> {
   return bad;
 }
 
-export function PreviewGrid({ importId, sourceTag, initialRows, dropped, hints, offerings, onDiscarded }: Props) {
+export function PreviewGrid({ importId, sourceTag, initialRows, dropped, capped, hints, offerings, onDiscarded }: Props) {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>(() =>
     initialRows.map((r, i) => ({ ...r, key: i, tags: (r.clusterTags ?? []).join(', ') })),
@@ -82,6 +88,8 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, hints, 
   const [serverErrors, setServerErrors] = useState<Map<number, string>>(new Map());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the server says the import was already confirmed or discarded.
+  const [done, setDone] = useState(false);
 
   // Hints and server row errors are indexed by the original row position, which
   // is what `key` keeps even after rows are deleted.
@@ -104,21 +112,28 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, hints, 
     });
   }
 
+  /** Shows a failure; an import someone already confirmed or discarded also gets a link to the board. */
+  function fail(message: string) {
+    setError(message);
+    if (message === IMPORT_MESSAGES.alreadyDone) setDone(true);
+  }
+
   async function confirm() {
     setBusy(true);
     setError(null);
     setServerErrors(new Map());
+    const sent = rows;
     try {
-      const sent = rows;
       const r = await confirmImportAction(
         importId,
         sent.map((row) => toInput(row, sourceTag)),
       );
       if (r.ok) {
+        // Stay busy: the board is loading.
         router.push(`/dashboard/prospects?source=${encodeURIComponent(sourceTag)}`);
         return;
       }
-      setError(r.message);
+      fail(r.message);
       if ('rowErrors' in r && r.rowErrors) {
         // rowErrors index into the array we sent, not the original positions.
         const m = new Map<number, string>();
@@ -128,19 +143,26 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, hints, 
         }
         setServerErrors(m);
       }
-    } finally {
-      setBusy(false);
+    } catch {
+      setError(FAILED);
     }
+    setBusy(false);
   }
 
   async function discard() {
     setBusy(true);
+    setError(null);
     try {
-      await discardImportAction(importId);
-      onDiscarded();
-    } finally {
-      setBusy(false);
+      const r = await discardImportAction(importId);
+      if (r.ok) {
+        onDiscarded();
+        return;
+      }
+      fail(r.message);
+    } catch {
+      setError(FAILED);
     }
+    setBusy(false);
   }
 
   const textCell = (r: Row, field: TextField, label: string) => (
@@ -156,6 +178,11 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, hints, 
   return (
     <Card>
       <div className="space-y-3">
+        {capped > 0 ? (
+          <p role="status" className="text-[12px] text-slate-500">
+            Only the first {MAX_DUMP_ROWS} rows were kept.
+          </p>
+        ) : null}
         {dropped > 0 ? (
           <p role="status" className="text-[12px] text-slate-500">
             {dropped} unreadable {dropped === 1 ? 'entry was' : 'entries were'} skipped.
@@ -265,6 +292,14 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, hints, 
         {error ? (
           <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
+            {done ? (
+              <>
+                {' '}
+                <Link href="/dashboard/prospects" className="font-medium underline">
+                  View board
+                </Link>
+              </>
+            ) : null}
           </p>
         ) : null}
 
@@ -273,10 +308,10 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, hints, 
             {rows.length} {rows.length === 1 ? 'prospect' : 'prospects'} will be added to Dump with source {sourceTag}
           </p>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={discard} disabled={busy}>
+            <Button variant="secondary" onClick={discard} disabled={busy || done}>
               Discard
             </Button>
-            <Button variant="primary" onClick={confirm} disabled={busy || rows.length === 0 || anyInvalid}>
+            <Button variant="primary" onClick={confirm} disabled={busy || done || rows.length === 0 || anyInvalid}>
               {busy ? 'Working…' : 'Confirm'}
             </Button>
           </div>
