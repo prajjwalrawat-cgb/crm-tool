@@ -137,7 +137,7 @@ export async function findContactByEmail(
 }
 
 /** Lower-case host: no scheme, `www.`, path, query or port (null when nothing is left). */
-function domainHost(raw: string): string | null {
+export function domainHost(raw: string): string | null {
   const host = raw
     .trim()
     .toLowerCase()
@@ -148,6 +148,12 @@ function domainHost(raw: string): string | null {
   return host.includes('.') ? host : null;
 }
 
+/** SQL for a stored companies.domain reduced the same way as domainHost (scheme, `www.`, path, port off). */
+export function storedCompanyDomainHost() {
+  // Character classes instead of backslashes (Drizzle would eat them).
+  return sql`regexp_replace(split_part(split_part(split_part(regexp_replace(lower(btrim(${companies.domain})), '^[a-z][a-z0-9+.-]*://', ''), '/', 1), '?', 1), '#', 1), '^www[.]|:[0-9]+$', '', 'g')`;
+}
+
 /**
  * An existing, active company on this exact domain, or null. The stored
  * domain is compared with its scheme, `www.`, path and port taken off, so
@@ -156,8 +162,7 @@ function domainHost(raw: string): string | null {
 export async function findCompanyByDomain(tenantId: string, domain: string): Promise<DedupMatch | null> {
   const host = domainHost(domain);
   if (!host) return null;
-  // Character classes instead of backslashes (Drizzle would eat them).
-  const stored = sql`regexp_replace(split_part(split_part(split_part(regexp_replace(lower(btrim(${companies.domain})), '^[a-z][a-z0-9+.-]*://', ''), '/', 1), '?', 1), '#', 1), '^www[.]|:[0-9]+$', '', 'g')`;
+  const stored = storedCompanyDomainHost();
   const [row] = await tenantTransaction((tx) =>
     tx
       .select({ id: companies.id, name: companies.name, domain: companies.domain })
