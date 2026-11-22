@@ -44,9 +44,9 @@ Settings can be changed by owner and admin only.
 
 - A strong match blocks the promote: same company name, domain, email, phone, or an open lead for the company.
 - A similar name only warns.
-- The user must pick a match for each kind found, or link to the open lead.
+- The user must pick a match for each kind that has a strong match, or link to the open lead.
 - "Create anyway" is for managers, owner and admin.
-- A claimed prospect gives a lead owned by the claimer, kept out of the SLA watchdog. An unclaimed one goes through the distribution rules.
+- The lead goes to the claimer if their claim is still active and they can still claim; otherwise your distribution rules decide; if routing fails it waits in the unassigned queue for retry. A claim-owned lead is kept out of the SLA watchdog.
 - A promoted prospect is read-only. Its pending AI suggestions are superseded.
 
 ### Claims and settings
@@ -55,9 +55,9 @@ A claim lasts 14 days by default. Defaults in `src/lib/prospects/settings.ts`:
 
 | Setting | Default |
 | --- | --- |
-| Claim length | 14 days |
+| Claim length | 14 days (valid range 1–90) |
 | Claim expiry | on |
-| Auto-park after | 45 days |
+| Auto-park after | 45 days (valid range 7–365) |
 | Auto-park | on |
 | AI enrichment | off |
 
@@ -78,7 +78,7 @@ Both are Inngest functions, registered in `src/app/api/inngest/route.ts`.
 | Enrichment | `PROSPECT_ENRICH_MODEL` | `claude-haiku-5-5` |
 
 - Both need `ANTHROPIC_API_KEY`. Without it, parsing and enrichment are skipped.
-- Enrichment also needs AI suggestions on and the prospect enrichment setting on. It is off by default.
+- Enrichment also needs the AI suggestions setting and the prospect enrichment setting on. Both are off by default.
 - Haiku does not support server-side fallback, so the code leaves it out for Haiku models.
 - Cost: about ₹0.03 per prospect on Haiku 5.5 (about 2,200 input and 290 output tokens per call, at $0.10 and $0.50 per MTok).
 
