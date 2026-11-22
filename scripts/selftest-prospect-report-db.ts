@@ -130,7 +130,7 @@ async function main() {
     const run = (tenant: string, userId: string, role: 'owner' | 'manager', range: unknown = RANGE) =>
       runWithSystemContext(tenant, async () => {
         const scope = await scopeUsers({ tenantId: tenant, userId, role });
-        const res = await prospectBoardRunner(tenant, { range: range as never, scope }, { currentUserId: userId });
+        const res = await prospectBoardRunner(tenant, { range: range as never, userScope: scope }, { currentUserId: userId });
         return res.extras!;
       });
 

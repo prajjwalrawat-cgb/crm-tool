@@ -24,7 +24,7 @@ import type { ReportFilter, ReportRunner } from '../types';
  *   stale      a current snapshot (not range-bound): idle past half the
  *              tenant's auto-park window
  *
- * Manager scope: `filters.scope.userIds` (from `scopeUsers`; null = everyone).
+ * Manager scope: `filters.userScope.userIds` (from `scopeUsers`; null = everyone).
  * Added/conversion/days follow the same attribution as their definition; stale
  * and auto-parked follow COALESCE(claimed_by, created_by).
  */
@@ -46,7 +46,7 @@ export type ProspectBoardFilter = ReportFilter & {
    * whole tenant. When absent the runner derives the scope from the viewer's
    * membership and fails closed (empty) if there is none.
    */
-  scope?: Pick<ReportScope, 'userIds'>;
+  userScope?: Pick<ReportScope, 'userIds'>;
 };
 
 export type ProspectBoardCsvRow = {
@@ -83,6 +83,7 @@ export const PROSPECT_BOARD_CSV_COLUMNS: { key: keyof ProspectBoardCsvRow; label
 
 const NO_TAG = '(no tag)';
 const FORMER = 'Former member';
+const UNKNOWN = '(unknown)';
 
 const rate = (promoted: number, cohort: number): number | null => (cohort > 0 ? promoted / cohort : null);
 
@@ -99,8 +100,8 @@ export const prospectBoardRunner: ReportRunner<
   // Effective user set: the viewer's scope, narrowed by an owner filter. Someone
   // outside the scope gets an empty set, never a wider one.
   let userIds: string[] | null;
-  if (filters.scope) {
-    userIds = filters.scope.userIds;
+  if (filters.userScope) {
+    userIds = filters.userScope.userIds;
   } else {
     const [m] = (await tenantTransaction((tx) =>
       tx.execute(sql`
@@ -207,7 +208,7 @@ export const prospectBoardRunner: ReportRunner<
       /* a Clerk hiccup must not break the report; names fall back */
     }
   }
-  const nameOf = (id: string) => (id && names.get(id)) || FORMER;
+  const nameOf = (id: string) => (id ? names.get(id) || FORMER : UNKNOWN);
 
   const num = (v: string | number | null | undefined) => Number(v ?? 0);
   const conv = <T extends object>(rows: Grouped[], extra: (k: string) => T) =>
