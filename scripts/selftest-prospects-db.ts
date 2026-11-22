@@ -792,6 +792,58 @@ async function main() {
         { oOut, oIn, owner: dIn?.ownerId },
       );
 
+      // fix round 1 (I1/M1): picks must cover every kind with strong matches
+      const countC = async () => ({
+        co: (await inC((tx) => tx.select({ id: s.companies.id }).from(s.companies))).length,
+        ct: (await inC((tx) => tx.select({ id: s.contacts.id }).from(s.contacts))).length,
+      });
+      const [kes] = await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Kestrel Pumps', normalizedName: normalizeCompanyName('Kestrel Pumps') }).returning());
+      const [kesCt] = await inC((tx) => tx.insert(s.contacts).values({ tenantId: C, companyId: kes!.id, firstName: 'Kiran', email: 'k@kestrel.in', emailNormalized: 'k@kestrel.in' }).returning());
+      const pKes = await mkC({ companyName: 'Kestrel Pumps', contactEmail: 'k@kestrel.in' });
+      const oK1 = await promote(cMember, pKes, { companyId: kes!.id });
+      check('promote: company picked while a strong email contact exists → blocked', oK1.status === 'blocked' && (await dealsFrom(pKes)).length === 0, oK1);
+      const cnt0 = await countC();
+      const oK2 = await promote(cMember, pKes, { companyId: kes!.id, contactId: kesCt!.id });
+      const dK = (await dealsFrom(pKes))[0];
+      const cnt1 = await countC();
+      check(
+        'promote: company + that contact picked → promoted, no new contact or company',
+        oK2.status === 'promoted' && dK?.companyId === kes!.id && dK?.contactId === kesCt!.id && cnt1.co === cnt0.co && cnt1.ct === cnt0.ct,
+        { oK2, cnt0, cnt1 },
+      );
+      await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Nomad Freight', normalizedName: normalizeCompanyName('Nomad Freight') }));
+      const [nomCt] = await inC((tx) => tx.insert(s.contacts).values({ tenantId: C, companyId: null, firstName: 'Nina', email: 'n@nomad.in', emailNormalized: 'n@nomad.in' }).returning());
+      const pNom = await mkC({ companyName: 'Nomad Freight', contactEmail: 'n@nomad.in' });
+      const oN = await promote(cMember, pNom, { contactId: nomCt!.id });
+      check('promote: contact without company picked while a strong company exists → blocked', oN.status === 'blocked' && (await dealsFrom(pNom)).length === 0, oN);
+      const [orbis] = await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Orbis Chemicals', normalizedName: normalizeCompanyName('Orbis Chemicals') }).returning());
+      const [orbisWeak] = await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Orbis Textiles', normalizedName: normalizeCompanyName('Orbis Textiles') }).returning());
+      const pOrb = await mkC({ companyName: 'Orbis Chemicals', contactEmail: 'o@orbis.in' });
+      const oW = await promote(cMember, pOrb, { companyId: orbisWeak!.id });
+      check('promote: weak pick while strong matches exist → blocked', oW.status === 'blocked' && oW.candidates.some((c) => c.id === orbisWeak!.id && c.strength === 'weak') && (await dealsFrom(pOrb)).length === 0, oW);
+      const pMis = await mkC({ companyName: 'Orbis Chemicals', contactEmail: 'k@kestrel.in' });
+      const oM = await promote(cMember, pMis, { companyId: orbis!.id, contactId: kesCt!.id });
+      check('promote: mismatched company/contact pair → invalid', oM.status === 'error' && oM.error === 'invalid' && oM.message === 'That contact belongs to a different company.' && (await dealsFrom(pMis)).length === 0, oM);
+
+      // fix round 1 (I2): the SLA watchdog never takes a claimer's lead back
+      const sla = await import('../src/lib/lead-capture/sla');
+      const [ctrl] = await inC((tx) => tx.insert(s.deals).values({ tenantId: C, name: 'Watchdog control', stage: 'lead', routingStatus: 'pending', routingQueuedAt: new Date() }).returning());
+      await asC(cOwner.userId, () => sla.reassignLead({ tenantId: C, dealId: ctrl!.id, toUserId: cOther.userId, actorUserId: cOwner.userId, reason: 'control' }));
+      const la3Before = d3 ? await inC((tx) => tx.select().from(s.leadAssignments).where(eq(s.leadAssignments.dealId, d3.id))) : [];
+      const wd = await asC(cOwner.userId, () => sla.runSlaWatchdog(C, new Date(Date.now() + 2 * 3_600_000)));
+      const la3After = d3 ? await inC((tx) => tx.select().from(s.leadAssignments).where(eq(s.leadAssignments.dealId, d3.id))) : [];
+      const ctrlAfter = await inC((tx) => tx.select().from(s.leadAssignments).where(eq(s.leadAssignments.dealId, ctrl!.id)));
+      const d3After = d3 ? await dealById(d3.id) : undefined;
+      check(
+        'promote: claimer keeps the lead past the SLA watchdog',
+        la3Before.some((a) => a.releasedAt === null && a.firstTouchAt !== null) &&
+          la3After.filter((a) => a.releasedAt === null).length === 1 && la3After.some((a) => a.releasedAt === null && a.assignedTo === cOther.userId) &&
+          d3After?.ownerId === cOther.userId &&
+          // control: an untouched manual assignment IS released by the same pass
+          wd.breached >= 1 && ctrlAfter.some((a) => a.releaseReason === 'sla_breach'),
+        { wd, la3After, ctrlAfter: ctrlAfter.map((a) => [a.releasedAt, a.releaseReason]) },
+      );
+
       // 14. bulk
       const bClean = await mkC({ companyName: 'Bulkclean Agro', contactEmail: 'b@bulkclean.in' });
       const bBlock = await mkC({ companyName: 'Blocker Industries', contactEmail: 'b2@blocker.in' });

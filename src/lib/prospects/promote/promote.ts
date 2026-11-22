@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 
-import { comments, companies, contacts, deals, memberships, notes, offerings, prospects, users, type Prospect } from '@/db/schema';
+import { comments, companies, contacts, deals, leadAssignments, memberships, notes, offerings, prospects, users, type Prospect } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { tenantTransaction } from '@/lib/db-context';
 import { normalizeCompanyName, normalizeContactName } from '@/lib/dedup/normalize';
@@ -66,6 +66,7 @@ export const PROMOTE_MESSAGES = {
   invalid: 'That record is no longer a match. Refresh and pick again.',
   both: 'Pick an open lead, or a company and contact, not both.',
   lead_taken: 'That lead is already linked to another prospect.',
+  contact_company: 'That contact belongs to a different company.',
   too_many: `Promote at most ${MAX_BULK_PROMOTE} prospects at a time.`,
   error: 'Something went wrong. Try again.',
 } as const;
@@ -193,9 +194,38 @@ async function promoteOne(
     if (!isCandidate('open_lead', choice.leadId) || !isCandidate('company', choice.companyId) || !isCandidate('contact', choice.contactId)) {
       return { outcome: fail('invalid') };
     }
+
+    let pickedContact: { id: string; companyId: string | null } | null = null;
+    if (choice.contactId) {
+      const [c] = await tx
+        .select({ id: contacts.id, companyId: contacts.companyId })
+        .from(contacts)
+        .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, choice.contactId)))
+        .limit(1);
+      if (!c) return { outcome: fail('invalid') };
+      pickedContact = c;
+    }
+    // A picked company and contact must agree.
+    if (choice.companyId && pickedContact?.companyId && pickedContact.companyId !== choice.companyId) {
+      return { outcome: fail('invalid', PROMOTE_MESSAGES.contact_company) };
+    }
+
     if (picked.length === 0 && !choice.createAnyway) {
       if (candidates.some((c) => c.strength === 'strong')) return { outcome: { status: 'blocked', candidates } };
       if (candidates.length > 0 && !choice.ignoreWarnings) return { outcome: { status: 'warn', candidates } };
+    }
+    // Without a lead or "create anyway", the picks must cover every kind that has
+    // strong matches. A weak pick never covers a strong kind; a picked contact's
+    // company covers the company kind only when it is itself a strong match.
+    if (picked.length > 0 && !choice.leadId && !choice.createAnyway) {
+      const strongIds = (kind: MatchCandidate['kind']) =>
+        candidates.filter((c) => c.kind === kind && c.strength === 'strong').map((c) => c.id);
+      const strongCompanies = strongIds('company');
+      const strongContacts = strongIds('contact');
+      const effectiveCompany = choice.companyId ?? pickedContact?.companyId ?? null;
+      const companyCovered = strongCompanies.length === 0 || (!!effectiveCompany && strongCompanies.includes(effectiveCompany));
+      const contactCovered = strongContacts.length === 0 || (!!choice.contactId && strongContacts.includes(choice.contactId));
+      if (!companyCovered || !contactCovered) return { outcome: { status: 'blocked', candidates } };
     }
 
     const bodies = await noteBodies(tx, tenantId, cur);
@@ -232,17 +262,6 @@ async function promoteOne(
           .limit(1)
       : [];
     const productInterest = offering?.name ?? null;
-
-    let pickedContact: { id: string; companyId: string | null } | null = null;
-    if (choice.contactId) {
-      const [c] = await tx
-        .select({ id: contacts.id, companyId: contacts.companyId })
-        .from(contacts)
-        .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, choice.contactId)))
-        .limit(1);
-      if (!c) return { outcome: fail('invalid') };
-      pickedContact = c;
-    }
 
     const sourceId = await ensureProspectBoardSource(tx, tenantId, actor.userId);
 
@@ -393,7 +412,22 @@ async function routeLead(tenantId: string, actor: Actor, c: Committed, deps: Pro
   try {
     if (c.claimer) {
       const r = await reassign({ tenantId, dealId: c.dealId, toUserId: c.claimer, actorUserId: actor.userId, reason: 'Claimed on Prospect Board' });
-      if (r.ok) return 'claimer';
+      if (r.ok) {
+        // The claimer has already worked the prospect: count it as the first
+        // touch so the SLA watchdog (keyed on first_touch_at IS NULL) never
+        // takes the lead back. Best-effort; the assignment itself stands.
+        try {
+          await tenantTransaction((tx) =>
+            tx
+              .update(leadAssignments)
+              .set({ firstTouchAt: new Date() })
+              .where(and(eq(leadAssignments.tenantId, tenantId), eq(leadAssignments.dealId, c.dealId), isNull(leadAssignments.releasedAt), isNull(leadAssignments.firstTouchAt))),
+          );
+        } catch (err) {
+          captureError(err, { category: 'prospects.promote.first_touch', retryable: false, fields: { tenantId, dealId: c.dealId } });
+        }
+        return 'claimer';
+      }
       logger.warn('promote: claimer routing refused, distributing instead', { tenantId, dealId: c.dealId, error: r.error });
     }
     outcome = await distribute({ tenantId, dealId: c.dealId });
