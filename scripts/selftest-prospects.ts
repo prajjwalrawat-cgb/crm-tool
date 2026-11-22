@@ -10,6 +10,7 @@ import {
   stageMoveBlock,
   type ProspectCard,
 } from '../src/lib/prospects/rules';
+import { promoteBlock } from '../src/lib/prospects/promote/rules';
 
 /**
  * Pure self-test for the Prospect Board rules (no DB).
@@ -97,6 +98,27 @@ check('release: own claim', releaseBlock(mk({ claimedBy: 'u1' }), me) === null);
 check('rbac: viewer manageProspects', can('viewer', 'manageProspects') === false);
 check('rbac: member manageProspectClaims', can('member', 'manageProspectClaims') === false);
 check('rbac: manager bulkParkProspects', can('manager', 'bulkParkProspects') === true);
+
+// ---- promote preconditions ----
+{
+  const pr = (o: Record<string, unknown> = {}) => ({ ...mk(), companyName: 'Acme', emailNormalized: 'a@acme.in' as string | null, phoneNormalized: null as string | null, ...o });
+  const active = new Date(Date.now() + dayMs);
+  const scoped = { holderInScope: true };
+  const out = { holderInScope: false };
+  check('promote: ok', promoteBlock(pr(), me, scoped) === null);
+  check('promote: viewer', promoteBlock(pr(), { userId: 'v', role: 'viewer' }, scoped) === 'no_permission');
+  check('promote: deleted/promoted', promoteBlock(pr({ deletedAt: new Date() }), me, scoped) === 'deleted' && promoteBlock(pr({ promotedDealId: 'd' }), me, scoped) === 'promoted');
+  check('promote: parked', promoteBlock(pr({ stage: 'parked' }), me, scoped) === 'parked');
+  check('promote: no email/phone', promoteBlock(pr({ emailNormalized: null }), me, scoped) === 'missing_contact');
+  check('promote: phone only ok', promoteBlock(pr({ emailNormalized: null, phoneNormalized: '+919845012345' }), me, scoped) === null);
+  check('promote: blank company', promoteBlock(pr({ companyName: '  ' }), me, scoped) === 'missing_contact');
+  check("promote: member on other's active claim", promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: active }), me, scoped) === 'claimed_by_other');
+  check("promote: member on other's expired claim", promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: new Date(Date.now() - dayMs) }), me, scoped) === null);
+  check('promote: member own claim', promoteBlock(pr({ claimedBy: 'u1', claimExpiresAt: active }), me, scoped) === null);
+  check('promote: manager out of scope', promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: active }), { userId: 'm', role: 'manager' }, out) === 'out_of_scope');
+  check('promote: manager in scope', promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: active }), { userId: 'm', role: 'manager' }, scoped) === null);
+  check("promote: owner on other's claim", promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: active }), { userId: 'o', role: 'owner' }, out) === null);
+}
 
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
 const passed = results.filter((r) => r.ok).length;

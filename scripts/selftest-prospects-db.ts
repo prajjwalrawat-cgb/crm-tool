@@ -531,6 +531,37 @@ async function main() {
     const dd = it3.ok ? await asA(() => imp.discardImport(A, member, it3.importId)) : null;
     const cd = it3.ok ? await asA(() => imp.confirmImport(A, member, it3.importId, it3.rows)) : null;
     check('discard: then confirm refused', !!dd?.ok && !!cd && !cd.ok && cd.message === 'This import was already confirmed or discarded.' && (it3.ok ? (await importRow(it3.importId))?.status === 'discarded' : false) && (await prospectCount()) === before3, { dd, cd });
+
+    // ---- promote candidates ----
+    {
+      const { findPromoteCandidates } = await import('../src/lib/prospects/promote/match');
+      const acme = await inA(async (tx) => (await tx.insert(s.companies).values({ tenantId: A, name: 'Acme Steel Pvt Ltd', normalizedName: 'acme steel', domain: 'acme.in' }).returning())[0]!);
+      await inA((tx) => tx.insert(s.contacts).values({ tenantId: A, companyId: acme.id, firstName: 'Ravi', lastName: 'K', email: 'ravi@acme.in', phone: '+919845012345', phoneNormalized: '+919845012345' }));
+      await inA((tx) => tx.insert(s.deals).values({ tenantId: A, name: 'Kaveri lead', stage: 'lead', companyNameText: 'Kaveri Textiles' }));
+      await (runWithSystemContext(B, () => tenantTransaction((tx) => tx.insert(s.companies).values({ tenantId: B, name: 'Acme Steel B', normalizedName: 'acme steel', domain: 'acme.in' }))) as Promise<unknown>);
+      await inA((tx) => tx.insert(s.companies).values({ tenantId: A, name: 'Gone Corp', normalizedName: 'gone', deletedAt: new Date() }));
+      const pc = (o: Record<string, unknown>) => ({ ...p, companyName: 'Zed', normalizedName: 'zed', domain: null, emailNormalized: null, phoneNormalized: null, ...o }) as typeof p;
+      const strongCo = (c: Array<{ kind: string; strength: string; id: string }>) => c.some((x) => x.kind === 'company' && x.strength === 'strong' && x.id === acme.id);
+      const byName = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Acme Steel', normalizedName: 'acme steel' })));
+      check('promote match: strong company by name', strongCo(byName) && byName.find((x) => x.id === acme.id)?.reason === 'name', byName);
+      const byDom = await asA(() => findPromoteCandidates(A, pc({ domain: 'www.acme.in' })));
+      check('promote match: strong by domain', byDom.some((x) => x.id === acme.id && x.strength === 'strong' && x.reason === 'domain'), byDom);
+      const byMail = await asA(() => findPromoteCandidates(A, pc({ emailNormalized: 'ravi@acme.in' })));
+      check('promote match: strong contact by email', byMail.some((x) => x.kind === 'contact' && x.strength === 'strong' && x.reason === 'email'), byMail);
+      const byPh = await asA(() => findPromoteCandidates(A, pc({ phoneNormalized: '+919845012345' })));
+      check('promote match: strong contact by phone', byPh.some((x) => x.kind === 'contact' && x.strength === 'strong' && x.reason === 'phone'), byPh);
+      const byLead = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Kaveri Textiles Ltd', normalizedName: 'kaveri textiles' })));
+      const lead = byLead.find((x) => x.kind === 'open_lead');
+      check('promote match: strong open lead', !!lead && lead.strength === 'strong' && lead.label === 'Kaveri lead' && lead.sublabel === 'Unassigned', byLead);
+      const weak = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Acme Engineering', normalizedName: 'acme engineering' })));
+      check('promote match: weak fuzzy only', weak.length > 0 && weak.every((x) => x.strength === 'weak') && weak.some((x) => x.id === acme.id && x.reason === 'fuzzy_name'), weak);
+      const dupe = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Acme Steel', normalizedName: 'acme steel', domain: 'acme.in' })));
+      check('promote match: dedup keeps strongest', dupe.filter((x) => x.id === acme.id && x.kind === 'company').length === 1 && dupe.find((x) => x.id === acme.id)?.strength === 'strong', dupe);
+      const cross = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Acme Steel', normalizedName: 'acme steel' })));
+      check('promote match: cross-tenant not returned', cross.every((x) => x.label !== 'Acme Steel B'), cross);
+      const gone = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Gone Corp', normalizedName: 'gone' })));
+      check('promote match: soft-deleted not returned', gone.every((x) => x.label !== 'Gone Corp'), gone);
+    }
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
