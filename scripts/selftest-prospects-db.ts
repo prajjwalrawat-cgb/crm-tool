@@ -961,6 +961,16 @@ async function main() {
       const nx = notesD.filter((n) => n.type === 'prospect_claim_expired');
       check('maint: releases expired claim + notification row', rRel.released === 1 && eRow.claimedBy === null && eRow.claimedAt === null && eRow.claimExpiresAt === null && nx.length === 1 && nx[0]!.entityType === 'prospect' && nx[0]!.entityId === expired && nx[0]!.title === 'Your claim on Expired Claim Co expired', { rRel, eRow, nx });
       check('maint: keeps active claim', (await rowD(active)).claimedBy === claimer && (await rowD(active)).claimExpiresAt !== null);
+
+      // boundaries: strict < for park, <= for release, and a park keeps the claim
+      const bEdge = await mkD('Edge 45d Co', { lastActivityAt: ago(45) });
+      const bClaimPark = await mkD('Claimed Stale Co', { lastActivityAt: ago(60), claimedBy: claimer, claimedAt: ago(1), claimExpiresAt: new Date(NOW.getTime() + 5 * DAY) });
+      const bExact = await mkD('Exact Expiry Co', { claimedBy: claimer, claimedAt: ago(14), claimExpiresAt: NOW });
+      const rB = await mt.runProspectMaintenance(D, NOW);
+      const cpRow = await rowD(bClaimPark);
+      check('maint: exactly 45 days is not parked (strict <)', (await rowD(bEdge)).stage === 'dump' && rB.parked === 1, rB);
+      check('maint: claim expiring exactly now is released (<=)', (await rowD(bExact)).claimedBy === null && rB.released === 1, rB);
+      check('maint: auto-parked prospect keeps its claim', cpRow.stage === 'parked' && cpRow.claimedBy === claimer && cpRow.claimExpiresAt !== null, cpRow);
     }
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
