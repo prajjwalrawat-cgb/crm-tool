@@ -30,6 +30,10 @@ export const NOTIFICATION_TYPES = [
   'lead_sla_breach',
   /** Telephony (0073): an inbound call to the recipient was missed. */
   'call_missed',
+  /** Prospect Board: a manager assigned the recipient a prospect claim. */
+  'prospect_claim_assigned',
+  /** Prospect Board: the recipient's claim expired and was released. */
+  'prospect_claim_expired',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

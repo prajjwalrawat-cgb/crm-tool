@@ -28,6 +28,7 @@ async function run(input: { id: string; action: 'accept' | 'reject' | 'edit'; va
   });
   revalidatePath('/dashboard/suggestions');
   revalidatePath('/dashboard/deals', 'layout');
+  revalidatePath('/dashboard/prospects');
   return out;
 }
 

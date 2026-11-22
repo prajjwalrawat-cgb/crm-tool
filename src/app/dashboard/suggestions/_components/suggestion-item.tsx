@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 
 import type { FollowUpValue, SuggestionValue } from '@/db/schema/ai-suggestions';
 import { formatSuggestionValue, type SuggestionView } from '@/lib/ai/suggestions/view';
+import { SIZE_BANDS } from '@/lib/prospects/rules';
 
 import { acceptSuggestion, editAndAcceptSuggestion, rejectSuggestion } from '../actions';
 
@@ -52,8 +53,12 @@ export function SuggestionItem({
     });
 
   const editValue = () => (s.field === 'follow_up_task' ? { title: draft, due_date: draftDate } : s.field === 'amount' ? Number(draft) : draft);
+  // Product fit picks from the active offerings; with none there is nothing to edit to.
+  const choices: Array<{ value: string; label: string }> | null =
+    s.field === 'size_band' ? SIZE_BANDS.map((b) => ({ value: b, label: b })) : s.field === 'product_fit' ? (s.options ?? []) : null;
+  const canEdit = !(s.field === 'product_fit' && (choices?.length ?? 0) === 0);
   const pct = Math.round(s.confidence * 100);
-  const SourceIcon = s.sourceType === 'call' ? Phone : Mail;
+  const SourceIcon = s.sourceType === 'call' ? Phone : s.sourceType === 'email' ? Mail : Sparkles;
 
   if (done) {
     return (
@@ -85,9 +90,9 @@ export function SuggestionItem({
       </div>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-slate-700 dark:text-[#E4E4E7]">
-        <span className="text-slate-500 line-through decoration-slate-300 dark:text-[#71717A]">{formatSuggestionValue(s.field, s.current)}</span>
+        <span className="text-slate-500 line-through decoration-slate-300 dark:text-[#71717A]">{formatSuggestionValue(s.field, s.current, s.valueLabels)}</span>
         <ArrowRight className="h-3 w-3 text-slate-400" aria-hidden />
-        <span className="font-medium">{formatSuggestionValue(s.field, s.suggested)}</span>
+        <span className="font-medium">{formatSuggestionValue(s.field, s.suggested, s.valueLabels)}</span>
       </div>
 
       <blockquote className="mt-1.5 border-l-2 border-indigo-200 pl-2 italic text-slate-600 dark:border-indigo-500/40 dark:text-[#A1A1AA]">
@@ -95,7 +100,7 @@ export function SuggestionItem({
       </blockquote>
       <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
         <SourceIcon className="h-3 w-3" aria-hidden />
-        From {s.sourceType === 'call' ? 'a call' : 'an email'}
+        From {s.sourceType === 'call' ? 'a call' : s.sourceType === 'email' ? 'an email' : 'AI enrichment'}
         {s.sourceHref ? (
           <Link href={s.sourceHref} className="inline-flex items-center gap-0.5 text-indigo-600 hover:underline dark:text-indigo-300">
             view <ExternalLink className="h-2.5 w-2.5" aria-hidden />
@@ -107,9 +112,9 @@ export function SuggestionItem({
       {stale ? (
         <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200" role="alert">
           <p className="font-medium">This field changed after the suggestion was made, so nothing was overwritten.</p>
-          <p>When suggested: {formatSuggestionValue(s.field, stale.atSuggestion)}</p>
-          <p>Now: {formatSuggestionValue(s.field, stale.live)}</p>
-          <p>Suggested: {formatSuggestionValue(s.field, stale.suggested)}</p>
+          <p>When suggested: {formatSuggestionValue(s.field, stale.atSuggestion, s.valueLabels)}</p>
+          <p>Now: {formatSuggestionValue(s.field, stale.live, s.valueLabels)}</p>
+          <p>Suggested: {formatSuggestionValue(s.field, stale.suggested, s.valueLabels)}</p>
         </div>
       ) : null}
 
@@ -123,13 +128,22 @@ export function SuggestionItem({
                 </option>
               ))}
             </select>
+          ) : choices ? (
+            <select className="rounded border border-slate-300 px-1.5 py-1 dark:border-[#262626] dark:bg-black" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={`New ${s.fieldLabel}`}>
+              {choices.some((c) => c.value === draft) ? null : <option value={draft}>{formatSuggestionValue(s.field, draft, s.valueLabels)}</option>}
+              {choices.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
           ) : s.field === 'close_date' ? (
             <input type="date" className="rounded border border-slate-300 px-1.5 py-1 dark:border-[#262626] dark:bg-black" value={draft} onChange={(e) => setDraft(e.target.value)} />
           ) : (
             <input
               className="min-w-[12rem] flex-1 rounded border border-slate-300 px-1.5 py-1 dark:border-[#262626] dark:bg-black"
               value={draft}
-              inputMode={s.field === 'amount' ? 'decimal' : undefined}
+              inputMode={s.field === 'amount' ? 'decimal' : s.field === 'icp_score' ? 'numeric' : undefined}
               onChange={(e) => setDraft(e.target.value)}
               aria-label={`New ${s.fieldLabel}`}
             />
@@ -161,14 +175,16 @@ export function SuggestionItem({
           >
             {pending ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Check className="h-3 w-3" aria-hidden />} Accept
           </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => setEditing(true)}
-            className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-[#262626] dark:text-[#E4E4E7]"
-          >
-            <Pencil className="h-3 w-3" aria-hidden /> Edit
-          </button>
+          {canEdit ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-[#262626] dark:text-[#E4E4E7]"
+            >
+              <Pencil className="h-3 w-3" aria-hidden /> Edit
+            </button>
+          ) : null}
           <button
             type="button"
             disabled={pending}

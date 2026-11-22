@@ -32,8 +32,8 @@ export default async function SuggestionsPage({ searchParams }: Props) {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">AI suggestions</h1>
             <p className="mt-1 max-w-2xl text-[13px] text-slate-500 dark:text-[#A1A1AA]">
-              Changes the AI proposed from calls and emails. Nothing is applied until someone accepts it, and accepted changes
-              follow the same rules as editing the deal yourself.
+              Changes the AI proposed from calls, emails and prospect research. Nothing is applied until someone accepts it, and
+              accepted changes follow the same rules as editing the record yourself.
             </p>
           </div>
           {canTeam ? (

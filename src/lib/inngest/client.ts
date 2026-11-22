@@ -100,3 +100,9 @@ export const emailThreadSummarizedEvent = eventType('crm/email.thread_summarized
 export const reportBackfillRequestedEvent = eventType('crm/report.backfill_requested', {
   schema: staticSchema<WorkflowEvents['crm/report.backfill_requested']>(),
 });
+
+/* -------- Prospect Board (0079) -------- */
+
+export const prospectCreatedEvent = eventType('crm/prospect.created', {
+  schema: staticSchema<WorkflowEvents['crm/prospect.created']>(),
+});

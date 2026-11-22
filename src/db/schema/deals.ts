@@ -200,6 +200,8 @@ export const deals = pgTable(
     leadCity: text('lead_city'),
     leadState: text('lead_state'),
     leadProductInterest: text('lead_product_interest'),
+    /** 0079: the prospect this deal was promoted from. FK in SQL (prospects references deals, so no .references() here to avoid an import cycle). */
+    sourceProspectId: uuid('source_prospect_id'),
     /** NULL = not routed; 'pending' | 'unassigned' | 'assigned'. */
     routingStatus: text('routing_status').$type<'pending' | 'unassigned' | 'assigned'>(),
     routingQueuedAt: timestamp('routing_queued_at', { withTimezone: true }),
@@ -254,7 +256,8 @@ export type DealLeadCaptureColumn =
   | 'leadState'
   | 'leadProductInterest'
   | 'routingStatus'
-  | 'routingQueuedAt';
+  | 'routingQueuedAt'
+  | 'sourceProspectId';
 /** The full row, including lead-capture columns. */
 export type DealRecord = typeof deals.$inferSelect;
 /**

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 
 import {
   aiSuggestions,
@@ -10,6 +10,8 @@ import {
   deals,
   emailMessages,
   communicationThreads,
+  offerings,
+  prospects,
   type AiSuggestion,
   type MembershipRole,
   type SuggestionField,
@@ -32,7 +34,7 @@ import { sameValue, validateFieldValue, type TargetValues } from './validate';
  * AI suggestions: extraction runs (call / email), the review queue, and
  * accept / reject / edit-and-accept.
  *
- * Invariant: nothing in this module writes a deal or contact field. Applying
+ * Invariant: nothing in this module writes a deal, contact or prospect field. Applying
  * a suggestion goes through `Appliers` (appliers.ts), which call the same
  * server actions a user's manual edit calls, as the accepting user, so stage
  * gates, validation and RBAC apply unchanged. A failed apply leaves the
@@ -92,9 +94,35 @@ async function contactValues(tx: Tx | DbExecutor, tenantId: string, contactId: s
   return { ...c, values };
 }
 
+/** Prospect enrichment fields (0079). A deleted prospect is not found. */
+async function prospectValues(tx: Tx | DbExecutor, tenantId: string, prospectId: string) {
+  const [p] = await tx
+    .select({
+      id: prospects.id,
+      industry: prospects.industry,
+      sizeBand: prospects.sizeBand,
+      productFitOfferingId: prospects.productFitOfferingId,
+      icpScore: prospects.icpScore,
+    })
+    .from(prospects)
+    .where(and(eq(prospects.id, prospectId), eq(prospects.tenantId, tenantId), isNull(prospects.deletedAt)));
+  if (!p) return null;
+  const values: TargetValues = {
+    industry: p.industry ?? null,
+    size_band: p.sizeBand ?? null,
+    product_fit: p.productFitOfferingId ?? null,
+    icp_score: p.icpScore ?? null,
+  };
+  return { ...p, values };
+}
+
 /** The live value of a suggestion's field right now (for stale detection). */
 export async function readLiveValue(tx: Tx, s: Pick<AiSuggestion, 'tenantId' | 'entityType' | 'entityId' | 'field'>): Promise<{ found: boolean; value: SuggestionValue }> {
   if (s.field === 'follow_up_task') return { found: true, value: null };
+  if (s.entityType === 'prospect') {
+    const p = await prospectValues(tx, s.tenantId, s.entityId);
+    return p ? { found: true, value: p.values[s.field] ?? null } : { found: false, value: null };
+  }
   if (s.entityType === 'contact') {
     const c = await contactValues(tx, s.tenantId, s.entityId);
     return c ? { found: true, value: c.values[s.field] ?? null } : { found: false, value: null };
@@ -106,7 +134,7 @@ export async function readLiveValue(tx: Tx, s: Pick<AiSuggestion, 'tenantId' | '
 /* ------------------------------------------------------------ persistence */
 
 export type NewSuggestion = {
-  entityType: 'deal' | 'contact' | 'lead';
+  entityType: 'deal' | 'contact' | 'lead' | 'prospect';
   entityId: string;
   field: SuggestionField;
   current: SuggestionValue;
@@ -117,7 +145,9 @@ export type NewSuggestion = {
 
 /**
  * Insert pending suggestions for one source. Idempotent per
- * (source, entity, field) via the unique index. Older pending suggestions
+ * (source, entity, field) via the unique index. For prospect enrichment
+ * (source_type 'enrichment', source_id = prospect id) the evidence quote is
+ * the model's reasoning. Older pending suggestions
  * for the same entity + field from other sources are superseded (except
  * follow-up tasks, which are independent).
  */
@@ -165,7 +195,7 @@ export async function persistSuggestions(
 }
 
 /** Claim a source for extraction. False = already processed (or running). */
-async function claimSource(tx: Tx, tenantId: string, sourceType: SuggestionSourceType, sourceId: string): Promise<boolean> {
+export async function claimSource(tx: Tx, tenantId: string, sourceType: SuggestionSourceType, sourceId: string): Promise<boolean> {
   const staleBefore = new Date(Date.now() - 15 * 60_000);
   const ins = await tx
     .insert(aiSuggestionSources)
@@ -189,7 +219,7 @@ async function claimSource(tx: Tx, tenantId: string, sourceType: SuggestionSourc
   return re.length > 0;
 }
 
-async function finishSource(tenantId: string, sourceType: SuggestionSourceType, sourceId: string, patch: { status: 'done' | 'failed' | 'skipped'; model?: string; count?: number; error?: string | null }) {
+export async function finishSource(tenantId: string, sourceType: SuggestionSourceType, sourceId: string, patch: { status: 'done' | 'failed' | 'skipped'; model?: string; count?: number; error?: string | null }) {
   await tenantTransaction((tx) =>
     tx
       .update(aiSuggestionSources)
@@ -205,7 +235,7 @@ export type RunResult = { status: 'done'; created: number; dropped: number } | {
 
 async function runExtraction(args: {
   tenantId: string;
-  sourceType: SuggestionSourceType;
+  sourceType: Exclude<SuggestionSourceType, 'enrichment'>;
   sourceId: string;
   text: string;
   date: string;
@@ -408,7 +438,17 @@ export async function suggestionScope(tenantId: string, viewer: Viewer, opts: { 
   return { tenantId, userIds: s.userIds };
 }
 
-const ownerExpr = sql`COALESCE(d.owner_id, c.owner_id)`;
+/**
+ * The record's owner: deal / contact owner, or for a prospect its claimer,
+ * else its creator. Every scope query joins the same three tables (FROM_JOINS).
+ */
+const ownerExpr = sql`COALESCE(d.owner_id, c.owner_id, p.claimed_by, p.created_by)`;
+const entityNameExpr = sql`COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), p.company_name)`;
+const FROM_JOINS = sql`
+      FROM ai_suggestions s
+      LEFT JOIN deals d ON s.entity_type IN ('deal', 'lead') AND d.id = s.entity_id AND d.tenant_id = s.tenant_id
+      LEFT JOIN contacts c ON s.entity_type = 'contact' AND c.id = s.entity_id AND c.tenant_id = s.tenant_id
+      LEFT JOIN prospects p ON s.entity_type = 'prospect' AND p.id = s.entity_id AND p.tenant_id = s.tenant_id`;
 
 function scopeSql(scope: SuggestionScope) {
   if (scope.userIds === null) return sql`TRUE`;
@@ -416,12 +456,20 @@ function scopeSql(scope: SuggestionScope) {
   return sql`${ownerExpr} IN (${sql.join(scope.userIds.map((u) => sql`${u}`), sql`, `)})`;
 }
 
-export type SuggestionRow = AiSuggestion & { ownerId: string | null; dealId: string | null; entityName: string | null };
+export type SuggestionRow = AiSuggestion & {
+  ownerId: string | null;
+  dealId: string | null;
+  entityName: string | null;
+  /** product_fit only: offering id -> name, for display (set by listSuggestions). */
+  valueLabels: Record<string, string> | null;
+  /** product_fit only: the tenant's active offerings, for edit-and-accept. */
+  options: Array<{ value: string; label: string }> | null;
+};
 
 export async function listSuggestions(args: {
   scope: SuggestionScope;
   statuses?: SuggestionStatus[];
-  entity?: { type: 'deal' | 'contact'; ids: string[] };
+  entity?: { type: 'deal' | 'contact' | 'prospect'; ids: string[] };
   limit?: number;
 }): Promise<SuggestionRow[]> {
   const statuses = args.statuses ?? ['pending'];
@@ -432,10 +480,8 @@ export async function listSuggestions(args: {
     tx.execute(sql`
       SELECT s.*, ${ownerExpr} AS owner_id_resolved,
              d.id AS deal_id_resolved,
-             COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), '')) AS entity_name
-      FROM ai_suggestions s
-      LEFT JOIN deals d ON s.entity_type IN ('deal', 'lead') AND d.id = s.entity_id AND d.tenant_id = s.tenant_id
-      LEFT JOIN contacts c ON s.entity_type = 'contact' AND c.id = s.entity_id AND c.tenant_id = s.tenant_id
+             ${entityNameExpr} AS entity_name
+      ${FROM_JOINS}
       WHERE s.tenant_id = ${args.scope.tenantId}::uuid
         AND s.status IN (${sql.join(statuses.map((x) => sql`${x}`), sql`, `)})
         AND ${scopeSql(args.scope)}
@@ -444,7 +490,34 @@ export async function listSuggestions(args: {
       LIMIT ${args.limit ?? 200}
     `),
   )) as unknown as Array<Record<string, unknown>>;
-  return rows.map(toRow);
+  return await withOfferingLabels(args.scope.tenantId, rows.map(toRow));
+}
+
+/**
+ * Product-fit values are offering ids: attach the tenant's offering names
+ * (all, so a retired one still reads as a name) and the active ones as edit
+ * options. One query, only when a product_fit row is present.
+ */
+async function withOfferingLabels(tenantId: string, rows: SuggestionRow[]): Promise<SuggestionRow[]> {
+  if (!rows.some((r) => r.field === 'product_fit')) return rows;
+  const offs = await tenantTransaction((tx) =>
+    tx
+      .select({ id: offerings.id, name: offerings.name, active: offerings.active })
+      .from(offerings)
+      .where(eq(offerings.tenantId, tenantId))
+      .orderBy(asc(offerings.name)),
+  );
+  const valueLabels = Object.fromEntries(offs.map((o) => [o.id, o.name]));
+  const options = offs.filter((o) => o.active).map((o) => ({ value: o.id, label: o.name }));
+  return rows.map((r) => (r.field === 'product_fit' ? { ...r, valueLabels, options } : r));
+}
+
+/** Ids of the tenant's active offerings (lowercase), for validating a product-fit edit. */
+async function activeOfferingIds(tenantId: string): Promise<string[]> {
+  const rows = await tenantTransaction((tx) =>
+    tx.select({ id: offerings.id }).from(offerings).where(and(eq(offerings.tenantId, tenantId), eq(offerings.active, true))),
+  );
+  return rows.map((r) => r.id.toLowerCase());
 }
 
 function toRow(r: Record<string, unknown>): SuggestionRow {
@@ -472,6 +545,8 @@ function toRow(r: Record<string, unknown>): SuggestionRow {
     ownerId: (r.owner_id_resolved as string | null) ?? null,
     dealId: (r.deal_id_resolved as string | null) ?? null,
     entityName: (r.entity_name as string | null) ?? null,
+    valueLabels: null,
+    options: null,
   };
 }
 
@@ -480,9 +555,7 @@ export async function countMyPending(tenantId: string, userId: string): Promise<
   const rows = (await tenantTransaction((tx) =>
     tx.execute(sql`
       SELECT count(*)::int AS n
-      FROM ai_suggestions s
-      LEFT JOIN deals d ON s.entity_type IN ('deal', 'lead') AND d.id = s.entity_id AND d.tenant_id = s.tenant_id
-      LEFT JOIN contacts c ON s.entity_type = 'contact' AND c.id = s.entity_id AND c.tenant_id = s.tenant_id
+      ${FROM_JOINS}
       WHERE s.tenant_id = ${tenantId}::uuid AND s.status = 'pending' AND ${ownerExpr} = ${userId}
     `),
   )) as unknown as Array<{ n: number }>;
@@ -536,7 +609,9 @@ export async function decideSuggestion(input: DecideInput, appliers: Appliers): 
   // Value to apply: the suggestion's, or the user's edit re-validated.
   let value = s.suggestedValue;
   if (input.action === 'edit') {
-    const v = validateFieldValue(s.field, input.value, { today });
+    // A product-fit edit must name one of the tenant's ACTIVE offerings.
+    const offeringIds = s.field === 'product_fit' ? await activeOfferingIds(input.tenantId) : undefined;
+    const v = validateFieldValue(s.field, input.value, { today, offeringIds });
     if (!v.ok) return { ok: false, message: v.error };
     value = v.value;
   }
@@ -609,10 +684,8 @@ async function findInScope(scope: SuggestionScope, id: string): Promise<Suggesti
   const rows = (await tenantTransaction((tx) =>
     tx.execute(sql`
       SELECT s.*, ${ownerExpr} AS owner_id_resolved, d.id AS deal_id_resolved,
-             COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), '')) AS entity_name
-      FROM ai_suggestions s
-      LEFT JOIN deals d ON s.entity_type IN ('deal', 'lead') AND d.id = s.entity_id AND d.tenant_id = s.tenant_id
-      LEFT JOIN contacts c ON s.entity_type = 'contact' AND c.id = s.entity_id AND c.tenant_id = s.tenant_id
+             ${entityNameExpr} AS entity_name
+      ${FROM_JOINS}
       WHERE s.tenant_id = ${scope.tenantId}::uuid AND s.id = ${id}::uuid AND s.status = 'pending' AND ${scopeSql(scope)}
       LIMIT 1
     `),
@@ -620,7 +693,7 @@ async function findInScope(scope: SuggestionScope, id: string): Promise<Suggesti
   return rows[0] ? toRow(rows[0]) : null;
 }
 
-/** Every decision is an activity_logs row on the deal/contact, marked AI-originated. */
+/** Every decision is an activity_logs row on the deal / contact / prospect, marked AI-originated. */
 async function logDecision(
   tx: Tx,
   s: SuggestionRow,
@@ -631,7 +704,7 @@ async function logDecision(
   await recordActivity(tx, {
     tenantId: s.tenantId,
     actorUserId: userId,
-    entityType: s.entityType === 'contact' ? 'contact' : 'deal',
+    entityType: s.entityType === 'contact' || s.entityType === 'prospect' ? s.entityType : 'deal',
     entityId: s.entityId,
     action: outcome === 'accepted' ? 'ai_suggestion_accepted' : outcome === 'rejected' ? 'ai_suggestion_rejected' : 'ai_suggestion_stale',
     metadata: {

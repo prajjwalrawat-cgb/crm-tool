@@ -128,6 +128,18 @@ const PERMISSIONS = {
   assignLeads: ['owner', 'admin', 'manager'],
   /** Bulk-import leads from CSV. */
   importLeads: ['owner', 'admin', 'manager'],
+  /** Prospect Board: create, edit, move and tag prospect cards. */
+  manageProspects: ['owner', 'admin', 'manager', 'member'],
+  /** Prospect Board: claim a prospect, release own claim, vote. */
+  claimProspects: ['owner', 'admin', 'manager', 'member'],
+  /** Prospect Board: promote a ready prospect to a deal (lead). */
+  promoteProspects: ['owner', 'admin', 'manager', 'member'],
+  /** Prospect Board: release or reassign someone else's claim. */
+  manageProspectClaims: ['owner', 'admin', 'manager'],
+  /** Prospect Board: bulk-park prospects (e.g. stale clean-up). */
+  bulkParkProspects: ['owner', 'admin', 'manager'],
+  /** Prospect Board: team-level reports (funnel, source quality). */
+  viewProspectReports: ['owner', 'admin', 'manager'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -178,6 +190,15 @@ export const canManageOfferings = (role: RoleArg) =>
   can(role, 'manageOfferings');
 export const canManageIncentives = (role: RoleArg) =>
   can(role, 'manageIncentives');
+
+export const canManageProspects = (role: RoleArg) => can(role, 'manageProspects');
+export const canClaimProspects = (role: RoleArg) => can(role, 'claimProspects');
+export const canPromoteProspects = (role: RoleArg) => can(role, 'promoteProspects');
+export const canManageProspectClaims = (role: RoleArg) =>
+  can(role, 'manageProspectClaims');
+export const canBulkParkProspects = (role: RoleArg) => can(role, 'bulkParkProspects');
+export const canViewProspectReports = (role: RoleArg) =>
+  can(role, 'viewProspectReports');
 
 export const canHardDeleteCompanies = (role: RoleArg) =>
   can(role, 'hardDeleteCompanies');

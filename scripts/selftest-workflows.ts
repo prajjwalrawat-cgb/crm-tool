@@ -3,6 +3,8 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 
 config({ path: '.env.local' });
 config();
+// .env.local may hold a real key: this test must never reach Claude.
+process.env.ANTHROPIC_API_KEY = '';
 
 /**
  * Self-test for the workflow dispatcher (the in-process fallback path).

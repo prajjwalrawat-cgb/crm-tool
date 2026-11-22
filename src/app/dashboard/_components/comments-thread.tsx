@@ -29,7 +29,7 @@ import { cn } from '@/lib/utils';
 
 type CommentItem = Comment & { __pending?: boolean };
 
-type EntityType = 'deal' | 'company' | 'contact';
+type EntityType = 'deal' | 'company' | 'contact' | 'prospect';
 
 /**
  * Threaded comments panel attached to an entity. One level of replies

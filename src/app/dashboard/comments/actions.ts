@@ -15,22 +15,25 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
+import { PROSPECT_TOUCH_MESSAGE, touchProspectActivity } from '@/lib/prospects/activity';
 import { recordNotificationsSafe } from '@/lib/notifications/recorder';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
-const ENTITY_TYPES = ['deal', 'company', 'contact'] as const;
+const ENTITY_TYPES = ['deal', 'company', 'contact', 'prospect'] as const;
 type EntityType = (typeof ENTITY_TYPES)[number];
 
-const PERMISSION_FOR: Record<EntityType, 'manageDeals' | 'manageCompanies' | 'manageContacts'> = {
+const PERMISSION_FOR: Record<EntityType, 'manageDeals' | 'manageCompanies' | 'manageContacts' | 'manageProspects'> = {
   deal: 'manageDeals',
   company: 'manageCompanies',
   contact: 'manageContacts',
+  prospect: 'manageProspects',
 };
 
 const PATH_FOR: Record<EntityType, (id: string) => string> = {
   deal: (id) => `/dashboard/deals/${id}`,
   company: (id) => `/dashboard/companies/${id}`,
   contact: (id) => `/dashboard/contacts/${id}`,
+  prospect: (id) => `/dashboard/prospects?p=${id}`,
 };
 
 const createSchema = z.object({
@@ -81,6 +84,11 @@ export async function createCommentAction(input: {
       const mentions = extractMentionUserIds(parsed.data.body);
 
       const inserted = await tenantTransaction(async (tx) => {
+        // A comment is prospect activity; promoted/deleted prospects are read-only.
+        if (parsed.data.entityType === 'prospect') {
+          const touched = await touchProspectActivity(tx, tenant.id, parsed.data.entityId);
+          if (touched !== 'ok') return { error: PROSPECT_TOUCH_MESSAGE[touched] } as const;
+        }
         // Normalize threading: replies-to-replies collapse to the
         // top-level ancestor. Keeps the UI's depth==1 promise even
         // if a buggy client sends a deeper parent.
@@ -165,6 +173,8 @@ export async function createCommentAction(input: {
         return { row, mentions, preview };
       });
 
+      if ('error' in inserted) return { ok: false, message: inserted.error as string };
+
       // Post-commit, best-effort mention fan-out. Mention failures must
       // never roll back the comment itself.
       if (inserted.mentions.length > 0) {
@@ -224,8 +234,15 @@ export async function updateCommentAction(input: {
         return { ok: false, message: 'You can only edit your own comments.' };
       }
 
+      const entityGate = await checkPermission(PERMISSION_FOR[c.entityType as EntityType]);
+      if (!entityGate.ok) return { ok: false, message: entityGate.message };
+
       const mentions = extractMentionUserIds(parsed.data.body);
       const updated = await tenantTransaction(async (tx) => {
+        if (c.entityType === 'prospect') {
+          const touched = await touchProspectActivity(tx, tenant.id, c.entityId);
+          if (touched !== 'ok') return { error: PROSPECT_TOUCH_MESSAGE[touched] };
+        }
         const [row] = await tx
           .update(comments)
           .set({
@@ -239,6 +256,7 @@ export async function updateCommentAction(input: {
         return row;
       });
 
+      if ('error' in updated) return { ok: false, message: updated.error };
       revalidatePath(
         PATH_FOR[c.entityType as EntityType](c.entityId),
       );
@@ -279,12 +297,21 @@ export async function deleteCommentAction(
         return { ok: false, message: 'You can only delete your own comments.' };
       }
 
-      await tenantTransaction(async (tx) => {
+      const entityGate = await checkPermission(PERMISSION_FOR[c.entityType as EntityType]);
+      if (!entityGate.ok) return { ok: false, message: entityGate.message };
+
+      const blocked = await tenantTransaction(async (tx) => {
+        if (c.entityType === 'prospect') {
+          const touched = await touchProspectActivity(tx, tenant.id, c.entityId);
+          if (touched !== 'ok') return PROSPECT_TOUCH_MESSAGE[touched];
+        }
         await tx
           .update(comments)
           .set({ deletedAt: new Date(), deletedBy: membership.userId })
           .where(eq(comments.id, parsed.data.id));
+        return null;
       });
+      if (blocked) return { ok: false, message: blocked };
 
       revalidatePath(
         PATH_FOR[c.entityType as EntityType](c.entityId),

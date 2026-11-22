@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { FollowUpValue, SuggestionField, SuggestionValue } from '@/db/schema/ai-suggestions';
+import { PROSPECT_SIZE_BANDS } from '@/db/schema/prospects';
 import { DEAL_STAGES } from '@/lib/deals/schema';
 import { normalizePhone } from '@/lib/lead-capture/normalize';
 
@@ -12,7 +13,9 @@ import { normalizePhone } from '@/lib/lead-capture/normalize';
  * Defences against a confused or manipulated model:
  *  - every value is re-validated per field (stage enum, real future dates,
  *    positive amounts, valid email/phone);
- *  - the evidence quote must appear verbatim in the conversation;
+ *  - the evidence quote must appear verbatim in the conversation (call /
+ *    email only; prospect enrichment has no source text, so its evidence is
+ *    the model's reasoning, see validateEnrichment);
  *  - a quote that reads like an instruction to the AI is dropped;
  *  - fields are restricted to the entity they belong to;
  *  - a "change" equal to the current value is dropped (nothing to review).
@@ -36,6 +39,7 @@ export const rawOutputSchema = z.object({ suggestions: z.array(rawSuggestionSche
 export type RawSuggestion = z.infer<typeof rawSuggestionSchema>;
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function realDate(s: string): boolean {
   if (!ISO.test(s)) return false;
@@ -54,7 +58,11 @@ export function isFutureDate(s: string, today: string): boolean {
 export type FieldCheck = { ok: true; value: SuggestionValue } | { ok: false; error: string };
 
 /** Validate + normalise a value for one field. `raw` is the model's string (or a user's edit). */
-export function validateFieldValue(field: SuggestionField, raw: unknown, ctx: { today: string; dueDate?: string | null }): FieldCheck {
+export function validateFieldValue(
+  field: SuggestionField,
+  raw: unknown,
+  ctx: { today: string; dueDate?: string | null; offeringIds?: readonly string[] },
+): FieldCheck {
   const str = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' ? String(raw) : '';
   switch (field) {
     case 'stage': {
@@ -89,6 +97,24 @@ export function validateFieldValue(field: SuggestionField, raw: unknown, ctx: { 
       if (title.length < 3 || title.length > 200) return { ok: false, error: 'Task title must be 3–200 characters' };
       if (!isFutureDate(due, ctx.today)) return { ok: false, error: 'Follow-up date must be a real date in the future' };
       return { ok: true, value: { title, due_date: due } };
+    }
+    // Prospect enrichment fields (0079).
+    case 'industry':
+      return str.length >= 2 && str.length <= 80 ? { ok: true, value: str } : { ok: false, error: 'Industry must be 2–80 characters' };
+    case 'size_band':
+      return (PROSPECT_SIZE_BANDS as readonly string[]).includes(str)
+        ? { ok: true, value: str }
+        : { ok: false, error: `"${str}" is not a size band` };
+    case 'product_fit': {
+      const id = str.toLowerCase();
+      if (!UUID.test(id)) return { ok: false, error: 'Not a known offering' };
+      // When the caller knows the tenant's offerings, the id must be one of them.
+      if (ctx.offeringIds && !ctx.offeringIds.includes(id)) return { ok: false, error: 'Not a known offering' };
+      return { ok: true, value: id };
+    }
+    case 'icp_score': {
+      const n = typeof raw === 'number' ? raw : /^\d{1,3}$/.test(str) ? Number(str) : NaN;
+      return Number.isInteger(n) && n >= 0 && n <= 100 ? { ok: true, value: n } : { ok: false, error: 'ICP score must be a whole number from 0 to 100' };
     }
   }
 }
@@ -212,6 +238,81 @@ export function validateSuggestions(
     }
     seen.add(key);
     out.push({ target: s.target, field, value: v.value, current: cur, evidenceQuote: s.evidence_quote.trim(), confidence: s.confidence });
+  }
+  return { suggestions: out, dropped };
+}
+
+/* ------------------------------------------------------------ prospect enrichment */
+
+export const ENRICH_FIELDS = ['industry', 'size_band', 'product_fit', 'icp_score'] as const;
+export type EnrichField = (typeof ENRICH_FIELDS)[number];
+
+const enrichItemSchema = z.object({
+  value: z.union([z.string(), z.number()]).nullable(),
+  reasoning: z.string(),
+  confidence: z.number(),
+});
+/** Raw enrichment output: one entry per field (value null when the model is unsure). */
+export const rawEnrichOutputSchema = z.object({
+  industry: enrichItemSchema,
+  size_band: enrichItemSchema,
+  product_fit: enrichItemSchema,
+  icp_score: enrichItemSchema,
+});
+
+export type ValidEnrichment = {
+  field: EnrichField;
+  value: SuggestionValue;
+  current: null;
+  /** The model's reasoning (≤ 500 chars); stored as the suggestion's evidence_quote. */
+  evidenceQuote: string;
+  confidence: number;
+};
+
+/**
+ * Enrichment (source_type 'enrichment') suggestions from raw model output.
+ * Unlike call/email extraction there is no source conversation, so there is
+ * no quote-in-source check: the evidence is the model's own reasoning. Every
+ * value is still re-validated per field (product fit must be one of
+ * `offeringIds`, size band one of PROSPECT_SIZE_BANDS, ICP a whole number
+ * 0–100, industry ≤ 80 chars), instruction-like reasoning is dropped, and a
+ * field that already has a value on the prospect is never suggested.
+ */
+export function validateEnrichment(
+  raw: unknown,
+  ctx: { offeringIds: readonly string[]; current: Partial<Record<EnrichField, SuggestionValue | undefined>> },
+): { suggestions: ValidEnrichment[]; dropped: Dropped[] } {
+  const parsed = rawEnrichOutputSchema.safeParse(raw);
+  if (!parsed.success) return { suggestions: [], dropped: [{ field: '(output)', reason: 'schema' }] };
+  const out: ValidEnrichment[] = [];
+  const dropped: Dropped[] = [];
+  for (const field of ENRICH_FIELDS) {
+    const item = parsed.data[field];
+    if (item.value == null || (typeof item.value === 'string' && !item.value.trim())) continue; // unsure: nothing to suggest
+    const cur = ctx.current[field];
+    if (cur != null && cur !== '') {
+      dropped.push({ field, reason: 'field already has a value' });
+      continue;
+    }
+    if (!Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1) {
+      dropped.push({ field, reason: 'confidence out of range' });
+      continue;
+    }
+    const reasoning = item.reasoning.trim();
+    if (!reasoning) {
+      dropped.push({ field, reason: 'no reasoning' });
+      continue;
+    }
+    if (looksLikeInstruction(reasoning)) {
+      dropped.push({ field, reason: 'instruction-like evidence' });
+      continue;
+    }
+    const v = validateFieldValue(field, item.value, { today: '', offeringIds: ctx.offeringIds });
+    if (!v.ok) {
+      dropped.push({ field, reason: v.error });
+      continue;
+    }
+    out.push({ field, value: v.value, current: null, evidenceQuote: reasoning.slice(0, 500), confidence: item.confidence });
   }
   return { suggestions: out, dropped };
 }

@@ -9,10 +9,11 @@ import { createTaskAction } from '@/app/dashboard/tasks/actions';
 import { calls, type FollowUpValue } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
+import { prospectAppliers } from './prospect-appliers';
 import type { ApplyResult, Appliers } from './service';
 
 /**
- * The ONLY way an accepted suggestion reaches a deal or contact: the same
+ * The ONLY way an accepted suggestion reaches a deal, contact or prospect: the same
  * server actions a user's manual edit calls. They read the session (the
  * accepting user), check permissions, enforce stage gates / governance /
  * validation, and write the normal audit rows. Nothing here writes a deal or
@@ -96,4 +97,6 @@ export const defaultAppliers: Appliers = {
     }
     return { ok: true };
   },
+  // Prospect enrichment fields (0079): updateProspect as the accepting user.
+  ...prospectAppliers,
 };

@@ -14,10 +14,13 @@ import { buildReportCsvAction } from '../actions';
 export function CsvDownloadButton({
   reportId,
   owner,
+  range,
   scopeParams,
 }: {
   reportId: string;
   owner: 'all' | 'mine';
+  /** Date-range preset for reports that honour it, so the file matches the screen. */
+  range?: string;
   /**
    * Extra URL params the report's runner understands (today: the funnel's
    * offering / category scope). Forwarded so the file matches what is on
@@ -35,7 +38,7 @@ export function CsvDownloadButton({
         start(async () => {
           const result = await buildReportCsvAction({
             reportId,
-            filters: { owner, ...scopeParams },
+            filters: { owner, range, ...scopeParams },
           });
           if (!result.ok) {
             toast.error(result.message);

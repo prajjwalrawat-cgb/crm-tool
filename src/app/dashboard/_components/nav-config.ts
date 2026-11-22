@@ -9,6 +9,7 @@ import {
   Briefcase,
   Building2,
   CheckSquare,
+  ClipboardList,
   Cog,
   FileSpreadsheet,
   FileText,
@@ -88,6 +89,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
     id: 'sales',
     label: 'Sales',
     items: [
+      { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
@@ -165,6 +167,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
     id: 'sales',
     label: 'Sales',
     items: [
+      { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
@@ -217,6 +220,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/dashboard/deals', label: 'My Deals', icon: Briefcase },
+      { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       {

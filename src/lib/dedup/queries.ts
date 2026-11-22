@@ -18,6 +18,11 @@ import {
   normalizeEmail,
 } from './normalize';
 
+/** Runs on the caller's executor when given, else in its own tenant transaction. */
+function withExec<T>(exec: DbExecutor | undefined, fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
+  return exec ? fn(exec) : tenantTransaction(fn);
+}
+
 /** Similarity threshold for a "possible duplicate" (spec: ≥ 0.55). */
 const SIM_THRESHOLD = 0.55;
 
@@ -47,6 +52,7 @@ export async function findCompanyMatches(
   tenantId: string,
   name: string,
   limit = 5,
+  exec?: DbExecutor,
 ): Promise<DedupMatch[]> {
   const norm = normalizeCompanyName(name);
   if (norm.length < 2) return [];
@@ -62,7 +68,7 @@ export async function findCompanyMatches(
   const sameFirst =
     fuzzy && firstWord.length >= 2 ? sql`split_part(${stored}, ' ', 1) = ${firstWord}` : sql`false`;
 
-  const rows = (await tenantTransaction((tx) =>
+  const rows = (await withExec(exec, (tx) =>
     tx.execute(sql`
       SELECT id, name, domain,
         (normalized_name = ${norm}) AS exact,
@@ -110,10 +116,11 @@ export async function findCompanyMatches(
 export async function findContactByEmail(
   tenantId: string,
   email: string,
+  exec?: DbExecutor,
 ): Promise<{ id: string; name: string } | null> {
   const norm = normalizeEmail(email);
   if (!norm) return null;
-  const [row] = await tenantTransaction((tx) =>
+  const [row] = await withExec(exec,(tx) =>
     tx
       .select({
         id: contacts.id,
@@ -134,6 +141,78 @@ export async function findContactByEmail(
   if (!row) return null;
   const name = [row.firstName, row.lastName].filter(Boolean).join(' ').trim();
   return { id: row.id, name: name || norm };
+}
+
+/** Lower-case host: no scheme, `www.`, path, query or port (null when nothing is left). */
+export function domainHost(raw: string): string | null {
+  const host = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+    .replace(/^www\./, '')
+    .split(/[/?#]/)[0]!
+    .replace(/:\d+$/, '');
+  return host.includes('.') ? host : null;
+}
+
+/** SQL for a stored companies.domain reduced the same way as domainHost (scheme, `www.`, path, port off). */
+export function storedCompanyDomainHost() {
+  // Character classes instead of backslashes (Drizzle would eat them).
+  return sql`regexp_replace(split_part(split_part(split_part(regexp_replace(lower(btrim(${companies.domain})), '^[a-z][a-z0-9+.-]*://', ''), '/', 1), '?', 1), '#', 1), '^www[.]|:[0-9]+$', '', 'g')`;
+}
+
+/**
+ * An existing, active company on this exact domain, or null. The stored
+ * domain is compared with its scheme, `www.`, path and port taken off, so
+ * "https://www.acme.in/" matches "acme.in".
+ */
+export async function findCompanyByDomain(tenantId: string, domain: string, exec?: DbExecutor): Promise<DedupMatch | null> {
+  const host = domainHost(domain);
+  if (!host) return null;
+  const stored = storedCompanyDomainHost();
+  const [row] = await withExec(exec,(tx) =>
+    tx
+      .select({ id: companies.id, name: companies.name, domain: companies.domain })
+      .from(companies)
+      .where(
+        and(
+          eq(companies.tenantId, tenantId),
+          isNull(companies.deletedAt),
+          isNull(companies.mergedIntoId),
+          sql`${companies.domain} IS NOT NULL`,
+          sql`${stored} = ${host}`,
+        ),
+      )
+      .limit(1),
+  );
+  return row ? { id: row.id, label: row.name, sublabel: row.domain, similarity: 1, kind: 'exact' } : null;
+}
+
+/** An existing, active contact with this E.164 phone (contacts.phone_normalized), or null. */
+export async function findContactByPhone(
+  tenantId: string,
+  phoneNormalized: string,
+  exec?: DbExecutor,
+): Promise<{ id: string; label: string } | null> {
+  const phone = phoneNormalized.trim();
+  if (!phone) return null;
+  const [row] = await withExec(exec,(tx) =>
+    tx
+      .select({ id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName })
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.tenantId, tenantId),
+          eq(contacts.phoneNormalized, phone),
+          isNull(contacts.deletedAt),
+          isNull(contacts.mergedIntoId),
+        ),
+      )
+      .limit(1),
+  );
+  if (!row) return null;
+  const name = [row.firstName, row.lastName].filter(Boolean).join(' ').trim();
+  return { id: row.id, label: name || phone };
 }
 
 /** Fuzzy name matches for a contact being created (warning, not blocking). */

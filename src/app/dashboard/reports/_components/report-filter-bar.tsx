@@ -72,7 +72,13 @@ export function ReportFilterBar({
                   : 'text-slate-700 hover:bg-slate-50',
               )}
             >
-              {v === 'all' ? 'All deals' : 'My deals'}
+              {reportId === 'prospect-board'
+                ? v === 'all'
+                  ? 'All prospects'
+                  : 'My prospects'
+                : v === 'all'
+                  ? 'All deals'
+                  : 'My deals'}
             </button>
           ))}
         </div>

@@ -25,6 +25,7 @@ import {
   FileText,
   Hash,
   Shuffle,
+  Kanban,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -79,6 +80,7 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/email', label: 'Email', icon: Mail, group: 'Infrastructure', visibility: 'adminOnly' },
   { href: '/dashboard/settings/ai', label: 'AI', icon: Brain, visibility: 'adminOnly' },
   { href: '/dashboard/settings/ai-suggestions', label: 'AI suggestions', icon: Sparkles, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/prospects', label: 'Prospect board', icon: Kanban, visibility: 'adminOnly' },
   { href: '/dashboard/settings/telephony', label: 'Telephony', icon: Headset, visibility: 'adminOnly' },
 ];
 

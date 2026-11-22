@@ -11,6 +11,7 @@ const ENTITY_LABEL: Record<ActivityEntityType, string> = {
   task: 'task',
   note: 'note',
   email: 'email',
+  prospect: 'prospect',
 };
 
 type FormattedActivity = {

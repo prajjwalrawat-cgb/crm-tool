@@ -2,8 +2,10 @@ import { ArrowRight, BarChart3, Briefcase, MailOpen, Users, Zap } from 'lucide-r
 import Link from 'next/link';
 
 import { withTenantSession } from '@/lib/auth-guard';
+import { getCurrentMembership } from '@/lib/membership';
 import { requirePersonas } from '@/lib/personas/guards';
 import {
+  canAccessReport,
   isReportEnabled,
   REPORTS,
   type ReportRegistration,
@@ -36,6 +38,7 @@ const CATEGORY_META: Record<
  */
 export default async function ReportsPage() {
   await requirePersonas(['manager', 'admin']);
+  const role = (await getCurrentMembership())?.role ?? null;
   return await withTenantSession(async ({ tenant, userId }) => {
     // Reports tied to a workspace feature that's switched off (e.g. Funnel
     // by offering, 0067) are dropped BEFORE their runners fire — no tile, and
@@ -43,7 +46,9 @@ export default async function ReportsPage() {
     const available = (
       await Promise.all(
         Object.values(REPORTS).map(async (report) =>
-          (await isReportEnabled(tenant.id, report)) ? report : null,
+          canAccessReport(role, report) && (await isReportEnabled(tenant.id, report))
+            ? report
+            : null,
         ),
       )
     ).filter((r): r is ReportRegistration => r !== null);
@@ -51,6 +56,8 @@ export default async function ReportsPage() {
     const cards = await Promise.all(
       available.map(async (report) => {
         let headline: string | null = null;
+        // Heavy runners opt out of tile headlines; the tile shows no number.
+        if (report.skipListHeadline) return { report, headline };
         try {
           const result = await report.runner(
             tenant.id,
@@ -129,7 +136,7 @@ function ReportTile({
       <p className="mt-1 line-clamp-2 text-[12px] leading-snug text-slate-500">
         {report.description}
       </p>
-      {headline ? (
+      {report.skipListHeadline ? null : headline ? (
         <p className="mt-3 font-mono text-[15px] font-semibold tabular-nums text-slate-900">
           {headline}
         </p>
