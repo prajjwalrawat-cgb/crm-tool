@@ -3,9 +3,13 @@ import { sql } from 'drizzle-orm';
 
 config({ path: '.env.local' });
 config();
+// The seed inserts fixed enrichment suggestions itself; never let the in-process
+// event dispatcher call Claude for the seeded prospects.
+process.env.ANTHROPIC_API_KEY = '';
 
 /**
- * Seeds 30 prospects (3 source tags x 10) into one tenant of a LOCAL/test DB.
+ * Seeds 30 prospects (3 source tags x 10), 2 promoted to leads and 3 pending enrichment
+ * suggestions (fixed values, no Claude), into one tenant of a LOCAL/test DB.
  *
  *   pnpm seed:prospects -- --tenant <slug-or-id> [--reset]
  *
@@ -58,6 +62,9 @@ const COMPANIES: Row[] = [
   { name: 'Vindhya Paper Mills', domain: 'vindhyapaper.in', contact: 'Alok Tiwari', role: 'Director', industry: 'Paper', size: '201-1000', city: 'Bhopal', state: 'Madhya Pradesh', tags: ['manufacturing'] },
 ];
 
+/** Promoted seed prospects get this suffix so reset can find the company promotion created. */
+const SEED_MARK = ' (Seed)';
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -83,7 +90,9 @@ async function main() {
   const s = await import('../src/db/schema');
   const { runWithSystemContext, runWithTenantContext, tenantTransaction } = await import('../src/lib/db-context');
   const m = await import('../src/lib/prospects/mutations');
-  const { and, eq, inArray } = await import('drizzle-orm');
+  const { and, eq, inArray, like, notInArray } = await import('drizzle-orm');
+  const { promoteProspect } = await import('../src/lib/prospects/promote/promote');
+  const { claimSource, finishSource, persistSuggestions } = await import('../src/lib/ai/suggestions/service');
 
   try {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantArg);
@@ -117,17 +126,54 @@ async function main() {
         process.exitCode = 1;
         return;
       }
-      // Comments are not FK-cascaded from prospects, so remove the seeded ones first.
-      await inTenant((tx) =>
-        tx.delete(s.comments).where(and(
-          eq(s.comments.tenantId, tenantId),
-          eq(s.comments.entityType, 'prospect'),
-          inArray(s.comments.entityId, existing.map((e) => e.id)),
-        )),
-      );
-      await inTenant((tx) =>
-        tx.delete(s.prospects).where(and(eq(s.prospects.tenantId, tenantId), inArray(s.prospects.sourceTag, [...SOURCES]))),
-      );
+      const ids = existing.map((e) => e.id);
+      await inTenant(async (tx) => {
+        // Promotion products: only deals linked to seed prospects, and only the
+        // companies/contacts those deals own that carry the seed marker and are
+        // used by no other deal.
+        const dealRows = await tx.select({ id: s.deals.id, companyId: s.deals.companyId, contactId: s.deals.contactId })
+          .from(s.deals).where(and(eq(s.deals.tenantId, tenantId), inArray(s.deals.sourceProspectId, ids)));
+        const dealIds = dealRows.map((d) => d.id);
+        let companyIds: string[] = [];
+        let contactIds: string[] = [];
+        if (dealIds.length > 0) {
+          const cos = [...new Set(dealRows.map((d) => d.companyId).filter((v): v is string => !!v))];
+          const cts = [...new Set(dealRows.map((d) => d.contactId).filter((v): v is string => !!v))];
+          const seedCos = cos.length ? await tx.select({ id: s.companies.id }).from(s.companies)
+            .where(and(eq(s.companies.tenantId, tenantId), inArray(s.companies.id, cos), like(s.companies.name, `%${SEED_MARK}`))) : [];
+          companyIds = seedCos.map((c) => c.id);
+          const seedCts = cts.length && companyIds.length ? await tx.select({ id: s.contacts.id }).from(s.contacts)
+            .where(and(eq(s.contacts.tenantId, tenantId), inArray(s.contacts.id, cts), inArray(s.contacts.companyId, companyIds))) : [];
+          contactIds = seedCts.map((c) => c.id);
+          // Spare anything another deal still uses.
+          const others = await tx.select({ companyId: s.deals.companyId, contactId: s.deals.contactId }).from(s.deals)
+            .where(and(eq(s.deals.tenantId, tenantId), notInArray(s.deals.id, dealIds)));
+          const usedCo = new Set(others.map((o) => o.companyId));
+          const usedCt = new Set(others.map((o) => o.contactId));
+          companyIds = companyIds.filter((x) => !usedCo.has(x));
+          contactIds = contactIds.filter((x) => !usedCt.has(x));
+        }
+        const logs = (type: string, eids: string[]) => eids.length
+          ? tx.delete(s.activityLogs).where(and(eq(s.activityLogs.tenantId, tenantId), eq(s.activityLogs.entityType, type as never), inArray(s.activityLogs.entityId, eids)))
+          : Promise.resolve();
+        if (dealIds.length > 0) {
+          await tx.delete(s.notes).where(and(eq(s.notes.tenantId, tenantId), eq(s.notes.entityType, 'deal'), inArray(s.notes.entityId, dealIds)));
+          await logs('deal', dealIds);
+          await tx.delete(s.leadAssignments).where(and(eq(s.leadAssignments.tenantId, tenantId), inArray(s.leadAssignments.dealId, dealIds)));
+          await tx.update(s.prospects).set({ promotedDealId: null }).where(and(eq(s.prospects.tenantId, tenantId), inArray(s.prospects.id, ids)));
+          await tx.delete(s.deals).where(and(eq(s.deals.tenantId, tenantId), inArray(s.deals.id, dealIds)));
+        }
+        await logs('contact', contactIds);
+        await logs('company', companyIds);
+        if (contactIds.length) await tx.delete(s.contacts).where(and(eq(s.contacts.tenantId, tenantId), inArray(s.contacts.id, contactIds)));
+        if (companyIds.length) await tx.delete(s.companies).where(and(eq(s.companies.tenantId, tenantId), inArray(s.companies.id, companyIds)));
+        // Enrichment suggestions (and their source claims) on the prospects being removed.
+        await tx.delete(s.aiSuggestions).where(and(eq(s.aiSuggestions.tenantId, tenantId), eq(s.aiSuggestions.entityType, 'prospect'), inArray(s.aiSuggestions.entityId, ids)));
+        await tx.delete(s.aiSuggestionSources).where(and(eq(s.aiSuggestionSources.tenantId, tenantId), eq(s.aiSuggestionSources.sourceType, 'enrichment'), inArray(s.aiSuggestionSources.sourceId, ids)));
+        // Comments are not FK-cascaded from prospects, so remove the seeded ones first.
+        await tx.delete(s.comments).where(and(eq(s.comments.tenantId, tenantId), eq(s.comments.entityType, 'prospect'), inArray(s.comments.entityId, ids)));
+        await tx.delete(s.prospects).where(and(eq(s.prospects.tenantId, tenantId), inArray(s.prospects.sourceTag, [...SOURCES])));
+      });
       console.log(`Reset: deleted ${existing.length} seed prospects`);
     }
 
@@ -164,7 +210,9 @@ async function main() {
     }
 
     // Claims (8, non-parked, spread over members) and votes (12), after stage moves.
-    const claimable = created.filter((x) => x.stage !== 'parked').filter((_, i) => i % 3 === 0).slice(0, 8);
+    // Suggestion targets stay unclaimed (enrichment skips claimed prospects).
+    const RESERVED = ['Sundarban Handicrafts', 'Doon Valley Biotech', 'Malwa Engineering Works'].map((n) => created[COMPANIES.findIndex((c) => c.name === n)]!.id);
+    const claimable = created.filter((x) => x.stage !== 'parked' && !RESERVED.includes(x.id)).filter((_, i) => i % 3 === 0).slice(0, 8);
     const now = Date.now();
     const votable = created.filter((_, i) => i % 5 < 2).slice(0, 12);
     await inTenant(async (tx) => {
@@ -214,6 +262,53 @@ async function main() {
       }
     });
     await inTenant((tx) => tx.insert(s.comments).values(commentRows));
+
+    // Pending enrichment suggestions (3): fixed values, no Claude. Targets are
+    // unclaimed, unpromoted prospects whose field is empty.
+    const claimedIds = new Set(claimable.map((x) => x.id));
+    const byName = (name: string) => {
+      const r = created[COMPANIES.findIndex((c) => c.name === name)]!;
+      if (claimedIds.has(r.id)) throw new Error(`${name} is claimed; pick another suggestion target`);
+      return r.id;
+    };
+    const sugTargets: Array<{ id: string; field: 'industry' | 'icp_score' | 'size_band'; value: string | number; reason: string; conf: number }> = [
+      { id: byName('Sundarban Handicrafts'), field: 'industry', value: 'Handicrafts', reason: 'Name and domain point to a handicrafts business.', conf: 0.78 },
+      { id: byName('Doon Valley Biotech'), field: 'icp_score', value: 74, reason: 'R&D-led pharma-adjacent company in the 11-50 band fits the ideal profile.', conf: 0.66 },
+      { id: byName('Malwa Engineering Works'), field: 'size_band', value: '11-50', reason: 'Owner-run engineering workshop; a small team is likely.', conf: 0.6 },
+    ];
+    // Leave the target fields empty so the suggestions are valid.
+    await inTenant(async (tx) => {
+      await tx.update(s.prospects).set({ industry: null }).where(eq(s.prospects.id, sugTargets[0]!.id));
+      await tx.update(s.prospects).set({ icpScore: null }).where(eq(s.prospects.id, sugTargets[1]!.id));
+      await tx.update(s.prospects).set({ sizeBand: null }).where(eq(s.prospects.id, sugTargets[2]!.id));
+    });
+    for (const t of sugTargets) {
+      await inTenant(async (tx) => {
+        if (!(await claimSource(tx as never, tenantId, 'enrichment', t.id))) return;
+        await persistSuggestions(tx as never, {
+          tenantId, sourceType: 'enrichment', sourceId: t.id, model: 'seed-fixed',
+          items: [{ entityType: 'prospect', entityId: t.id, field: t.field, current: null, value: t.value, evidenceQuote: t.reason, confidence: t.conf }],
+        });
+      });
+      await asActor(() => finishSource(tenantId, 'enrichment', t.id, { status: 'done', model: 'seed-fixed', count: 1 }));
+    }
+
+    // Promoted examples (2): real promotion, so the lead, notes and routing exist.
+    // The company name carries SEED_MARK so reset can find what promotion created.
+    const sugIds = new Set(sugTargets.map((x) => x.id));
+    const toPromote = created.filter((x) => x.stage === 'ready' && !claimedIds.has(x.id) && !sugIds.has(x.id)).slice(0, 2);
+    if (toPromote.length < 2) throw new Error('Not enough unclaimed ready prospects to promote');
+    const noEvents = async () => undefined as never;
+    const promoted: string[] = [];
+    for (const pr of toPromote) {
+      await inTenant((tx) =>
+        tx.update(s.prospects).set({ companyName: sql`${s.prospects.companyName} || ${SEED_MARK}` }).where(eq(s.prospects.id, pr.id)),
+      );
+      const out = await asActor(() => promoteProspect(tenantId, actor as never, pr.id, {}, new Date(), { sendEvent: noEvents } as never));
+      if (out.status !== 'promoted') throw new Error(`promote failed: ${JSON.stringify(out)}`);
+      promoted.push(`${out.dealId} (${out.routing})`);
+    }
+    console.log(`Promoted ${promoted.length}: ${promoted.join(', ')}`);
 
     console.log(`Seeded ${created.length} prospects, ${claimable.length} claimed, ${votable.length} with votes, ${commentRows.length} comments on ${commented.length} prospects.`);
   } finally {
