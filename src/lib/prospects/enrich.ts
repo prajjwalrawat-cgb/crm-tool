@@ -34,14 +34,15 @@ import { getProspectSettings } from './settings';
  * updateProspect as the accepting user.
  *
  * API notes (same proven pattern as import/parse.ts):
- *  - model claude-opus-5-5 (env PROSPECT_ENRICH_MODEL), effort `low`,
+ *  - model claude-haiku-5-5 (env PROSPECT_ENRICH_MODEL), effort `low`,
  *    streamed (messages.stream -> finalMessage()), max_tokens 16k.
  *  - Plain `json_schema` output format with no SDK-side parsing: stop_reason
  *    is checked first, then the text after the last `fallback` block is
  *    JSON.parsed and validated ourselves.
  *  - No forced tool_choice, prefill, temperature or disabled thinking.
  *  - Server-side refusal fallback on (`fallbacks: "default"` + beta header,
- *    through a cast: SDK 0.94 has no type for the field).
+ *    through a cast: SDK 0.94 has no type for the field), except for Haiku
+ *    models, which do not support it: both are omitted there.
  *
  * Prompt-injection posture: the system prompt is fixed; the prospect details
  * and the offerings list sit only in the user turn, inside <prospect> and
@@ -53,7 +54,12 @@ import { getProspectSettings } from './settings';
 
 const MAX_TOKENS = 16_000;
 const EFFORT = 'low' as const;
-const enrichModel = () => process.env.PROSPECT_ENRICH_MODEL?.trim() || 'claude-opus-5-5';
+const enrichModel = () => process.env.PROSPECT_ENRICH_MODEL?.trim() || 'claude-haiku-5-5';
+const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+/** Haiku has no server-side refusal fallback; other models (env override to Opus/Sonnet) keep it. */
+const supportsServerFallback = (model: string) => !model.startsWith('claude-haiku');
+
+export type EnrichRequest = Anthropic.MessageCreateParamsNonStreaming & { fallbacks?: 'default' };
 
 export const ENRICH_SYSTEM = `You are an ICP (ideal customer profile) analyst for an Indian B2B sales team. For one prospect company you suggest four fields that a salesperson will review before anything is saved: industry, size_band, product_fit and icp_score.
 
@@ -144,15 +150,16 @@ function userTurn(input: EnrichInput): string {
 }
 
 /** The request params (fixed system prompt; prospect + offerings only in the user turn). */
-export function buildEnrichRequest(input: EnrichInput): Anthropic.MessageCreateParamsNonStreaming & { fallbacks: 'default' } {
+export function buildEnrichRequest(input: EnrichInput): EnrichRequest {
+  const model = enrichModel();
   return {
-    model: enrichModel(),
+    model,
     max_tokens: MAX_TOKENS,
     system: ENRICH_SYSTEM,
     messages: [{ role: 'user', content: userTurn(input) }],
     output_config: { effort: EFFORT, format: OUTPUT_FORMAT },
-    fallbacks: 'default',
-  } as Anthropic.MessageCreateParamsNonStreaming & { fallbacks: 'default' };
+    ...(supportsServerFallback(model) && { fallbacks: 'default' as const }),
+  } as EnrichRequest;
 }
 
 export type EnrichUsage = { inputTokens: number; outputTokens: number; latencyMs: number };
@@ -184,7 +191,7 @@ export async function runEnrichment(input: EnrichInput, deps: EnrichDeps = {}): 
   const t0 = Date.now();
   let res: Anthropic.Message;
   try {
-    res = await stream(params, { headers: { 'anthropic-beta': 'server-side-fallback-2026-07-01' } });
+    res = await stream(params, supportsServerFallback(model) ? { headers: { 'anthropic-beta': FALLBACK_BETA } } : {});
   } catch (err) {
     usage.latencyMs = Date.now() - t0;
     if (err instanceof Anthropic.APIError) {

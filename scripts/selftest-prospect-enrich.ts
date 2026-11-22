@@ -95,12 +95,12 @@ async function main() {
     const props = (oc?.format?.schema?.properties ?? {}) as Record<string, unknown>;
     check(
       'enrich: request shape',
-      p.model === 'claude-opus-5-5' &&
+      p.model === 'claude-haiku-5-5' &&
         p.max_tokens === 16000 &&
         oc?.effort === 'low' &&
         oc?.format?.type === 'json_schema' &&
         ['industry', 'size_band', 'product_fit', 'icp_score'].every((k) => k in props) &&
-        (p as Record<string, unknown>).fallbacks === 'default' &&
+        !('fallbacks' in p) &&
         !('tool_choice' in p) &&
         !('temperature' in p) &&
         !('thinking' in p) &&
@@ -118,10 +118,29 @@ async function main() {
     check('enrich: model from PROSPECT_ENRICH_MODEL', p2.model === 'claude-test-model', p2.model);
     delete process.env.PROSPECT_ENRICH_MODEL;
 
+    // Default Haiku 5.5: no server-side fallback, so neither the field nor the beta header.
     const s = stub(out());
     await e.runEnrichment({ prospect: emptyProspect, offerings }, { create: s.fn });
     const opts = s.calls[0]?.options as { headers?: Record<string, string> } | undefined;
-    check('enrich: fallback beta header sent', opts?.headers?.['anthropic-beta'] === 'server-side-fallback-2026-07-01', opts);
+    const sent = s.calls[0]?.params as unknown as Record<string, unknown> | undefined;
+    check(
+      'enrich: default request is claude-haiku-5-5 with no fallbacks and no beta header',
+      sent?.model === 'claude-haiku-5-5' && !('fallbacks' in (sent ?? {})) && !opts?.headers?.['anthropic-beta'],
+      { model: sent?.model, fallbacks: sent?.fallbacks, opts },
+    );
+
+    // An Opus/Sonnet override keeps the refusal fallback + beta header.
+    process.env.PROSPECT_ENRICH_MODEL = 'claude-sonnet-5-5';
+    const sS = stub(out());
+    await e.runEnrichment({ prospect: emptyProspect, offerings }, { create: sS.fn });
+    delete process.env.PROSPECT_ENRICH_MODEL;
+    const optsS = sS.calls[0]?.options as { headers?: Record<string, string> } | undefined;
+    const sentS = sS.calls[0]?.params as unknown as Record<string, unknown> | undefined;
+    check(
+      'enrich: PROSPECT_ENRICH_MODEL=claude-sonnet-5-5 sends fallbacks + beta header',
+      sentS?.model === 'claude-sonnet-5-5' && sentS?.fallbacks === 'default' && optsS?.headers?.['anthropic-beta'] === 'server-side-fallback-2026-07-01',
+      { model: sentS?.model, fallbacks: sentS?.fallbacks, optsS },
+    );
   }
 
   /* ---------------- happy path ---------------- */
