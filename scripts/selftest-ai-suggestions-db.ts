@@ -255,6 +255,52 @@ async function main() {
     const callsBefore = claudeCalls;
     const off = await runWithSystemContext(A, () => svc.runSuggestionsForCall(A, ids.callId, deps(demoItems)));
     check('setting off: skipped, Claude not called', off.status === 'skipped' && claudeCalls === callsBefore);
+
+    // ------------------------------------------------ Inngest retries re-run the extraction
+    const retryCallId = await runWithSystemContext(A, () =>
+      tenantTransaction(async (tx) => {
+        await tx.update(s.organizationSettings).set({ aiSuggestionsEnabled: true }).where(eq(s.organizationSettings.tenantId, A));
+        const [call] = await tx
+          .insert(s.calls)
+          .values({ tenantId: A, provider: 'mock', providerCallId: `sug-retry-${stamp}`, direction: 'outbound', userId: rep1, leadId: ids.dealId, contactId: ids.contactId, fromNumber: '+919800000001', toNumber: '+919811122233', status: 'completed', talkTimeSec: 60, transcript: TRANSCRIPT, transcriptStatus: 'done', startedAt: new Date('2026-11-19T06:00:00Z') })
+          .returning();
+        return call!.id;
+      }),
+    );
+    // A step stub that re-runs its callback when it throws, like Inngest retrying a step.
+    let stepAttempts = 0;
+    const retryingStep = {
+      run: async <T,>(_id: string, fn: () => Promise<T>): Promise<T> => {
+        for (let attempt = 1; ; attempt++) {
+          stepAttempts++;
+          try {
+            return await fn();
+          } catch (err) {
+            if (attempt >= 3) throw err;
+          }
+        }
+      },
+      sleep: async () => {},
+    };
+    const failUsage = { inputTokens: 0, outputTokens: 0, latencyMs: 0, model: 'test', costUsd: 0 };
+    let extractRuns = 0;
+    const failing = (retryable: boolean) => ({
+      extract: async () => {
+        extractRuns++;
+        return { ok: false as const, error: 'model busy', retryable, usage: failUsage };
+      },
+    });
+    let handlerThrew = false;
+    try {
+      await suggestionsFromCallHandler({ event: { data: { tenantId: A, callId: retryCallId } }, step: retryingStep }, failing(true));
+    } catch {
+      handlerThrew = true;
+    }
+    check('retry: retryable failure throws inside the step, so each retry re-runs the extraction', handlerThrew && stepAttempts === 3 && extractRuns === 3, { handlerThrew, stepAttempts, extractRuns });
+    stepAttempts = 0;
+    extractRuns = 0;
+    const nr = await suggestionsFromCallHandler({ event: { data: { tenantId: A, callId: retryCallId } }, step: retryingStep }, failing(false));
+    check('retry: non-retryable failure returns normally (one attempt, no throw)', nr.status === 'failed' && stepAttempts === 1 && extractRuns === 1, { nr, stepAttempts, extractRuns });
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {

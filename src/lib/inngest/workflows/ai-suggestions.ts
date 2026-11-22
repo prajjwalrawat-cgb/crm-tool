@@ -13,7 +13,9 @@ import type { LocalStepAPI } from '../local-step';
  *
  * Gated by organization_settings.ai_suggestions_enabled (default off).
  * Idempotent per source via ai_suggestion_sources. A retryable model error
- * throws so Inngest retries with backoff (the failed claim can be re-taken).
+ * throws INSIDE the step, so Inngest retries the step with backoff (a step
+ * that returns normally is memoized and never re-run); the failed claim can
+ * be re-taken.
  * Suggestions are only ever written to ai_suggestions; nothing touches deal
  * or contact fields.
  */
@@ -24,9 +26,15 @@ export async function suggestionsFromCallHandler(
 ) {
   const { tenantId, callId } = args.event.data;
   return await runWithTrace({ origin: 'workflow', name: 'suggestions-from-call' }, async () => {
-    const r = await args.step.run('extract', () => runWithSystemContext(tenantId, () => runSuggestionsForCall(tenantId, callId, deps)));
+    const r = await args.step.run('extract', async () => {
+      const res = await runWithSystemContext(tenantId, () => runSuggestionsForCall(tenantId, callId, deps));
+      if (res.status === 'failed' && res.retryable) {
+        incr('ai.suggestions.run', 1, { source: 'call', status: res.status });
+        throw new Error(`suggestions-from-call: ${res.error}`);
+      }
+      return res;
+    });
     incr('ai.suggestions.run', 1, { source: 'call', status: r.status });
-    if (r.status === 'failed' && r.retryable) throw new Error(`suggestions-from-call: ${r.error}`);
     return r;
   });
 }
@@ -37,9 +45,15 @@ export async function suggestionsFromEmailHandler(
 ) {
   const { tenantId, threadId } = args.event.data;
   return await runWithTrace({ origin: 'workflow', name: 'suggestions-from-email' }, async () => {
-    const r = await args.step.run('extract', () => runWithSystemContext(tenantId, () => runSuggestionsForEmail(tenantId, threadId, deps)));
+    const r = await args.step.run('extract', async () => {
+      const res = await runWithSystemContext(tenantId, () => runSuggestionsForEmail(tenantId, threadId, deps));
+      if (res.status === 'failed' && res.retryable) {
+        incr('ai.suggestions.run', 1, { source: 'email', status: res.status });
+        throw new Error(`suggestions-from-email: ${res.error}`);
+      }
+      return res;
+    });
     incr('ai.suggestions.run', 1, { source: 'email', status: r.status });
-    if (r.status === 'failed' && r.retryable) throw new Error(`suggestions-from-email: ${r.error}`);
     return r;
   });
 }
