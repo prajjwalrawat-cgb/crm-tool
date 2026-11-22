@@ -1008,7 +1008,10 @@ async function main() {
       const [impRow] = await inE((tx) =>
         tx.insert(s.prospectImports).values({ tenantId: E, sourceTag: 'expo-e', inputKind: 'text', rawText: 'x', status: 'parsed', createdBy: eMember.userId }).returning(),
       );
-      sent.length = 0;
+      const batches: Array<{ name: string; data: Array<Record<string, unknown>> }> = [];
+      const sendEvents = (async (name: string, data: Array<Record<string, unknown>>) => {
+        batches.push({ name, data });
+      }) as never;
       const ci = await asE(() =>
         imp.confirmImport(
           E,
@@ -1018,12 +1021,33 @@ async function main() {
             { companyName: 'Import One Co', clusterTags: [] },
             { companyName: 'Import Two Co', clusterTags: [] },
           ],
-          { sendEvent },
+          { sendEvent, sendEvents },
         ),
       );
       const impIds = (await inE((tx) => tx.select({ id: s.prospects.id }).from(s.prospects).where(eq(s.prospects.importId, impRow!.id)))).map((r) => r.id).sort();
-      const sentIds = sent.filter((x) => x.name === 'crm/prospect.created').map((x) => String(x.data.prospectId)).sort();
-      check('confirm-import sends one event per inserted prospect', ci.ok && impIds.length === 2 && JSON.stringify(sentIds) === JSON.stringify(impIds), { ci, impIds, sentIds });
+      const sentIds = (batches[0]?.data ?? []).map((d) => String(d.prospectId)).sort();
+      check(
+        'confirm-import sends one batch with one event per inserted prospect',
+        ci.ok && batches.length === 1 && batches[0]!.name === 'crm/prospect.created' && batches[0]!.data.every((d) => d.tenantId === E) && impIds.length === 2 && JSON.stringify(sentIds) === JSON.stringify(impIds),
+        { ci, impIds, batches },
+      );
+
+      // 250 rows -> the real batch sender makes 3 inngest.send calls (100 + 100 + 50)
+      const { sendWorkflowEventsBatch } = await import('../src/lib/inngest/send');
+      const inngestCalls: number[] = [];
+      const realBatch = ((name: never, data: never) =>
+        sendWorkflowEventsBatch(name, data, {
+          send: async (events) => {
+            inngestCalls.push(events.length);
+          },
+        })) as never;
+      const [imp250] = await inE((tx) =>
+        tx.insert(s.prospectImports).values({ tenantId: E, sourceTag: 'expo-250', inputKind: 'text', rawText: 'x', status: 'parsed', createdBy: eMember.userId }).returning(),
+      );
+      const c250 = await asE(() =>
+        imp.confirmImport(E, eMember, imp250!.id, Array.from({ length: 250 }, (_, i) => ({ companyName: `Bulk Enrich Co ${i}`, clusterTags: [] })), { sendEvents: realBatch }),
+      );
+      check('confirm-import of 250 rows makes 3 batch sends', c250.ok && c250.inserted === 250 && JSON.stringify(inngestCalls) === JSON.stringify([100, 100, 50]), { c250, inngestCalls });
 
       const f = (value: unknown, reasoning: string, confidence = 0.8) => ({ value, reasoning, confidence });
       const answer = (o: Record<string, unknown> = {}) =>
@@ -1103,6 +1127,53 @@ async function main() {
       const step = { run: async <T,>(_id: string, fn: () => Promise<T>) => fn() };
       const hr = hp.ok ? await wf.prospectEnrichHandler({ event: { data: { tenantId: E, prospectId: hp.id } }, step } as never, { create: create(answer()) }) : null;
       check('enrich: handler runs enrichProspect in a system context', hr?.status === 'done' && (await suggestionsFor(hp.ok ? hp.id : E)).length === 4, hr);
+
+      // Retries: a step stub that re-runs its callback when it throws (like Inngest retrying a step).
+      let stepAttempts = 0;
+      const retryingStep = {
+        run: async <T,>(_id: string, fn: () => Promise<T>): Promise<T> => {
+          for (let attempt = 1; ; attempt++) {
+            stepAttempts++;
+            try {
+              return await fn();
+            } catch (err) {
+              if (attempt >= 3) throw err;
+            }
+          }
+        },
+      };
+      const ht = await asE(() => m.createProspect(E, eMember, { companyName: 'Transient Error Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      let flaky = 0;
+      const flakyCreate = (async (params: never) => {
+        flaky++;
+        if (flaky === 1) throw new Error('stream dropped'); // non-API error -> retryable
+        return (create(answer()) as unknown as (p: never) => Promise<unknown>)(params);
+      }) as never;
+      const htr = ht.ok ? await wf.prospectEnrichHandler({ event: { data: { tenantId: E, prospectId: ht.id } }, step: retryingStep } as never, { create: flakyCreate }) : null;
+      check(
+        'enrich: retryable failure throws inside the step, so the retry re-runs the Claude call',
+        htr?.status === 'done' && stepAttempts === 2 && flaky === 2 && (await suggestionsFor(ht.ok ? ht.id : E)).length === 4,
+        { htr, stepAttempts, flaky },
+      );
+
+      stepAttempts = 0;
+      const hn = await asE(() => m.createProspect(E, eMember, { companyName: 'Refused In Step Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      const refusingInStep = (async () => ({
+        id: 'm',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-opus-5-5',
+        content: [],
+        stop_reason: 'refusal',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      })) as never;
+      const hnr = hn.ok ? await wf.prospectEnrichHandler({ event: { data: { tenantId: E, prospectId: hn.id } }, step: retryingStep } as never, { create: refusingInStep }) : null;
+      check(
+        'enrich: non-retryable failure returns normally (no step retry, no throw)',
+        hnr?.status === 'failed' && hnr.retryable === false && stepAttempts === 1,
+        { hnr, stepAttempts },
+      );
 
       // promoted / deleted before the job runs -> skipped, no suggestions
       const pp = await asE(() => m.createProspect(E, eMember, { companyName: 'Promoted Early Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));

@@ -4,7 +4,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 
 import { offerings, prospects, prospectStageHistory, type ProspectStage } from '@/db/schema';
 import { tenantTransaction, type DbExecutor } from '@/lib/db-context';
-import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { sendWorkflowEvent, sendWorkflowEventsBatch } from '@/lib/inngest/send';
 import { captureError } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 
@@ -46,22 +46,36 @@ export const MAX_BULK = 500;
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Event seam (selftests inject a recorder; production sends through Inngest). */
-export type ProspectEventDeps = { sendEvent?: typeof sendWorkflowEvent };
+/** Event seams (selftests inject recorders; production sends through Inngest). */
+export type ProspectEventDeps = { sendEvent?: typeof sendWorkflowEvent; sendEvents?: typeof sendWorkflowEventsBatch };
 
 /**
- * After commit, best-effort: one `crm/prospect.created` per new prospect (AI
+ * After commit, best-effort: `crm/prospect.created` for one new prospect (AI
  * enrichment listens). Never throws, so a failed send never fails the user's
  * action.
  */
+export async function emitProspectCreated(tenantId: string, prospectId: string, deps: ProspectEventDeps = {}): Promise<void> {
+  try {
+    await (deps.sendEvent ?? sendWorkflowEvent)('crm/prospect.created', { tenantId, prospectId });
+  } catch (err) {
+    captureError(err, { category: 'prospects.event_send_failed', severity: 'low', retryable: false, fields: { tenantId, prospectId } });
+  }
+}
+
+/**
+ * The same for many prospects (Quick Dump confirm): one batched send, chunked
+ * by sendWorkflowEventsBatch; on the local fallback the handlers run in the
+ * background, so the request never waits on enrichment. Never throws.
+ */
 export async function emitProspectsCreated(tenantId: string, ids: string[], deps: ProspectEventDeps = {}): Promise<void> {
-  const send = deps.sendEvent ?? sendWorkflowEvent;
-  for (const prospectId of ids) {
-    try {
-      await send('crm/prospect.created', { tenantId, prospectId });
-    } catch (err) {
-      captureError(err, { category: 'prospects.event_send_failed', severity: 'low', retryable: false, fields: { tenantId, prospectId } });
-    }
+  if (ids.length === 0) return;
+  try {
+    await (deps.sendEvents ?? sendWorkflowEventsBatch)(
+      'crm/prospect.created',
+      ids.map((prospectId) => ({ tenantId, prospectId })),
+    );
+  } catch (err) {
+    captureError(err, { category: 'prospects.event_send_failed', severity: 'low', retryable: false, fields: { tenantId, count: ids.length } });
   }
 }
 
@@ -80,7 +94,7 @@ export async function createProspect(
     if (!r.ok) return { ok: false as const, error: UNKNOWN_PRODUCT };
     return { ok: true as const, id: r.ids[0]! };
   });
-  if (res.ok) await emitProspectsCreated(tenantId, [res.id], deps);
+  if (res.ok) await emitProspectCreated(tenantId, res.id, deps);
   return res;
 }
 

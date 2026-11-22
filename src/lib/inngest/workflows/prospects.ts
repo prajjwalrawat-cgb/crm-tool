@@ -83,8 +83,11 @@ export async function prospectMaintenanceHandler(
 /**
  * Suggests industry / size band / product fit / ICP score for a new prospect
  * into the AI suggestions queue. Gated (and idempotent) inside
- * enrichProspect. A retryable model error throws so Inngest retries with
- * backoff (the failed claim can be re-taken). Never writes a prospect field.
+ * enrichProspect. A retryable model error throws INSIDE the step, so Inngest
+ * retries the step itself with backoff (a step that returns normally is
+ * memoized and never re-run); the failed claim can be re-taken. Skipped,
+ * done and non-retryable failures return normally. Never writes a prospect
+ * field.
  */
 export async function prospectEnrichHandler(
   args: { event: { data: WorkflowEvents['crm/prospect.created'] }; step: LocalStepAPI },
@@ -92,9 +95,15 @@ export async function prospectEnrichHandler(
 ) {
   const { tenantId, prospectId } = args.event.data;
   return await runWithTrace({ origin: 'workflow', name: 'prospect-enrich' }, async () => {
-    const r = await args.step.run('enrich', () => runWithSystemContext(tenantId, () => enrichProspect(tenantId, prospectId, deps)));
+    const r = await args.step.run('enrich', async () => {
+      const res = await runWithSystemContext(tenantId, () => enrichProspect(tenantId, prospectId, deps));
+      if (res.status === 'failed' && res.retryable) {
+        incr('prospects.enrich.run', 1, { status: 'retry' });
+        throw new Error(`prospect-enrich: ${res.error}`);
+      }
+      return res;
+    });
     incr('prospects.enrich.run', 1, { status: r.status });
-    if (r.status === 'failed' && r.retryable) throw new Error(`prospect-enrich: ${r.error}`);
     return r;
   });
 }

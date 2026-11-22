@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { incr, logger, setGauge } from '@/lib/observability';
+import { captureError, incr, logger, setGauge } from '@/lib/observability';
 
 import { inngest } from './client';
 import type { WorkflowEventName, WorkflowEvents } from './events';
@@ -64,21 +64,8 @@ export async function sendWorkflowEvent<TName extends WorkflowEventName>(
   } catch (err) {
     incr('inngest.send.failure', 1, { name });
     const message = err instanceof Error ? err.message : String(err);
-    const isMissingKey =
-      message.includes('INNGEST_EVENT_KEY') ||
-      message.includes('event key') ||
-      message.includes('Failed to send event');
-    if (isMissingKey) {
-      setGauge('inngest.unreachable', 1);
-      if (!inngestUnreachableLogged) {
-        inngestUnreachableLogged = true;
-        logger.warn(
-          'inngest event delivery unavailable — falling back to in-process local dispatcher. ' +
-            'For production-grade durability/retries/sleep, run `pnpm inngest:dev` in a second terminal. ' +
-            'Subsequent send failures are suppressed; check `inngest.send.failure` and `inngest.local.dispatched` on /dashboard/ops.',
-          { firstFailedEvent: name },
-        );
-      }
+    if (isDeliveryUnavailable(message)) {
+      markUnreachable(name);
       // Fire-and-forget: the originating mutation has committed and we
       // don't want a workflow failure to surface as a UI error. Errors
       // inside the dispatcher are captured via `captureError`.
@@ -99,5 +86,73 @@ export async function sendWorkflowEvent<TName extends WorkflowEventName>(
     // Genuine, unrelated send failure. Log once per occurrence — these are
     // rare and worth surfacing.
     logger.error(`inngest send failed: ${name}`, { error: message });
+  }
+}
+
+/** The send errors that mean "no Inngest here" (dev without a dev server / event key): fall back to local dispatch. */
+function isDeliveryUnavailable(message: string): boolean {
+  return message.includes('INNGEST_EVENT_KEY') || message.includes('event key') || message.includes('Failed to send event');
+}
+
+function markUnreachable(name: string) {
+  setGauge('inngest.unreachable', 1);
+  if (!inngestUnreachableLogged) {
+    inngestUnreachableLogged = true;
+    logger.warn(
+      'inngest event delivery unavailable — falling back to in-process local dispatcher. ' +
+        'For production-grade durability/retries/sleep, run `pnpm inngest:dev` in a second terminal. ' +
+        'Subsequent send failures are suppressed; check `inngest.send.failure` and `inngest.local.dispatched` on /dashboard/ops.',
+      { firstFailedEvent: name },
+    );
+  }
+}
+
+/** Events per `inngest.send([...])` call. */
+export const BATCH_SEND_CHUNK = 100;
+
+/** Seams for selftests: the Inngest send and the local dispatcher. */
+export type BatchSendOpts = {
+  send?: (events: Array<{ name: string; data: unknown }>) => Promise<unknown>;
+  dispatch?: typeof dispatchLocally;
+};
+
+/**
+ * Many events of one type: one `inngest.send([...])` per BATCH_SEND_CHUNK
+ * events. Never throws (same error handling as sendWorkflowEvent). On the
+ * local fallback the handlers are started but NOT awaited, so the caller's
+ * request never waits on workflow work (e.g. one Claude call per imported
+ * prospect); handler errors are captured by the dispatcher / captureError.
+ */
+export async function sendWorkflowEventsBatch<TName extends WorkflowEventName>(
+  name: TName,
+  dataArray: Array<WorkflowEvents[TName]>,
+  opts: BatchSendOpts = {},
+): Promise<void> {
+  const send =
+    opts.send ?? ((events: Array<{ name: string; data: unknown }>) => inngest.send(events as unknown as Parameters<typeof inngest.send>[0]));
+  for (let i = 0; i < dataArray.length; i += BATCH_SEND_CHUNK) {
+    const chunk = dataArray.slice(i, i + BATCH_SEND_CHUNK);
+    try {
+      await send(chunk.map((data) => ({ name, data })));
+      incr('inngest.send.success', chunk.length, { name });
+      setGauge('inngest.unreachable', 0);
+    } catch (err) {
+      incr('inngest.send.failure', chunk.length, { name });
+      const message = err instanceof Error ? err.message : String(err);
+      if (!isDeliveryUnavailable(message)) {
+        logger.error(`inngest batch send failed: ${name}`, { error: message, events: chunk.length });
+        continue;
+      }
+      markUnreachable(name);
+      const dispatch = opts.dispatch ?? dispatchLocally;
+      const ready = opts.dispatch ? Promise.resolve() : ensureHandlersRegistered();
+      for (const data of chunk) {
+        // Fire-and-forget: never awaited by the caller.
+        void ready
+          .then(() => dispatch(name, data))
+          .then(() => incr('inngest.local.dispatched', 1, { name }))
+          .catch((dispatchErr) => captureError(dispatchErr, { category: 'inngest.local-dispatcher', severity: 'medium', retryable: false, fields: { event: name } }));
+      }
+    }
   }
 }

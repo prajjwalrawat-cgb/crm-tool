@@ -211,6 +211,53 @@ async function main() {
     check('enrich: nothing suggested when every field is set', all.ok && all.items.length === 0, all);
   }
 
+  /* ---------------- batched, non-blocking event sends ---------------- */
+  {
+    const { sendWorkflowEventsBatch } = await import('../src/lib/inngest/send');
+    const data = (n: number) => Array.from({ length: n }, (_, i) => ({ tenantId: 't', prospectId: `p${i}` }));
+
+    const sizes: number[] = [];
+    await sendWorkflowEventsBatch('crm/prospect.created', data(250), { send: async (ev) => void sizes.push(ev.length) });
+    check('batch: 250 events -> 3 inngest.send calls (100/100/50)', JSON.stringify(sizes) === '[100,100,50]', sizes);
+
+    const one: number[] = [];
+    await sendWorkflowEventsBatch('crm/prospect.created', data(7), { send: async (ev) => void one.push(ev.length) });
+    check('batch: N <= 100 events -> one call', JSON.stringify(one) === '[7]', one);
+
+    // Local fallback: handlers start but are not awaited.
+    let started = 0;
+    let finished = 0;
+    const slowDispatch = (async () => {
+      started++;
+      await new Promise((r) => setTimeout(r, 1500));
+      finished++;
+    }) as never;
+    const t0 = Date.now();
+    await sendWorkflowEventsBatch('crm/prospect.created', data(5), {
+      send: async () => {
+        throw new Error('Failed to send event: no event key');
+      },
+      dispatch: slowDispatch,
+    });
+    const elapsed = Date.now() - t0;
+    await new Promise((r) => setTimeout(r, 20)); // let the background dispatches start
+    check('batch: local fallback returns before the handlers finish', elapsed < 500 && started === 5 && finished === 0, { elapsed, started, finished });
+
+    let dispatched = 0;
+    let threw = false;
+    try {
+      await sendWorkflowEventsBatch('crm/prospect.created', data(3), {
+        send: async () => {
+          throw new Error('500 internal');
+        },
+        dispatch: (async () => void dispatched++) as never,
+      });
+    } catch {
+      threw = true;
+    }
+    check('batch: other send errors are logged, never thrown, not dispatched locally', !threw && dispatched === 0, { threw, dispatched });
+  }
+
   console.log(`\nprospect enrich selftest: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
