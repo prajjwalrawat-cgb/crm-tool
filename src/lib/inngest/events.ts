@@ -165,6 +165,11 @@ export type WorkflowEvents = {
     tenantId: string;
     jobId: string;
   };
+  /** Prospect Board (0079): a prospect was created (manual or Quick Dump confirm); AI enrichment may run. */
+  'crm/prospect.created': {
+    tenantId: string;
+    prospectId: string;
+  };
 };
 
 export type WorkflowEventName = keyof WorkflowEvents;

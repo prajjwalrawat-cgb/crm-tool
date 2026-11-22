@@ -3,12 +3,12 @@ import { index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, uniq
 import { tenants } from './tenants';
 
 /**
- * AI-proposed changes to deals / contacts (0077). AI never writes those
+ * AI-proposed changes to deals / contacts (0077) and prospects (0079). AI never writes those
  * fields: a row here is applied only when a user accepts it, through the
  * same server actions as a manual edit. See src/lib/ai/suggestions/.
  */
 
-export const SUGGESTION_ENTITY_TYPES = ['deal', 'contact', 'lead'] as const;
+export const SUGGESTION_ENTITY_TYPES = ['deal', 'contact', 'lead', 'prospect'] as const;
 export type SuggestionEntityType = (typeof SUGGESTION_ENTITY_TYPES)[number];
 
 export const SUGGESTION_FIELDS = [
@@ -21,10 +21,15 @@ export const SUGGESTION_FIELDS = [
   'contact_phone',
   'contact_designation',
   'follow_up_task',
+  // Prospect Board enrichment (0079)
+  'industry',
+  'size_band',
+  'product_fit',
+  'icp_score',
 ] as const;
 export type SuggestionField = (typeof SUGGESTION_FIELDS)[number];
 
-export const SUGGESTION_SOURCE_TYPES = ['call', 'email'] as const;
+export const SUGGESTION_SOURCE_TYPES = ['call', 'email', 'enrichment'] as const;
 export type SuggestionSourceType = (typeof SUGGESTION_SOURCE_TYPES)[number];
 
 export const SUGGESTION_STATUSES = ['pending', 'accepted', 'rejected', 'superseded', 'stale'] as const;

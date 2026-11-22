@@ -10,6 +10,7 @@ import {
   deals,
   emailMessages,
   communicationThreads,
+  prospects,
   type AiSuggestion,
   type MembershipRole,
   type SuggestionField,
@@ -32,7 +33,7 @@ import { sameValue, validateFieldValue, type TargetValues } from './validate';
  * AI suggestions: extraction runs (call / email), the review queue, and
  * accept / reject / edit-and-accept.
  *
- * Invariant: nothing in this module writes a deal or contact field. Applying
+ * Invariant: nothing in this module writes a deal, contact or prospect field. Applying
  * a suggestion goes through `Appliers` (appliers.ts), which call the same
  * server actions a user's manual edit calls, as the accepting user, so stage
  * gates, validation and RBAC apply unchanged. A failed apply leaves the
@@ -92,9 +93,35 @@ async function contactValues(tx: Tx | DbExecutor, tenantId: string, contactId: s
   return { ...c, values };
 }
 
+/** Prospect enrichment fields (0079). A deleted prospect is not found. */
+async function prospectValues(tx: Tx | DbExecutor, tenantId: string, prospectId: string) {
+  const [p] = await tx
+    .select({
+      id: prospects.id,
+      industry: prospects.industry,
+      sizeBand: prospects.sizeBand,
+      productFitOfferingId: prospects.productFitOfferingId,
+      icpScore: prospects.icpScore,
+    })
+    .from(prospects)
+    .where(and(eq(prospects.id, prospectId), eq(prospects.tenantId, tenantId), isNull(prospects.deletedAt)));
+  if (!p) return null;
+  const values: TargetValues = {
+    industry: p.industry ?? null,
+    size_band: p.sizeBand ?? null,
+    product_fit: p.productFitOfferingId ?? null,
+    icp_score: p.icpScore ?? null,
+  };
+  return { ...p, values };
+}
+
 /** The live value of a suggestion's field right now (for stale detection). */
 export async function readLiveValue(tx: Tx, s: Pick<AiSuggestion, 'tenantId' | 'entityType' | 'entityId' | 'field'>): Promise<{ found: boolean; value: SuggestionValue }> {
   if (s.field === 'follow_up_task') return { found: true, value: null };
+  if (s.entityType === 'prospect') {
+    const p = await prospectValues(tx, s.tenantId, s.entityId);
+    return p ? { found: true, value: p.values[s.field] ?? null } : { found: false, value: null };
+  }
   if (s.entityType === 'contact') {
     const c = await contactValues(tx, s.tenantId, s.entityId);
     return c ? { found: true, value: c.values[s.field] ?? null } : { found: false, value: null };
@@ -106,7 +133,7 @@ export async function readLiveValue(tx: Tx, s: Pick<AiSuggestion, 'tenantId' | '
 /* ------------------------------------------------------------ persistence */
 
 export type NewSuggestion = {
-  entityType: 'deal' | 'contact' | 'lead';
+  entityType: 'deal' | 'contact' | 'lead' | 'prospect';
   entityId: string;
   field: SuggestionField;
   current: SuggestionValue;
@@ -117,7 +144,9 @@ export type NewSuggestion = {
 
 /**
  * Insert pending suggestions for one source. Idempotent per
- * (source, entity, field) via the unique index. Older pending suggestions
+ * (source, entity, field) via the unique index. For prospect enrichment
+ * (source_type 'enrichment', source_id = prospect id) the evidence quote is
+ * the model's reasoning. Older pending suggestions
  * for the same entity + field from other sources are superseded (except
  * follow-up tasks, which are independent).
  */
@@ -165,7 +194,7 @@ export async function persistSuggestions(
 }
 
 /** Claim a source for extraction. False = already processed (or running). */
-async function claimSource(tx: Tx, tenantId: string, sourceType: SuggestionSourceType, sourceId: string): Promise<boolean> {
+export async function claimSource(tx: Tx, tenantId: string, sourceType: SuggestionSourceType, sourceId: string): Promise<boolean> {
   const staleBefore = new Date(Date.now() - 15 * 60_000);
   const ins = await tx
     .insert(aiSuggestionSources)
@@ -189,7 +218,7 @@ async function claimSource(tx: Tx, tenantId: string, sourceType: SuggestionSourc
   return re.length > 0;
 }
 
-async function finishSource(tenantId: string, sourceType: SuggestionSourceType, sourceId: string, patch: { status: 'done' | 'failed' | 'skipped'; model?: string; count?: number; error?: string | null }) {
+export async function finishSource(tenantId: string, sourceType: SuggestionSourceType, sourceId: string, patch: { status: 'done' | 'failed' | 'skipped'; model?: string; count?: number; error?: string | null }) {
   await tenantTransaction((tx) =>
     tx
       .update(aiSuggestionSources)
@@ -205,7 +234,7 @@ export type RunResult = { status: 'done'; created: number; dropped: number } | {
 
 async function runExtraction(args: {
   tenantId: string;
-  sourceType: SuggestionSourceType;
+  sourceType: Exclude<SuggestionSourceType, 'enrichment'>;
   sourceId: string;
   text: string;
   date: string;

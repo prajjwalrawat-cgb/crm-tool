@@ -98,6 +98,11 @@ async function main() {
     contact_phone: async () => ({ ok: false, message: 'not used' }),
     contact_designation: async () => ({ ok: false, message: 'not used' }),
     follow_up_task: async () => ({ ok: true }),
+    // Prospect fields (0079): not exercised here.
+    industry: async () => ({ ok: false, message: 'Not available yet.' }),
+    size_band: async () => ({ ok: false, message: 'Not available yet.' }),
+    product_fit: async () => ({ ok: false, message: 'Not available yet.' }),
+    icp_score: async () => ({ ok: false, message: 'Not available yet.' }),
   };
 
   try {

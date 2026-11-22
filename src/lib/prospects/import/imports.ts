@@ -10,7 +10,7 @@ import { captureError } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 import { isStorageConfigured, prospectImportsBucket, uploadPrivateFile } from '@/lib/storage/supabase';
 
-import { insertProspectRows, MESSAGES, UNKNOWN_PRODUCT, UUID_RE } from '../mutations';
+import { emitProspectsCreated, insertProspectRows, MESSAGES, type ProspectEventDeps, UNKNOWN_PRODUCT, UUID_RE } from '../mutations';
 import { normalizeProspectInput, prospectInputSchema, type Actor, type ProspectRowValues } from '../rules';
 import { computeDedupHints, type DedupHint } from './dedup-hints';
 import {
@@ -192,13 +192,16 @@ export async function confirmImport(
   actor: Actor,
   importId: string,
   rows: unknown[],
+  deps: ProspectEventDeps = {},
 ): Promise<ConfirmImportResult> {
   if (!can(actor.role, 'manageProspects')) return { ok: false, message: MESSAGES.no_permission };
   if (typeof importId !== 'string' || !UUID_RE.test(importId)) return { ok: false, message: IMPORT_MESSAGES.notFound };
   if (!Array.isArray(rows) || rows.length === 0) return { ok: false, message: IMPORT_MESSAGES.noRows };
   if (rows.length > MAX_DUMP_ROWS) return { ok: false, message: IMPORT_MESSAGES.tooManyRows };
 
-  return tenantTransaction(async (tx): Promise<ConfirmImportResult> => {
+  let insertedIds: string[] = [];
+  const res = await tenantTransaction(async (tx): Promise<ConfirmImportResult> => {
+    insertedIds = [];
     const [cur] = await tx
       .select({ id: prospectImports.id, status: prospectImports.status, sourceTag: prospectImports.sourceTag })
       .from(prospectImports)
@@ -236,8 +239,12 @@ export async function confirmImport(
       .update(prospectImports)
       .set({ status: 'confirmed', rowsInserted: ins.ids.length, confirmedAt: new Date() })
       .where(and(eq(prospectImports.tenantId, tenantId), eq(prospectImports.id, importId)));
+    insertedIds = ins.ids;
     return { ok: true, inserted: ins.ids.length };
   });
+  // After commit: one enrichment event per inserted prospect (best-effort, never throws).
+  if (res.ok) await emitProspectsCreated(tenantId, insertedIds, deps);
+  return res;
 }
 
 export async function discardImport(

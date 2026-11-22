@@ -9,9 +9,12 @@ import {
   observe,
   runWithTrace,
 } from '@/lib/observability';
+import { enrichProspect, type EnrichDeps } from '@/lib/prospects/enrich';
 import { runProspectMaintenance } from '@/lib/prospects/maintenance';
 
-import { inngest } from '../client';
+import { inngest, prospectCreatedEvent } from '../client';
+import type { WorkflowEvents } from '../events';
+import type { LocalStepAPI } from '../local-step';
 
 const WORKFLOW_ID = 'prospects-daily-maintenance';
 
@@ -74,3 +77,35 @@ export async function prospectMaintenanceHandler(
     throw err;
   }
 }
+
+/* ---------------- AI enrichment (crm/prospect.created) ---------------- */
+
+/**
+ * Suggests industry / size band / product fit / ICP score for a new prospect
+ * into the AI suggestions queue. Gated (and idempotent) inside
+ * enrichProspect. A retryable model error throws so Inngest retries with
+ * backoff (the failed claim can be re-taken). Never writes a prospect field.
+ */
+export async function prospectEnrichHandler(
+  args: { event: { data: WorkflowEvents['crm/prospect.created'] }; step: LocalStepAPI },
+  deps: EnrichDeps = {},
+) {
+  const { tenantId, prospectId } = args.event.data;
+  return await runWithTrace({ origin: 'workflow', name: 'prospect-enrich' }, async () => {
+    const r = await args.step.run('enrich', () => runWithSystemContext(tenantId, () => enrichProspect(tenantId, prospectId, deps)));
+    incr('prospects.enrich.run', 1, { status: r.status });
+    if (r.status === 'failed' && r.retryable) throw new Error(`prospect-enrich: ${r.error}`);
+    return r;
+  });
+}
+
+export const prospectEnrich = inngest.createFunction(
+  {
+    id: 'prospect-enrich',
+    name: 'Prospects — AI enrichment',
+    retries: 2,
+    concurrency: { limit: 5 },
+    triggers: [prospectCreatedEvent],
+  },
+  async ({ event, step }) => prospectEnrichHandler({ event, step: step as unknown as LocalStepAPI }),
+);

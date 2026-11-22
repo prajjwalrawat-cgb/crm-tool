@@ -64,7 +64,7 @@ import {
   regenerateEmbedding,
   regenerateEmbeddingHandler,
 } from './regenerate-embedding';
-import { prospectMaintenanceDaily } from './prospects';
+import { prospectEnrich, prospectEnrichHandler, prospectMaintenanceDaily } from './prospects';
 import { notificationsRetention } from './notifications-retention';
 import { relationshipSignalsDerive } from './relationship-signals-derive';
 import { staleDealsScan } from './stale-deals-scan';
@@ -93,6 +93,7 @@ registerLocalHandler('crm/call.transcribed', callAiSummarizeHandler);
 registerLocalHandler('crm/call.summarized', (a) => suggestionsFromCallHandler(a));
 registerLocalHandler('crm/email.thread_summarized', (a) => suggestionsFromEmailHandler(a));
 registerLocalHandler('crm/report.backfill_requested', reportBackfillHandler);
+registerLocalHandler('crm/prospect.created', (a) => prospectEnrichHandler(a));
 
 export {
   callAiSummarize,
@@ -119,6 +120,7 @@ export {
   leadUnassignedRetry,
   newMemberOnboarding,
   notificationsRetention,
+  prospectEnrich,
   prospectMaintenanceDaily,
   regenerateEmbedding,
   relationshipSignalsDerive,

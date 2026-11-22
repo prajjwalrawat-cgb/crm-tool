@@ -41,6 +41,8 @@ async function main() {
   const C = tc!.id; // clean tenant for promote tests
   const [td] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PROS D', ${`zz-pros-d-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
   const D = td!.id; // clean tenant for maintenance tests
+  const [te] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PROS E', ${`zz-pros-e-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
+  const E = te!.id; // clean tenant for enrichment tests
   const user = `usr_prostest_${stamp}`;
   const inA = <T,>(fn: (tx: Parameters<Parameters<typeof tenantTransaction>[0]>[0]) => Promise<T>) =>
     runWithSystemContext(A, () => tenantTransaction(fn as never)) as Promise<T>;
@@ -972,10 +974,195 @@ async function main() {
       check('maint: claim expiring exactly now is released (<=)', (await rowD(bExact)).claimedBy === null && rB.released === 1, rB);
       check('maint: auto-parked prospect keeps its claim', cpRow.stage === 'parked' && cpRow.claimedBy === claimer && cpRow.claimExpiresAt !== null, cpRow);
     }
+    /* ---------------- enrichment (Stage 3 Task 6) ---------------- */
+    {
+      const en = await import('../src/lib/prospects/enrich');
+      const eMember = { userId: `usr_enrich_${stamp}`, role: 'member' as const };
+      const asE = <T,>(fn: () => Promise<T>) => runWithTenantContext({ tenantId: E, userId: eMember.userId }, fn);
+      const sysE = <T,>(fn: () => Promise<T>) => runWithSystemContext(E, fn);
+      const inE = <T,>(fn: (tx: Parameters<Parameters<typeof tenantTransaction>[0]>[0]) => Promise<T>) =>
+        runWithSystemContext(E, () => tenantTransaction(fn as never)) as Promise<T>;
+      const [offE] = await inE((tx) => tx.insert(s.offerings).values({ tenantId: E, name: 'Payroll Suite', category: s.offeringCategory.enumValues[0] }).returning());
+      const [offRetired] = await inE((tx) => tx.insert(s.offerings).values({ tenantId: E, name: 'Old Product', category: s.offeringCategory.enumValues[0], active: false }).returning());
+      const setFlags = (enrich: boolean, sugg: boolean) => {
+        const set = { prospectEnrichmentEnabled: enrich, aiSuggestionsEnabled: sugg };
+        return inE((tx) => tx.insert(s.organizationSettings).values({ tenantId: E, ...set }).onConflictDoUpdate({ target: s.organizationSettings.tenantId, set }));
+      };
+
+      // create action path sends the event (injectable sender), after commit
+      const sent: Array<{ name: string; data: Record<string, unknown> }> = [];
+      const sendEvent = (async (name: string, data: Record<string, unknown>) => {
+        sent.push({ name, data });
+      }) as never;
+      const cr = await asE(() => m.createProspect(E, eMember, { companyName: 'Enrich Me Pvt Ltd', city: 'Pune', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      const pid = cr.ok ? cr.id : '';
+      check('create action path sends event', cr.ok && sent.length === 1 && sent[0]!.name === 'crm/prospect.created' && sent[0]!.data.tenantId === E && sent[0]!.data.prospectId === pid, sent);
+
+      const throwingSend = (async () => {
+        throw new Error('inngest down');
+      }) as never;
+      const crThrow = await asE(() => m.createProspect(E, eMember, { companyName: 'Send Fails Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent: throwingSend }));
+      check('create: a failing event send never fails the create', crThrow.ok, crThrow);
+
+      // confirm-import sends one event per inserted prospect
+      const [impRow] = await inE((tx) =>
+        tx.insert(s.prospectImports).values({ tenantId: E, sourceTag: 'expo-e', inputKind: 'text', rawText: 'x', status: 'parsed', createdBy: eMember.userId }).returning(),
+      );
+      sent.length = 0;
+      const ci = await asE(() =>
+        imp.confirmImport(
+          E,
+          eMember,
+          impRow!.id,
+          [
+            { companyName: 'Import One Co', clusterTags: [] },
+            { companyName: 'Import Two Co', clusterTags: [] },
+          ],
+          { sendEvent },
+        ),
+      );
+      const impIds = (await inE((tx) => tx.select({ id: s.prospects.id }).from(s.prospects).where(eq(s.prospects.importId, impRow!.id)))).map((r) => r.id).sort();
+      const sentIds = sent.filter((x) => x.name === 'crm/prospect.created').map((x) => String(x.data.prospectId)).sort();
+      check('confirm-import sends one event per inserted prospect', ci.ok && impIds.length === 2 && JSON.stringify(sentIds) === JSON.stringify(impIds), { ci, impIds, sentIds });
+
+      const f = (value: unknown, reasoning: string, confidence = 0.8) => ({ value, reasoning, confidence });
+      const answer = (o: Record<string, unknown> = {}) =>
+        JSON.stringify({
+          industry: f('Manufacturing', 'Pune-based manufacturer by name and city.'),
+          size_band: f('51-200', 'Typical size for a Pvt Ltd manufacturer.'),
+          product_fit: f(offE!.id, 'Payroll fits a mid-size workforce.'),
+          icp_score: f(82, 'Good fit for Payroll Suite.'),
+          ...o,
+        });
+      let calls = 0;
+      let lastUser = '';
+      const create = (body: string) =>
+        (async (params: { messages: Array<{ content: unknown }> }) => {
+          calls++;
+          lastUser = JSON.stringify(params.messages[0]!.content);
+          return {
+            id: 'm',
+            type: 'message',
+            role: 'assistant',
+            model: 'claude-opus-5-5',
+            content: [{ type: 'text', text: body, citations: null }],
+            stop_reason: 'end_turn',
+            stop_sequence: null,
+            usage: { input_tokens: 10, output_tokens: 10 },
+          };
+        }) as never;
+      const suggestionsFor = (id: string) => inE((tx) => tx.select().from(s.aiSuggestions).where(eq(s.aiSuggestions.entityId, id)));
+      const prospectRow = async (id: string) => (await inE((tx) => tx.select().from(s.prospects).where(eq(s.prospects.id, id))))[0]!;
+
+      // flags off -> skipped, no Claude call
+      await setFlags(false, true);
+      const off1 = await sysE(() => en.enrichProspect(E, pid, { create: create(answer()) }));
+      await setFlags(true, false);
+      const off2 = await sysE(() => en.enrichProspect(E, pid, { create: create(answer()) }));
+      check('enrich: flags off → skipped', off1.status === 'skipped' && off2.status === 'skipped' && calls === 0 && (await suggestionsFor(pid)).length === 0, { off1, off2, calls });
+
+      await setFlags(true, true);
+      const before = await prospectRow(pid);
+      const r1 = await sysE(() => en.enrichProspect(E, pid, { create: create(answer()) }));
+      const sg = await suggestionsFor(pid);
+      const byField = Object.fromEntries(sg.map((x) => [x.field, x]));
+      check(
+        'enrich: creates pending suggestions with entity prospect, source enrichment, evidence = reasoning',
+        r1.status === 'done' &&
+          r1.created === 4 &&
+          sg.length === 4 &&
+          sg.every((x) => x.entityType === 'prospect' && x.sourceType === 'enrichment' && x.sourceId === pid && x.status === 'pending' && x.currentValueAtSuggestion === null) &&
+          byField.industry?.evidenceQuote === 'Pune-based manufacturer by name and city.' &&
+          byField.icp_score?.suggestedValue === 82 &&
+          byField.product_fit?.suggestedValue === offE!.id,
+        { r1, sg: sg.map((x) => [x.field, x.entityType, x.sourceType, x.suggestedValue, x.evidenceQuote]) },
+      );
+      check('enrich: only active offerings are sent', lastUser.includes(offE!.id) && !lastUser.includes(offRetired!.id) && lastUser.includes('Enrich Me Pvt Ltd'));
+      const [src] = await inE((tx) => tx.select().from(s.aiSuggestionSources).where(eq(s.aiSuggestionSources.sourceId, pid)));
+      check('enrich: source marked done', src?.sourceType === 'enrichment' && src.status === 'done' && src.suggestionsCount === 4, src);
+
+      const after = await prospectRow(pid);
+      check(
+        'enrich: never writes prospect fields',
+        after.industry === null &&
+          after.sizeBand === null &&
+          after.productFitOfferingId === null &&
+          after.icpScore === null &&
+          after.updatedAt.getTime() === before.updatedAt.getTime() &&
+          after.lastActivityAt.getTime() === before.lastActivityAt.getTime(),
+        after,
+      );
+
+      const callsBefore = calls;
+      const r2 = await sysE(() => en.enrichProspect(E, pid, { create: create(answer()) }));
+      check('enrich: event twice → no duplicates', r2.status === 'skipped' && calls === callsBefore && (await suggestionsFor(pid)).length === 4, { r2 });
+
+      // handler path (what the Inngest function runs)
+      const wf = await import('../src/lib/inngest/workflows/prospects');
+      const hp = await asE(() => m.createProspect(E, eMember, { companyName: 'Handler Path Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      const step = { run: async <T,>(_id: string, fn: () => Promise<T>) => fn() };
+      const hr = hp.ok ? await wf.prospectEnrichHandler({ event: { data: { tenantId: E, prospectId: hp.id } }, step } as never, { create: create(answer()) }) : null;
+      check('enrich: handler runs enrichProspect in a system context', hr?.status === 'done' && (await suggestionsFor(hp.ok ? hp.id : E)).length === 4, hr);
+
+      // promoted / deleted before the job runs -> skipped, no suggestions
+      const pp = await asE(() => m.createProspect(E, eMember, { companyName: 'Promoted Early Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      const [dl] = await inE((tx) => tx.insert(s.deals).values({ tenantId: E, name: 'Already a lead' }).returning());
+      if (pp.ok) await inE((tx) => tx.update(s.prospects).set({ promotedDealId: dl!.id, promotedAt: new Date() }).where(eq(s.prospects.id, pp.id)));
+      const rp = pp.ok ? await sysE(() => en.enrichProspect(E, pp.id, { create: create(answer()) })) : null;
+      check('enrich: promoted prospect → skipped', rp?.status === 'skipped' && (await suggestionsFor(pp.ok ? pp.id : E)).length === 0, rp);
+
+      const pd = await asE(() => m.createProspect(E, eMember, { companyName: 'Deleted Early Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      if (pd.ok) await inE((tx) => tx.update(s.prospects).set({ deletedAt: new Date() }).where(eq(s.prospects.id, pd.id)));
+      const rd = pd.ok ? await sysE(() => en.enrichProspect(E, pd.id, { create: create(answer()) })) : null;
+      check('enrich: deleted prospect → skipped', rd?.status === 'skipped' && (await suggestionsFor(pd.ok ? pd.id : E)).length === 0, rd);
+
+      // invented (retired) offering / bad ICP / bad size band dropped; an existing value is not suggested
+      const pv = await asE(() =>
+        m.createProspect(E, eMember, { companyName: 'Validated Co', industry: 'Textiles', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }),
+      );
+      const rv = pv.ok
+        ? await sysE(() =>
+            en.enrichProspect(E, pv.id, {
+              create: create(answer({ product_fit: f(offRetired!.id, 'retired one'), icp_score: f(140, 'too high'), size_band: f('50-100', 'not a band') })),
+            }),
+          )
+        : null;
+      const sv = await suggestionsFor(pv.ok ? pv.id : E);
+      check('enrich: invalid values dropped and existing industry not suggested', rv?.status === 'done' && sv.length === 0 && rv.dropped >= 3, { rv, sv: sv.map((x) => x.field) });
+
+      // refusal -> failed, nothing persisted, a later delivery can retry
+      const pr = await asE(() => m.createProspect(E, eMember, { companyName: 'Refused Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      const refusing = (async () => ({
+        id: 'm',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-opus-5-5',
+        content: [],
+        stop_reason: 'refusal',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      })) as never;
+      const rr = pr.ok ? await sysE(() => en.enrichProspect(E, pr.id, { create: refusing })) : null;
+      const rr0 = pr.ok ? (await suggestionsFor(pr.id)).length : -1;
+      const rr2 = pr.ok ? await sysE(() => en.enrichProspect(E, pr.id, { create: create(answer()) })) : null;
+      check(
+        'enrich: refusal → failed, no suggestions; a later delivery can retry',
+        rr?.status === 'failed' && rr0 === 0 && rr2?.status === 'done' && (await suggestionsFor(pr.ok ? pr.id : E)).length === 4,
+        { rr, rr0, rr2 },
+      );
+
+      // no API key and no injected client -> skipped
+      const keySaved = process.env.ANTHROPIC_API_KEY;
+      delete process.env.ANTHROPIC_API_KEY;
+      const pk = await asE(() => m.createProspect(E, eMember, { companyName: 'No Key Co', sourceTag: 'selftest', clusterTags: [] } as never, { sendEvent }));
+      const rk = pk.ok ? await sysE(() => en.enrichProspect(E, pk.id)) : null;
+      if (keySaved !== undefined) process.env.ANTHROPIC_API_KEY = keySaved;
+      check('enrich: no ANTHROPIC_API_KEY → skipped', rk?.status === 'skipped', rk);
+    }
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
-    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B}, ${C}, ${D})`);
+    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B}, ${C}, ${D}, ${E})`);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

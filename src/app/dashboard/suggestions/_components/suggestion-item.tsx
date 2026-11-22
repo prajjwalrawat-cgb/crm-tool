@@ -53,7 +53,7 @@ export function SuggestionItem({
 
   const editValue = () => (s.field === 'follow_up_task' ? { title: draft, due_date: draftDate } : s.field === 'amount' ? Number(draft) : draft);
   const pct = Math.round(s.confidence * 100);
-  const SourceIcon = s.sourceType === 'call' ? Phone : Mail;
+  const SourceIcon = s.sourceType === 'call' ? Phone : s.sourceType === 'email' ? Mail : Sparkles;
 
   if (done) {
     return (
@@ -95,7 +95,7 @@ export function SuggestionItem({
       </blockquote>
       <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
         <SourceIcon className="h-3 w-3" aria-hidden />
-        From {s.sourceType === 'call' ? 'a call' : 'an email'}
+        From {s.sourceType === 'call' ? 'a call' : s.sourceType === 'email' ? 'an email' : 'AI enrichment'}
         {s.sourceHref ? (
           <Link href={s.sourceHref} className="inline-flex items-center gap-0.5 text-indigo-600 hover:underline dark:text-indigo-300">
             view <ExternalLink className="h-2.5 w-2.5" aria-hidden />

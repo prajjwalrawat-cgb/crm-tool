@@ -4,6 +4,8 @@ import { and, eq, inArray } from 'drizzle-orm';
 
 import { offerings, prospects, prospectStageHistory, type ProspectStage } from '@/db/schema';
 import { tenantTransaction, type DbExecutor } from '@/lib/db-context';
+import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { captureError } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 
 import {
@@ -44,20 +46,42 @@ export const MAX_BULK = 500;
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Event seam (selftests inject a recorder; production sends through Inngest). */
+export type ProspectEventDeps = { sendEvent?: typeof sendWorkflowEvent };
+
+/**
+ * After commit, best-effort: one `crm/prospect.created` per new prospect (AI
+ * enrichment listens). Never throws, so a failed send never fails the user's
+ * action.
+ */
+export async function emitProspectsCreated(tenantId: string, ids: string[], deps: ProspectEventDeps = {}): Promise<void> {
+  const send = deps.sendEvent ?? sendWorkflowEvent;
+  for (const prospectId of ids) {
+    try {
+      await send('crm/prospect.created', { tenantId, prospectId });
+    } catch (err) {
+      captureError(err, { category: 'prospects.event_send_failed', severity: 'low', retryable: false, fields: { tenantId, prospectId } });
+    }
+  }
+}
+
 export async function createProspect(
   tenantId: string,
   actor: Actor,
   input: ProspectInput,
+  deps: ProspectEventDeps = {},
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!can(actor.role, 'manageProspects')) return { ok: false, error: MESSAGES.no_permission };
   const parsed = prospectInputSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.message };
   const values = normalizeProspectInput(parsed.data);
-  return tenantTransaction(async (tx) => {
+  const res = await tenantTransaction(async (tx) => {
     const r = await insertProspectRows(tx, tenantId, actor, [values]);
     if (!r.ok) return { ok: false as const, error: UNKNOWN_PRODUCT };
     return { ok: true as const, id: r.ids[0]! };
   });
+  if (res.ok) await emitProspectsCreated(tenantId, [res.id], deps);
+  return res;
 }
 
 /** Indexes of rows whose non-null productFitOfferingId is not one of this tenant's offerings. */

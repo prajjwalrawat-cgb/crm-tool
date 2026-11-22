@@ -1,4 +1,4 @@
-import type { FollowUpValue, SuggestionField, SuggestionValue } from '@/db/schema/ai-suggestions';
+import type { FollowUpValue, SuggestionEntityType, SuggestionField, SuggestionSourceType, SuggestionValue } from '@/db/schema/ai-suggestions';
 
 export const FIELD_LABELS: Record<SuggestionField, string> = {
   stage: 'Stage',
@@ -10,6 +10,10 @@ export const FIELD_LABELS: Record<SuggestionField, string> = {
   contact_phone: 'Contact phone',
   contact_designation: 'Designation',
   follow_up_task: 'Follow-up task',
+  industry: 'Industry',
+  size_band: 'Company size',
+  product_fit: 'Product fit',
+  icp_score: 'ICP score',
 };
 
 /** Client-safe view of a suggestion. Built on the server, rendered by SuggestionItem. */
@@ -17,7 +21,7 @@ export type SuggestionView = {
   id: string;
   field: SuggestionField;
   fieldLabel: string;
-  entityType: 'deal' | 'contact' | 'lead';
+  entityType: SuggestionEntityType;
   entityId: string;
   entityName: string | null;
   entityHref: string | null;
@@ -25,7 +29,7 @@ export type SuggestionView = {
   suggested: SuggestionValue;
   evidence: string;
   confidence: number;
-  sourceType: 'call' | 'email';
+  sourceType: SuggestionSourceType;
   sourceHref: string | null;
   createdAt: string;
   model: string;
@@ -37,7 +41,7 @@ export const LOW_CONFIDENCE = 0.6;
 export function toSuggestionView(r: {
   id: string;
   field: SuggestionField;
-  entityType: 'deal' | 'contact' | 'lead';
+  entityType: SuggestionEntityType;
   entityId: string;
   entityName: string | null;
   dealId: string | null;
@@ -45,15 +49,20 @@ export function toSuggestionView(r: {
   suggestedValue: SuggestionValue;
   evidenceQuote: string;
   confidence: number;
-  sourceType: 'call' | 'email';
+  sourceType: SuggestionSourceType;
   sourceId: string;
   createdAt: Date;
   model: string;
 }): SuggestionView {
-  const entityHref = r.entityType === 'contact' ? `/dashboard/contacts/${r.entityId}` : `/dashboard/deals/${r.entityId}`;
+  const entityHref =
+    r.entityType === 'contact'
+      ? `/dashboard/contacts/${r.entityId}`
+      : r.entityType === 'prospect'
+        ? `/dashboard/prospects?p=${r.entityId}`
+        : `/dashboard/deals/${r.entityId}`;
   let sourceHref: string | null = null;
   if (r.sourceType === 'call') sourceHref = r.dealId ? `/dashboard/deals/${r.dealId}#call-${r.sourceId}` : null;
-  else sourceHref = `/dashboard/communications/${r.sourceId.split(':')[0]}`;
+  else if (r.sourceType === 'email') sourceHref = `/dashboard/communications/${r.sourceId.split(':')[0]}`;
   return {
     id: r.id,
     field: r.field,
