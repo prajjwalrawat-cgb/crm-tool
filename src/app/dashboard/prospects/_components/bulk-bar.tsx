@@ -7,16 +7,18 @@ import { PROSPECT_STAGES } from '@/lib/prospects/rules';
 
 import { STAGE_LABELS } from './prospect-column';
 
-export type BulkResult = { moved: number; skipped: { id: string; reason: string }[] };
+export type BulkResult = { label: string; moved: number; skipped: { id: string; reason: string }[] };
 
 type Props = {
   count: number;
   canPark: boolean;
+  canRelease: boolean;
   busy: boolean;
   result: BulkResult | null;
   /** id to company name, for the skipped list. */
   names: Map<string, string>;
   onMove: (to: ProspectStage) => void;
+  onRelease: () => void;
   onClear: () => void;
   onDismissResult: () => void;
 };
@@ -26,12 +28,14 @@ const REASONS: Record<string, string> = {
   promoted: 'Already promoted',
   deleted: 'Deleted',
   not_found: 'Not found',
+  not_claimed: 'Not claimed',
+  out_of_scope: 'Outside your team',
   no_permission: 'No permission',
   invalid: 'Invalid',
   error: 'Failed',
 };
 
-export function BulkBar({ count, canPark, busy, result, names, onMove, onClear, onDismissResult }: Props) {
+export function BulkBar({ count, canPark, canRelease, busy, result, names, onMove, onRelease, onClear, onDismissResult }: Props) {
   const [to, setTo] = useState('');
   if (count === 0 && !result) return null;
   return (
@@ -74,6 +78,16 @@ export function BulkBar({ count, canPark, busy, result, names, onMove, onClear, 
               Park
             </button>
           ) : null}
+          {canRelease ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onRelease}
+              className="rounded-md border border-slate-300 px-3 py-1 text-[13px] text-slate-700 disabled:opacity-50"
+            >
+              Release claims
+            </button>
+          ) : null}
           <button type="button" onClick={onClear} className="ml-auto text-[12px] text-slate-500 hover:text-slate-700">
             Clear
           </button>
@@ -83,7 +97,7 @@ export function BulkBar({ count, canPark, busy, result, names, onMove, onClear, 
         <div role="status" className={count > 0 ? 'mt-2 border-t border-slate-100 pt-2' : ''}>
           <div className="flex items-center justify-between text-[13px] text-slate-800">
             <span>
-              Moved {result.moved}, skipped {result.skipped.length}
+              {result.label} {result.moved}, skipped {result.skipped.length}
             </span>
             <button type="button" onClick={onDismissResult} className="text-[12px] text-slate-500 hover:text-slate-700">
               Dismiss

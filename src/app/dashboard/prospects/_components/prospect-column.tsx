@@ -26,6 +26,7 @@ type Props = {
   cards: BoardCard[];
   teammates: Map<string, Teammate>;
   interactive: boolean;
+  currentUserId: string;
   selected: Set<string>;
   isDragActive: boolean;
   /** Parked renders as a slim bar until expanded. */
@@ -41,6 +42,7 @@ export function ProspectColumn({
   cards,
   teammates,
   interactive,
+  currentUserId,
   selected,
   isDragActive,
   collapsed,
@@ -102,6 +104,7 @@ export function ProspectColumn({
             card={c}
             teammates={teammates}
             interactive={interactive}
+            currentUserId={currentUserId}
             selected={selected.has(c.id)}
             onSelectToggle={onSelectToggle}
             onOpen={onOpen}

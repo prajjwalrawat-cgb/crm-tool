@@ -18,7 +18,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 
-import type { MembershipRole, Prospect, ProspectStage } from '@/db/schema';
+import type { Comment, MembershipRole, Prospect, ProspectStage } from '@/db/schema';
 import {
   groupKeyOf,
   PROSPECT_STAGES,
@@ -28,7 +28,7 @@ import {
 import { can } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 
-import { bulkMoveStageAction, moveProspectStageAction } from '../actions';
+import { bulkMoveStageAction, bulkReleaseClaimsAction, moveProspectStageAction } from '../actions';
 import { BoardToolbar } from './board-toolbar';
 import { BulkBar, type BulkResult } from './bulk-bar';
 import { NewProspectButton } from './new-prospect-button';
@@ -47,6 +47,12 @@ type Props = {
   offerings: { id: string; name: string }[];
   role: MembershipRole;
   currentUserId: string;
+  tenantId: string;
+  /** Users the viewer may reassign claims to; null means everyone. */
+  reassignScope: string[] | null;
+  myVotes: { knowSomeone: boolean; priority: boolean };
+  openComments: Comment[];
+  authorLookup: Record<string, string>;
   /** The prospect named by `?p=`, when it exists. */
   openProspect: Prospect | null;
   openHistory: StageHistoryEntry[];
@@ -88,12 +94,18 @@ export function ProspectBoard({
   offerings,
   role,
   currentUserId,
+  tenantId,
+  reassignScope,
+  myVotes,
+  openComments,
+  authorLookup,
   openProspect,
   openHistory,
 }: Props) {
   const router = useRouter();
   const interactive = can(role, 'manageProspects');
   const canPark = can(role, 'bulkParkProspects');
+  const canClaim = can(role, 'claimProspects');
 
   const [cards, setCards] = useState<BoardCard[]>(serverCards);
   // Adopt the fresh server list after revalidatePath re-renders the page.
@@ -208,10 +220,31 @@ export function ProspectBoard({
         setError(result.message);
         return;
       }
-      setBulkResult(result.data ?? { moved: 0, skipped: [] });
+      setBulkResult({ label: 'Moved', ...(result.data ?? { moved: 0, skipped: [] }) });
       setSelected(new Set());
     });
   }
+
+  function handleBulkRelease() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setError(null);
+    setBulkResult(null);
+    startTransition(async () => {
+      const result = await bulkReleaseClaimsAction(ids);
+      setBulkBusy(false);
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      const d = result.data ?? { released: 0, skipped: [] };
+      setBulkResult({ label: 'Done', moved: d.released, skipped: d.skipped });
+      setSelected(new Set());
+    });
+  }
+
+  const openBoardCard = openProspect ? cards.find((c) => c.id === openProspect.id) : undefined;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -263,6 +296,7 @@ export function ProspectBoard({
                     cards={lane.cards.filter((c) => c.stage === stage)}
                     teammates={teammateMap}
                     interactive={interactive}
+                    currentUserId={currentUserId}
                     selected={selected}
                     isDragActive={!!activeCard}
                     collapsed={stage === 'parked' && !parkedOpen && !filters.stage}
@@ -278,7 +312,13 @@ export function ProspectBoard({
 
         <DragOverlay dropAnimation={null}>
           {activeCard ? (
-            <ProspectCardView card={activeCard} teammates={teammateMap} interactive={false} overlay />
+            <ProspectCardView
+              card={activeCard}
+              teammates={teammateMap}
+              interactive={false}
+              currentUserId={currentUserId}
+              overlay
+            />
           ) : null}
         </DragOverlay>
       </DndContext>
@@ -292,6 +332,12 @@ export function ProspectBoard({
           sourceTags={sourceTags}
           role={role}
           currentUserId={currentUserId}
+          tenantId={tenantId}
+          myVotes={myVotes}
+          reassignScope={reassignScope}
+          comments={openComments}
+          authorLookup={authorLookup}
+          voteCounts={openBoardCard ? { knowSomeone: openBoardCard.votesKnowSomeone, priority: openBoardCard.votesPriority } : null}
           onClose={closeCard}
         />
       ) : null}
@@ -300,10 +346,12 @@ export function ProspectBoard({
         <BulkBar
           count={selected.size}
           canPark={canPark}
+          canRelease={canClaim}
           busy={bulkBusy}
           result={bulkResult}
           names={names}
           onMove={handleBulkMove}
+          onRelease={handleBulkRelease}
           onClear={() => setSelected(new Set())}
           onDismissResult={() => setBulkResult(null)}
         />

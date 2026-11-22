@@ -6,6 +6,9 @@ import { PROSPECT_STAGES, prospectInputSchema, type Actor } from '@/lib/prospect
 import type { ProspectStage } from '@/db/schema';
 import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext } from '@/lib/db-context';
+import { bulkReleaseClaims, claimProspect, reassignClaim, releaseProspect } from '@/lib/prospects/claims';
+import { toggleVote, type VoteKind } from '@/lib/prospects/votes';
+import type { Permission } from '@/lib/rbac';
 import {
   bulkMoveStage,
   createProspect,
@@ -26,8 +29,8 @@ const BOARD_PATH = '/dashboard/prospects';
 
 const isStage = (v: string): v is ProspectStage => (PROSPECT_STAGES as readonly string[]).includes(v);
 
-async function gate() {
-  const g = await checkPermission('manageProspects');
+async function gate(permission: Permission = 'manageProspects') {
+  const g = await checkPermission(permission);
   if (!g.ok) return { ok: false as const, message: g.message };
   const actor: Actor = { userId: g.membership.userId, role: g.membership.role };
   return { ok: true as const, tenantId: g.tenant.id, actor };
@@ -90,4 +93,62 @@ export async function bulkMoveStageAction(
   );
   revalidatePath(BOARD_PATH);
   return { ok: true, data: { moved: r.moved.length, skipped: r.skipped } };
+}
+
+export async function claimProspectAction(id: string): Promise<ActionResult> {
+  const g = await gate('claimProspects');
+  if (!g.ok) return g;
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    claimProspect(g.tenantId, g.actor, String(id)),
+  );
+  if (r.ok) revalidatePath(BOARD_PATH);
+  return toResult(r);
+}
+
+export async function releaseProspectAction(id: string): Promise<ActionResult> {
+  const g = await gate('claimProspects');
+  if (!g.ok) return g;
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    releaseProspect(g.tenantId, g.actor, String(id)),
+  );
+  if (r.ok) revalidatePath(BOARD_PATH);
+  return toResult(r);
+}
+
+export async function reassignClaimAction(id: string, toUserId: string): Promise<ActionResult> {
+  const g = await gate('manageProspectClaims');
+  if (!g.ok) return g;
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    reassignClaim(g.tenantId, g.actor, String(id), String(toUserId)),
+  );
+  if (r.ok) revalidatePath(BOARD_PATH);
+  return toResult(r);
+}
+
+export async function toggleVoteAction(
+  id: string,
+  kind: string,
+): Promise<ActionResult<{ voted: boolean; knowSomeone: number; priority: number }>> {
+  const g = await gate();
+  if (!g.ok) return g;
+  if (kind !== 'know_someone' && kind !== 'priority') return { ok: false, message: 'Unknown vote.' };
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    toggleVote(g.tenantId, g.actor, String(id), kind as VoteKind),
+  );
+  if (!r.ok) return { ok: false, message: r.message };
+  revalidatePath(BOARD_PATH);
+  return { ok: true, data: { voted: r.voted, knowSomeone: r.knowSomeone, priority: r.priority } };
+}
+
+export async function bulkReleaseClaimsAction(
+  ids: string[],
+): Promise<ActionResult<{ released: number; skipped: { id: string; reason: string }[] }>> {
+  const g = await gate('claimProspects');
+  if (!g.ok) return g;
+  if (!Array.isArray(ids) || ids.length === 0) return { ok: false, message: 'Select at least one prospect.' };
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    bulkReleaseClaims(g.tenantId, g.actor, ids.map(String)),
+  );
+  revalidatePath(BOARD_PATH);
+  return { ok: true, data: { released: r.released.length, skipped: r.skipped } };
 }

@@ -102,6 +102,31 @@ export async function getProspect(tenantId: string, id: string): Promise<Prospec
   });
 }
 
+/** Which vote kinds the viewer has cast on one prospect. */
+export async function listMyVotes(
+  tenantId: string,
+  userId: string,
+  prospectId: string,
+): Promise<{ knowSomeone: boolean; priority: boolean }> {
+  if (!UUID_RE.test(prospectId)) return { knowSomeone: false, priority: false };
+  return tenantTransaction(async (tx) => {
+    const rows = await tx
+      .select({ kind: prospectVotes.kind })
+      .from(prospectVotes)
+      .where(
+        and(
+          eq(prospectVotes.tenantId, tenantId),
+          eq(prospectVotes.prospectId, prospectId),
+          eq(prospectVotes.userId, userId),
+        ),
+      );
+    return {
+      knowSomeone: rows.some((r) => r.kind === 'know_someone'),
+      priority: rows.some((r) => r.kind === 'priority'),
+    };
+  });
+}
+
 export async function listSourceTags(tenantId: string): Promise<string[]> {
   return tenantTransaction(async (tx) => {
     const rows = await tx

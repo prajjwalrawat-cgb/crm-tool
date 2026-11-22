@@ -3,13 +3,16 @@
 import Link from 'next/link';
 import { useState } from 'react';
 
-import type { MembershipRole, Prospect, ProspectStage } from '@/db/schema';
+import type { Comment, MembershipRole, Prospect, ProspectStage } from '@/db/schema';
 import { editBlock } from '@/lib/prospects/rules';
 import type { Teammate } from '@/lib/teammates/queries';
 
+import { CommentsThread } from '../../_components/comments-thread';
 import { Drawer } from '../../_components/drawer';
+import { ClaimPanel } from './claim-panel';
 import { STAGE_LABELS } from './prospect-column';
 import { ProspectForm } from './prospect-form';
+import { VoteButtons } from './vote-buttons';
 
 export type StageHistoryEntry = {
   fromStage: ProspectStage | null;
@@ -26,6 +29,14 @@ type Props = {
   sourceTags: string[];
   role: MembershipRole;
   currentUserId: string;
+  tenantId: string;
+  myVotes: { knowSomeone: boolean; priority: boolean };
+  /** Users the viewer may reassign claims to; null means everyone. */
+  reassignScope: string[] | null;
+  comments: Comment[];
+  authorLookup: Record<string, string>;
+  /** Votes on this prospect, from the board card (null when filtered off the board). */
+  voteCounts: { knowSomeone: number; priority: number } | null;
   onClose: () => void;
 };
 
@@ -39,11 +50,25 @@ export function ProspectDrawer({
   sourceTags,
   role,
   currentUserId,
+  tenantId,
+  myVotes,
+  reassignScope,
+  comments,
+  authorLookup,
+  voteCounts,
   onClose,
 }: Props) {
   const [now] = useState(() => Date.now());
 
   const block = editBlock(prospect, { userId: currentUserId, role });
+  const disabledReason =
+    block === 'promoted'
+      ? 'Promoted prospects are read-only.'
+      : block === 'deleted'
+        ? 'This prospect was deleted.'
+        : block === 'no_permission'
+          ? 'You have read-only access to prospects.'
+          : null;
   const nameOf = (id: string | null) => {
     if (!id) return 'Unknown';
     if (id.startsWith('system:')) return 'System';
@@ -76,6 +101,36 @@ export function ProspectDrawer({
           readOnly={block !== null}
           onSaved={() => undefined}
         />
+
+        <ClaimPanel
+          prospect={prospect}
+          teammates={teammates}
+          role={role}
+          currentUserId={currentUserId}
+          reassignScope={reassignScope}
+          disabledReason={disabledReason}
+        />
+
+        <VoteButtons
+          prospectId={prospect.id}
+          knowSomeone={voteCounts?.knowSomeone ?? 0}
+          priority={voteCounts?.priority ?? 0}
+          myVotes={myVotes}
+          disabledReason={disabledReason}
+        />
+
+        <div className="mt-6 border-t border-slate-200 pt-4">
+          <CommentsThread
+            tenantId={tenantId}
+            entityType="prospect"
+            entityId={prospect.id}
+            currentUserId={currentUserId}
+            initialComments={comments}
+            authorLookup={authorLookup}
+            teammates={teammates}
+            canWrite={block === null}
+          />
+        </div>
 
         <section className="mt-6 border-t border-slate-200 pt-4 text-[13px] text-slate-700">
           <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-slate-500">Details</h3>

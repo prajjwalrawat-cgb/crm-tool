@@ -34,13 +34,15 @@ type Props = {
   teammates: Map<string, Teammate>;
   /** Viewers get no drag handle or checkbox. */
   interactive: boolean;
+  /** Marks the claim avatar with a "You" badge when the viewer holds the claim. */
+  currentUserId?: string;
   selected?: boolean;
   overlay?: boolean;
   onSelectToggle?: (id: string) => void;
   onOpen?: (id: string) => void;
 };
 
-function ProspectCardImpl({ card, teammates, interactive, selected, overlay, onSelectToggle, onOpen }: Props) {
+function ProspectCardImpl({ card, teammates, interactive, currentUserId, selected, overlay, onSelectToggle, onOpen }: Props) {
   const draggable = interactive && !overlay && !card.promotedDealId;
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: card.id,
@@ -121,6 +123,9 @@ function ProspectCardImpl({ card, teammates, interactive, selected, overlay, onS
                   initials(claimer?.displayName ?? '?')
                 )}
               </span>
+              {card.claimedBy === currentUserId ? (
+                <span className="rounded bg-indigo-600 px-1 py-px text-[9px] font-semibold text-white">You</span>
+              ) : null}
               {left !== null ? <span>{left}d left</span> : null}
             </>
           ) : (

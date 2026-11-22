@@ -6,7 +6,7 @@ import { comments, type Comment } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 import { timeQuery } from '@/lib/pagination/timing';
 
-export type CommentEntityType = 'deal' | 'company' | 'contact';
+export type CommentEntityType = 'deal' | 'company' | 'contact' | 'prospect';
 
 /**
  * Load all live comments for an entity, oldest first. The detail
