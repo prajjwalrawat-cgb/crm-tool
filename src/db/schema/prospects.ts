@@ -114,6 +114,7 @@ export const prospects = pgTable(
   },
   (t) => [
     index('prospects_tenant_stage_idx').on(t.tenantId, t.stage).where(sql`${t.deletedAt} IS NULL`),
+    index('prospects_tenant_created_idx').on(t.tenantId, t.createdAt).where(sql`${t.deletedAt} IS NULL`),
     index('prospects_tenant_claimed_by_idx').on(t.tenantId, t.claimedBy),
     index('prospects_tenant_source_tag_idx').on(t.tenantId, t.sourceTag),
     index('prospects_tenant_last_activity_idx').on(t.tenantId, t.lastActivityAt),
@@ -141,7 +142,12 @@ export const prospectStageHistory = pgTable(
     changedBy: text('changed_by').notNull(),
     changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('prospect_stage_history_prospect_idx').on(t.tenantId, t.prospectId, t.changedAt)],
+  (t) => [
+    index('prospect_stage_history_prospect_idx').on(t.tenantId, t.prospectId, t.changedAt),
+    index('prospect_stage_history_autopark_idx')
+      .on(t.tenantId, t.changedAt)
+      .where(sql`${t.changedBy} = 'system:auto-park'`),
+  ],
 );
 
 export const prospectVotes = pgTable(

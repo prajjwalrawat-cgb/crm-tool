@@ -101,6 +101,9 @@ CREATE INDEX IF NOT EXISTS "prospects_tenant_source_tag_idx"
 CREATE INDEX IF NOT EXISTS "prospects_tenant_last_activity_idx"
   ON "prospects" ("tenant_id", "last_activity_at");
 --> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "prospects_tenant_created_idx"
+  ON "prospects" ("tenant_id", "created_at") WHERE "deleted_at" IS NULL;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "prospects_normalized_name_trgm_idx"
   ON "prospects" USING gin ("normalized_name" gin_trgm_ops);
 --> statement-breakpoint
@@ -121,6 +124,9 @@ CREATE TABLE IF NOT EXISTS "prospect_stage_history" (
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "prospect_stage_history_prospect_idx"
   ON "prospect_stage_history" ("tenant_id", "prospect_id", "changed_at");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "prospect_stage_history_autopark_idx"
+  ON "prospect_stage_history" ("tenant_id", "changed_at") WHERE "changed_by" = 'system:auto-park';
 --> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "prospect_votes" (
