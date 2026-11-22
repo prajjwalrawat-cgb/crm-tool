@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { Comment, MembershipRole, Prospect, ProspectStage } from '@/db/schema';
 import { promoteBlock } from '@/lib/prospects/promote/rules';
@@ -13,7 +13,7 @@ import { CommentsThread } from '../../_components/comments-thread';
 import { Drawer } from '../../_components/drawer';
 import { ClaimPanel } from './claim-panel';
 import { STAGE_LABELS } from './prospect-column';
-import { PromoteDialog } from './promote-dialog';
+import { PromoteDialog, type PromoteSeed } from './promote-dialog';
 import { ProspectForm } from './prospect-form';
 import { VoteButtons } from './vote-buttons';
 
@@ -42,8 +42,9 @@ type Props = {
   voteCounts: { knowSomeone: number; priority: number };
   /** The claim holder is within the viewer's team scope (page-computed). */
   holderInScope: boolean;
-  /** Open the promote dialog straight away (from the bulk result list). */
-  autoPromote?: boolean;
+  /** From a bulk result row: expands the promote panel with that outcome, no server call. `n` re-seeds. */
+  promoteSeed?: (PromoteSeed & { n: number }) | null;
+  onSeedConsumed?: () => void;
   onClose: () => void;
 };
 
@@ -64,11 +65,21 @@ export function ProspectDrawer({
   authorLookup,
   voteCounts,
   holderInScope,
-  autoPromote = false,
+  promoteSeed = null,
+  onSeedConsumed,
   onClose,
 }: Props) {
   const [now] = useState(() => Date.now());
-  const [promoteOpen, setPromoteOpen] = useState(autoPromote);
+  const [promote, setPromote] = useState<{ key: number; seed: PromoteSeed | null } | null>(null);
+  const promoteOpen = promote !== null;
+  const [seenN, setSeenN] = useState(0);
+  if (promoteSeed && promoteSeed.n !== seenN) {
+    setSeenN(promoteSeed.n);
+    setPromote({ key: promoteSeed.n, seed: { kind: promoteSeed.kind, candidates: promoteSeed.candidates } });
+  }
+  useEffect(() => {
+    if (promoteSeed) onSeedConsumed?.();
+  }, [promoteSeed, onSeedConsumed]);
 
   const block = editBlock(prospect, { userId: currentUserId, role });
   const disabledReason =
@@ -117,7 +128,7 @@ export function ProspectDrawer({
               <button
                 type="button"
                 disabled={promoteReason !== null || promoteOpen}
-                onClick={() => setPromoteOpen(true)}
+                onClick={() => setPromote({ key: Date.now(), seed: null })}
                 className="rounded-md bg-indigo-600 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
               >
                 Promote to lead
@@ -130,10 +141,12 @@ export function ProspectDrawer({
         ) : null}
         {promoteOpen ? (
           <PromoteDialog
+            key={promote.key}
             prospectId={prospect.id}
+            seed={promote.seed}
             claimerName={prospect.claimedBy ? nameOf(prospect.claimedBy) : null}
             canCreateAnyway={can(role, 'manageProspectClaims') || role === 'owner' || role === 'admin'}
-            onClose={() => setPromoteOpen(false)}
+            onClose={() => setPromote(null)}
           />
         ) : null}
 

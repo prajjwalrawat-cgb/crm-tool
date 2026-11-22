@@ -8,8 +8,12 @@ import type { MatchCandidate } from '@/lib/prospects/promote/rules';
 
 import { promoteProspectAction } from '../actions';
 
+export type PromoteSeed = { kind: 'blocked' | 'warn'; candidates: MatchCandidate[] };
+
 type Props = {
   prospectId: string;
+  /** Initial view from a bulk result: no server call is made until the user clicks. */
+  seed?: PromoteSeed | null;
   /** Name of the active claimer, used in the routing line. */
   claimerName: string | null;
   /** Managers, owners and admins may skip the duplicate check. */
@@ -61,8 +65,8 @@ function routingLine(routing: PromoteRouting, claimerName: string | null): strin
   }
 }
 
-export function PromoteDialog({ prospectId, claimerName, canCreateAnyway, onClose }: Props) {
-  const [view, setView] = useState<View>({ kind: 'checking' });
+export function PromoteDialog({ prospectId, seed = null, claimerName, canCreateAnyway, onClose }: Props) {
+  const [view, setView] = useState<View>(seed ? { kind: seed.kind, candidates: seed.candidates } : { kind: 'checking' });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pick, setPick] = useState<{ leadId: string; companyId: string; contactId: string }>({ leadId: '', companyId: '', contactId: '' });
@@ -80,6 +84,13 @@ export function PromoteDialog({ prospectId, claimerName, canCreateAnyway, onClos
     if (o.status === 'promoted') setView({ kind: 'done', dealId: o.dealId, linked: o.linked, routing: o.routing });
     else if (o.status === 'blocked' || o.status === 'warn') {
       setNotice(null);
+      // Drop picks that are no longer in the new candidate list.
+      const ids = new Set(o.candidates.map((c) => c.id));
+      setPick((p) => ({
+        leadId: ids.has(p.leadId) ? p.leadId : '',
+        companyId: ids.has(p.companyId) ? p.companyId : '',
+        contactId: ids.has(p.contactId) ? p.contactId : '',
+      }));
       setView({ kind: o.status, candidates: o.candidates });
     } else if (keep) setNotice(o.message);
     else setView({ kind: 'error', message: o.message });
@@ -87,10 +98,10 @@ export function PromoteDialog({ prospectId, claimerName, canCreateAnyway, onClos
 
   useEffect(() => {
     // The ref keeps React strict-mode's double effect from promoting twice.
-    if (started.current) return;
+    if (seed || started.current) return;
     started.current = true;
     void promoteProspectAction(prospectId).then((r) => apply(r));
-  }, [prospectId]);
+  }, [prospectId, seed]);
 
   function send(choice: PromoteChoice) {
     if (view.kind === 'checking') return;
@@ -132,7 +143,7 @@ export function PromoteDialog({ prospectId, claimerName, canCreateAnyway, onClos
     <section role="region" aria-label="Promote to lead" className="mb-4 rounded-md border border-indigo-200 bg-indigo-50/40 p-3 text-[13px] text-slate-800">
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-[12px] font-semibold uppercase tracking-wide text-slate-600">Promote to lead</h3>
-        <button type="button" onClick={onClose} className="text-[12px] text-slate-500 hover:text-slate-700">
+        <button type="button" disabled={view.kind === 'checking'} onClick={onClose} className="text-[12px] text-slate-500 hover:text-slate-700 disabled:opacity-50">
           Close
         </button>
       </div>

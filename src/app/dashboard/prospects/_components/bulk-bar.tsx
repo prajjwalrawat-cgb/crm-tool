@@ -5,6 +5,8 @@ import { useState } from 'react';
 
 import type { ProspectStage } from '@/db/schema';
 import type { PromoteOutcome } from '@/lib/prospects/promote/promote';
+
+import type { PromoteSeed } from './promote-dialog';
 import { PROSPECT_STAGES } from '@/lib/prospects/rules';
 
 import { STAGE_LABELS } from './prospect-column';
@@ -26,7 +28,7 @@ type Props = {
   onMove: (to: ProspectStage) => void;
   onRelease: () => void;
   onPromote: (ignoreWarnings: boolean) => void;
-  onOpenPromote: (id: string) => void;
+  onOpenPromote: (id: string, seed: PromoteSeed) => void;
   onDismissPromote: () => void;
   onClear: () => void;
   onDismissResult: () => void;
@@ -165,14 +167,14 @@ export function BulkBar({ count, canPark, canRelease, canPromote, busy, result, 
                 ) : outcome.status === 'blocked' ? (
                   <>
                     <span className="text-amber-700">Matches existing records</span>
-                    <button type="button" onClick={() => onOpenPromote(id)} className="text-indigo-700 underline">
+                    <button type="button" onClick={() => onOpenPromote(id, { kind: 'blocked', candidates: outcome.candidates })} className="text-indigo-700 underline">
                       Open
                     </button>
                   </>
                 ) : outcome.status === 'warn' ? (
                   <>
                     <span className="text-amber-700">Similar name</span>
-                    <button type="button" onClick={() => onOpenPromote(id)} className="text-indigo-700 underline">
+                    <button type="button" onClick={() => onOpenPromote(id, { kind: 'warn', candidates: outcome.candidates })} className="text-indigo-700 underline">
                       Open
                     </button>
                   </>

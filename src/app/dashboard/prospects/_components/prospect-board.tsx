@@ -26,6 +26,7 @@ import {
   type ProspectCard,
   type ProspectFilters,
 } from '@/lib/prospects/rules';
+import type { MatchCandidate } from '@/lib/prospects/promote/rules';
 import { can } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 
@@ -131,7 +132,9 @@ export function ProspectBoard({
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [promoteResults, setPromoteResults] = useState<PromoteResults | null>(null);
   // Prospect whose promote dialog should open with its drawer (from the bulk list).
-  const [autoPromoteId, setAutoPromoteId] = useState<string | null>(null);
+  const [openSeed, setOpenSeed] = useState<{ id: string; n: number; kind: 'blocked' | 'warn'; candidates: MatchCandidate[] } | null>(null);
+  const seedCounter = useRef(0);
+  const consumeSeed = useCallback(() => setOpenSeed(null), []);
   // Guards a slow rollback from clobbering a newer drag.
   const dragSeqRef = useRef(0);
 
@@ -365,7 +368,8 @@ export function ProspectBoard({
       {openProspect ? (
         <ProspectDrawer
           key={openProspect.id}
-          autoPromote={autoPromoteId === openProspect.id}
+          promoteSeed={openSeed && openSeed.id === openProspect.id ? openSeed : null}
+          onSeedConsumed={consumeSeed}
           holderInScope={holderInScope}
           prospect={openProspect}
           history={openHistory}
@@ -380,7 +384,10 @@ export function ProspectBoard({
           comments={openComments}
           authorLookup={authorLookup}
           voteCounts={voteCounts}
-          onClose={closeCard}
+          onClose={() => {
+            setOpenSeed(null);
+            closeCard();
+          }}
         />
       ) : null}
 
@@ -392,8 +399,8 @@ export function ProspectBoard({
           canPromote={canPromote}
           promoteResults={promoteResults}
           onPromote={handleBulkPromote}
-          onOpenPromote={(id) => {
-            setAutoPromoteId(id);
+          onOpenPromote={(id, seed) => {
+            setOpenSeed({ id, n: ++seedCounter.current, ...seed });
             openCard(id);
           }}
           onDismissPromote={() => setPromoteResults(null)}
