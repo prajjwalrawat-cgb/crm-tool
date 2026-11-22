@@ -1,8 +1,10 @@
 import { config } from 'dotenv';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 config({ path: '.env.local' });
 config();
+// .env.local may hold a real key: no test path here may reach Claude (in-process enrichment via the local dispatcher).
+process.env.ANTHROPIC_API_KEY = '';
 
 /**
  * DB-backed self-test for the Prospect Board (0079). Two throwaway tenants,
@@ -968,7 +970,15 @@ async function main() {
       const bEdge = await mkD('Edge 45d Co', { lastActivityAt: ago(45) });
       const bClaimPark = await mkD('Claimed Stale Co', { lastActivityAt: ago(60), claimedBy: claimer, claimedAt: ago(1), claimExpiresAt: new Date(NOW.getTime() + 5 * DAY) });
       const bExact = await mkD('Exact Expiry Co', { claimedBy: claimer, claimedAt: ago(14), claimExpiresAt: NOW });
+      // final review I1: a promoted prospect keeps its (expired) claim as attribution
+      const promoDeal = (await inD((tx) => tx.insert(s.deals).values({ tenantId: D, name: 'Promoted claim deal' }).returning({ id: s.deals.id })))[0]!.id;
+      const bPromoClaim = await mkD('Promoted Claim Co', { claimedBy: claimer, claimedAt: ago(20), claimExpiresAt: ago(3), promotedDealId: promoDeal, promotedAt: ago(5) });
       const rB = await mt.runProspectMaintenance(D, NOW);
+      const pcRow = await rowD(bPromoClaim);
+      const pcNotes = await runWithTenantContext({ tenantId: D, userId: claimer }, () =>
+        tenantTransaction((tx) => tx.select().from(s.notifications).where(and(eq(s.notifications.recipientUserId, claimer), eq(s.notifications.entityId, bPromoClaim)))),
+      );
+      check('maint: claimed + promoted + expired → not released, no notification', pcRow.claimedBy === claimer && pcRow.claimExpiresAt !== null && pcNotes.length === 0, { pcRow: { by: pcRow.claimedBy, exp: pcRow.claimExpiresAt }, pcNotes: pcNotes.length });
       const cpRow = await rowD(bClaimPark);
       check('maint: exactly 45 days is not parked (strict <)', (await rowD(bEdge)).stage === 'dump' && rB.parked === 1, rB);
       check('maint: claim expiring exactly now is released (<=)', (await rowD(bExact)).claimedBy === null && rB.released === 1, rB);

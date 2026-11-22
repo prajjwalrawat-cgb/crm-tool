@@ -63,17 +63,18 @@ export async function runProspectMaintenance(
       let expired: Array<{ id: string; claimed_by: string; company_name: string }> = [];
       if (settings.claimExpiryEnabled) {
         // RETURNING sees the new row, so the former claimer comes from the locked snapshot.
+        // Promoted prospects are read-only and keep claimed_by as attribution, so they are never released.
         expired = (await tx.execute(sql`
           WITH old AS (
             SELECT id, claimed_by FROM prospects
-            WHERE tenant_id = ${tenantId} AND deleted_at IS NULL
+            WHERE tenant_id = ${tenantId} AND deleted_at IS NULL AND promoted_deal_id IS NULL
               AND claimed_by IS NOT NULL AND claim_expires_at <= ${nowIso}::timestamptz
             FOR UPDATE
           )
           UPDATE prospects p
           SET claimed_by = NULL, claimed_at = NULL, claim_expires_at = NULL, updated_at = ${nowIso}::timestamptz
           FROM old
-          WHERE p.id = old.id AND p.tenant_id = ${tenantId} AND p.deleted_at IS NULL
+          WHERE p.id = old.id AND p.tenant_id = ${tenantId} AND p.deleted_at IS NULL AND p.promoted_deal_id IS NULL
             AND p.claimed_by IS NOT NULL AND p.claim_expires_at <= ${nowIso}::timestamptz
           RETURNING p.id AS id, old.claimed_by AS claimed_by, p.company_name AS company_name
         `)) as unknown as typeof expired;
