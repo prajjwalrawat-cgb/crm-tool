@@ -3,6 +3,8 @@ import { and, eq, sql } from 'drizzle-orm';
 
 config({ path: '.env.local' });
 config();
+// .env.local may hold a real key: this test must never reach Claude.
+process.env.ANTHROPIC_API_KEY = '';
 
 /**
  * DB-backed self-test for AI suggestions (0077). Two throwaway tenants,
