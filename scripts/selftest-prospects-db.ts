@@ -35,8 +35,10 @@ async function main() {
   const stamp = Date.now();
   const [ta] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PROS A', ${`zz-pros-a-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
   const [tb] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PROS B', ${`zz-pros-b-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
+  const [tc] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PROS C', ${`zz-pros-c-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
   const A = ta!.id;
   const B = tb!.id;
+  const C = tc!.id; // clean tenant for promote tests
   const user = `usr_prostest_${stamp}`;
   const inA = <T,>(fn: (tx: Parameters<Parameters<typeof tenantTransaction>[0]>[0]) => Promise<T>) =>
     runWithSystemContext(A, () => tenantTransaction(fn as never)) as Promise<T>;
@@ -572,10 +574,238 @@ async function main() {
       const shree = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Shree Balaji Traders Pvt Ltd', normalizedName: 'shree balaji traders' })));
       check('promote match: exact open lead found past 60 same-word leads', shree.some((x) => x.kind === 'open_lead' && x.label === 'Balaji lead'), shree);
     }
+
+    /* ---------------- promote (Stage 3 Task 2) — clean tenant C ---------------- */
+    {
+      const pr = await import('../src/lib/prospects/promote/promote');
+      const { distributeLead } = await import('../src/lib/lead-capture/distribute');
+      const inC = <T,>(fn: (tx: Parameters<Parameters<typeof tenantTransaction>[0]>[0]) => Promise<T>) =>
+        runWithSystemContext(C, () => tenantTransaction(fn as never)) as Promise<T>;
+      const cMember = { userId: `usr_cmem_${stamp}`, role: 'member' as const };
+      const cOther = { userId: `usr_coth_${stamp}`, role: 'member' as const };
+      const cMgr = { userId: `usr_cmgr_${stamp}`, role: 'manager' as const };
+      const cOwner = { userId: `usr_cown_${stamp}`, role: 'owner' as const };
+      const cGhost = `usr_cghost_${stamp}`;
+      await inC((tx) =>
+        tx.insert(s.memberships).values([
+          { tenantId: C, userId: cMember.userId, role: 'member' },
+          { tenantId: C, userId: cOther.userId, role: 'member' },
+          { tenantId: C, userId: cMgr.userId, role: 'manager' },
+          { tenantId: C, userId: cOwner.userId, role: 'owner' },
+          { tenantId: C, userId: cGhost, role: 'member', status: 'suspended' as never },
+        ] as never),
+      );
+      await db.execute(sql`INSERT INTO users (id, email, first_name, last_name) VALUES (${cMember.userId}, ${`${cMember.userId}@example.test`}, 'Mona', 'Member') ON CONFLICT DO NOTHING`);
+      const events: string[] = [];
+      const sendEvent = (async (name: string) => { events.push(name); }) as never;
+      let distributeCalls = 0;
+      const spyDistribute = ((args: Parameters<typeof distributeLead>[0]) => { distributeCalls++; return distributeLead(args); }) as typeof distributeLead;
+      const deps = { sendEvent, distribute: spyDistribute };
+      const asC = <T,>(uid: string, fn: () => Promise<T>) => runWithTenantContext({ tenantId: C, userId: uid }, fn);
+      const promote = (actor: { userId: string; role: 'member' | 'manager' | 'owner' }, id: string, choice?: Record<string, unknown>, d: Record<string, unknown> = deps) =>
+        asC(actor.userId, () => pr.promoteProspect(C, actor, id, choice as never, undefined, d as never));
+      const [offC] = await inC((tx) => tx.insert(s.offerings).values({ tenantId: C, name: 'Solar Panels', category: s.offeringCategory.enumValues[0] }).returning());
+      const mkC = async (input: Record<string, unknown>, extra: Record<string, unknown> = {}) => {
+        const r = await asC(cMember.userId, () => m.createProspect(C, cMember, { sourceTag: 'expo-26', clusterTags: [], ...input } as never));
+        if (!r.ok) throw new Error(`create failed: ${r.error}`);
+        if (Object.keys(extra).length) await inC((tx) => tx.update(s.prospects).set(extra as never).where(eq(s.prospects.id, r.id)));
+        return r.id;
+      };
+      const prow = async (id: string) => (await inC((tx) => tx.select().from(s.prospects).where(eq(s.prospects.id, id))))[0]!;
+      const dealsFrom = (pid: string) => inC((tx) => tx.select().from(s.deals).where(eq(s.deals.sourceProspectId, pid)));
+      const dealById = async (id: string) => (await inC((tx) => tx.select().from(s.deals).where(eq(s.deals.id, id))))[0];
+      const companiesNamed = (norm: string) => inC((tx) => tx.select().from(s.companies).where(eq(s.companies.normalizedName, norm)));
+      const notesOn = (dealId: string) => inC((tx) => tx.select().from(s.notes).where(eq(s.notes.entityId, dealId)).orderBy(s.notes.createdAt));
+
+      // 1. clean promote: company + contact + lead with every field
+      const pClean = await mkC({
+        companyName: 'Nirvana Polymers', domain: 'https://www.nirvana.in/', industry: 'Plastics',
+        contactName: 'Anil Kumar Mehta', contactDesignation: 'Purchase Head', contactEmail: 'Anil@Nirvana.in', contactPhone: '098450 11111',
+        city: 'Pune', state: 'Maharashtra', productFitOfferingId: offC!.id, notes: 'Met at expo, wants a quote',
+      });
+      await inC((tx) => tx.insert(s.comments).values([
+        { tenantId: C, entityType: 'prospect', entityId: pClean, authorUserId: cMember.userId, body: 'Called, call back Monday' },
+        { tenantId: C, entityType: 'prospect', entityId: pClean, authorUserId: cMember.userId, body: 'Sent brochure' },
+      ]));
+      const o1 = await promote(cMember, pClean);
+      const d1s = await dealsFrom(pClean);
+      const d1 = d1s[0];
+      const co1 = d1?.companyId ? (await inC((tx) => tx.select().from(s.companies).where(eq(s.companies.id, d1.companyId!))))[0] : undefined;
+      const ct1 = d1?.contactId ? (await inC((tx) => tx.select().from(s.contacts).where(eq(s.contacts.id, d1.contactId!))))[0] : undefined;
+      const src1 = d1?.leadSourceId ? (await inC((tx) => tx.select().from(s.leadSources).where(eq(s.leadSources.id, d1.leadSourceId!))))[0] : undefined;
+      const p1 = await prow(pClean);
+      const act1 = d1 ? await inC((tx) => tx.select().from(s.activityLogs).where(eq(s.activityLogs.entityId, d1.id))) : [];
+      check(
+        'promote: clean prospect creates company+contact+lead with all fields',
+        o1.status === 'promoted' && !o1.linked && d1s.length === 1 && o1.dealId === d1!.id &&
+          d1!.stage === 'lead' && d1!.source === 'Prospect Board: expo-26' && d1!.companyNameText === 'Nirvana Polymers' &&
+          d1!.leadCity === 'Pune' && d1!.leadState === 'Maharashtra' && d1!.leadProductInterest === 'Solar Panels' && d1!.sourceProspectId === pClean &&
+          src1?.type === 'prospect_board' && src1?.name === 'Prospect Board' &&
+          co1?.name === 'Nirvana Polymers' && co1?.normalizedName === 'nirvana polymers' && co1?.domain === 'nirvana.in' && co1?.industry === 'Plastics' && co1?.dedupOverride === false &&
+          ct1?.firstName === 'Anil' && ct1?.lastName === 'Kumar Mehta' && ct1?.title === 'Purchase Head' && ct1?.email === 'Anil@Nirvana.in' &&
+          ct1?.emailNormalized === 'anil@nirvana.in' && ct1?.phoneNormalized === '+919845011111' && ct1?.companyId === co1?.id &&
+          p1.promotedDealId === d1!.id && !!p1.promotedAt && p1.promotedBy === cMember.userId &&
+          act1.some((a) => a.action === 'automation_note' && (a.metadata as { message?: string }).message === 'Promoted from Prospect Board'),
+        { o1, d1, co1, ct1, src1, p1: { d: p1.promotedDealId, by: p1.promotedBy }, act1: act1.map((a) => a.action) },
+      );
+      const n1 = d1 ? await notesOn(d1.id) : [];
+      const cmts = n1.filter((n) => n.body.startsWith('Comment by Mona Member on '));
+      check(
+        'promote: notes + comments copied as notes with the prefix',
+        n1.length === 3 && n1.some((n) => n.body === 'Met at expo, wants a quote') && cmts.length === 2 && cmts.some((n) => n.body.endsWith('Called, call back Monday')) && n1.every((n) => n.entityType === 'deal'),
+        n1.map((n) => n.body),
+      );
+      check(
+        'promote: unclaimed → distributeLead called',
+        o1.status === 'promoted' && ['distributed', 'unassigned', 'queued'].includes(o1.routing) && distributeCalls === 1,
+        { o1, distributeCalls },
+      );
+      check('promote: post-commit events fired', events.includes('crm/deal.created') && events.includes('crm/company.created') && events.includes('crm/contact.created'), events);
+
+      // 3. claimed → claimer owns the lead
+      const pClaimed = await mkC({ companyName: 'Claimwell Exports', contactEmail: 'ops@claimwell.in' }, { claimedBy: cOther.userId, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
+      const callsBefore = distributeCalls;
+      const o3 = await promote(cOther, pClaimed);
+      const d3 = o3.status === 'promoted' ? await dealById(o3.dealId) : undefined;
+      const la3 = d3 ? await inC((tx) => tx.select().from(s.leadAssignments).where(eq(s.leadAssignments.dealId, d3.id))) : [];
+      check(
+        'promote: claimed → lead owner is claimer, an open lead_assignments row exists',
+        o3.status === 'promoted' && o3.routing === 'claimer' && d3?.ownerId === cOther.userId && la3.some((a) => a.assignedTo === cOther.userId && a.releasedAt === null) && distributeCalls === callsBefore,
+        { o3, owner: d3?.ownerId, la3 },
+      );
+      // claimer suspended since claiming → falls back to distribution, never to the claimer
+      const pGhost = await mkC({ companyName: 'Ghostline Pumps', contactEmail: 'a@ghostline.in' }, { claimedBy: cGhost, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
+      const oG = await promote(cOwner, pGhost);
+      const dG = oG.status === 'promoted' ? await dealById(oG.dealId) : undefined;
+      check('promote: suspended claimer → distributed instead', oG.status === 'promoted' && oG.routing !== 'claimer' && oG.routing !== 'retry' && dG?.ownerId !== cGhost, { oG, owner: dG?.ownerId });
+
+      // 5. strong match → blocked, nothing written
+      await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Blocker Industries', normalizedName: normalizeCompanyName('Blocker Industries') }));
+      const pBlock = await mkC({ companyName: 'Blocker Industries', contactEmail: 'x@blocker.in' });
+      const coBefore = (await inC((tx) => tx.select({ id: s.companies.id }).from(s.companies))).length;
+      const o5 = await promote(cMember, pBlock);
+      const coAfter = (await inC((tx) => tx.select({ id: s.companies.id }).from(s.companies))).length;
+      check(
+        'promote: strong match → blocked, nothing written',
+        o5.status === 'blocked' && o5.candidates.some((c) => c.kind === 'company' && c.strength === 'strong') && (await dealsFrom(pBlock)).length === 0 && (await prow(pBlock)).promotedDealId === null && coAfter === coBefore,
+        { o5, coBefore, coAfter },
+      );
+
+      // 6. weak only → warn; ignoreWarnings → promoted
+      await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Zentrix Steel', normalizedName: 'zentrix steel' }));
+      const pWeak = await mkC({ companyName: 'Zentrix Engineering', contactEmail: 'hi@zentrix-eng.in' });
+      const o6a = await promote(cMember, pWeak);
+      const o6b = await promote(cMember, pWeak, { ignoreWarnings: true });
+      check(
+        'promote: weak only → warn; with ignoreWarnings → promoted',
+        o6a.status === 'warn' && o6a.candidates.length > 0 && o6a.candidates.every((c) => c.strength === 'weak') && o6b.status === 'promoted' && (await dealsFrom(pWeak)).length === 1,
+        { o6a, o6b },
+      );
+
+      // 7. choose an existing company
+      const [pick] = await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Pickme Traders', normalizedName: 'pickme traders' }).returning());
+      const pPick = await mkC({ companyName: 'Pickme Traders', contactEmail: 'buy@pickme.in' });
+      const o7 = await promote(cMember, pPick, { companyId: pick!.id });
+      const d7 = (await dealsFrom(pPick))[0];
+      check(
+        'promote: choose existing company → deal.company_id = picked, no new company',
+        o7.status === 'promoted' && d7?.companyId === pick!.id && (await companiesNamed('pickme traders')).length === 1,
+        { o7, d7: d7?.companyId },
+      );
+
+      // 8. choose an open lead → linked
+      const [openLead] = await inC((tx) => tx.insert(s.deals).values({ tenantId: C, name: 'Linkup lead', stage: 'lead', companyNameText: 'Linkup Foods' }).returning());
+      const pLink = await mkC({ companyName: 'Linkup Foods', contactEmail: 'l@linkup.in', notes: 'Linked notes' });
+      const nDealsBefore = (await inC((tx) => tx.select({ id: s.deals.id }).from(s.deals))).length;
+      const o8 = await promote(cMember, pLink, { leadId: openLead!.id });
+      const nDealsAfter = (await inC((tx) => tx.select({ id: s.deals.id }).from(s.deals))).length;
+      const n8 = await notesOn(openLead!.id);
+      const a8 = await inC((tx) => tx.select().from(s.activityLogs).where(eq(s.activityLogs.entityId, openLead!.id)));
+      check(
+        'promote: choose open lead → linked, no new deal, promoted_deal_id = that lead',
+        o8.status === 'promoted' && o8.linked && o8.dealId === openLead!.id && nDealsAfter === nDealsBefore && (await prow(pLink)).promotedDealId === openLead!.id &&
+          n8.some((n) => n.body === 'Linked notes') && a8.some((a) => (a.metadata as { message?: string }).message === 'Promoted from Prospect Board'),
+        { o8, nDealsBefore, nDealsAfter, n8: n8.map((n) => n.body) },
+      );
+      // a second prospect cannot link the same lead (promoted_deal_id is unique)
+      const pLink2 = await mkC({ companyName: 'Linkup Foods', contactEmail: 'l2@linkup.in' });
+      const o8b = await promote(cMember, pLink2, { leadId: openLead!.id });
+      check('promote: lead already linked to another prospect → invalid', o8b.status === 'error' && o8b.error === 'invalid' && (await prow(pLink2)).promotedDealId === null, o8b);
+
+      // 9. create anyway
+      await inC((tx) => tx.insert(s.companies).values({ tenantId: C, name: 'Anyway Corp', normalizedName: 'anyway' }));
+      const pAny = await mkC({ companyName: 'Anyway Corp', contactEmail: 'a@anyway.in' });
+      const o9a = await promote(cMember, pAny, { createAnyway: true });
+      const o9b = await promote(cMgr, pAny, { createAnyway: true });
+      const d9 = (await dealsFrom(pAny))[0];
+      const co9 = d9?.companyId ? (await inC((tx) => tx.select().from(s.companies).where(eq(s.companies.id, d9.companyId!))))[0] : undefined;
+      check(
+        'promote: createAnyway by member → no_permission; by manager → promoted with dedup_override',
+        o9a.status === 'error' && o9a.error === 'no_permission' && o9b.status === 'promoted' && co9?.dedupOverride === true && (await companiesNamed('anyway')).length === 2,
+        { o9a, o9b, co9 },
+      );
+
+      // 10. choice not among candidates
+      const pStray = await mkC({ companyName: 'Strayfield Co', contactEmail: 's@strayfield.in' });
+      const o10a = await promote(cMember, pStray, { companyId: pick!.id });
+      const o10b = await promote(cMember, pStray, { contactId: '00000000-0000-0000-0000-000000000000' });
+      check('promote: choice not among candidates → invalid', o10a.status === 'error' && o10a.error === 'invalid' && o10b.status === 'error' && o10b.error === 'invalid' && (await dealsFrom(pStray)).length === 0, { o10a, o10b });
+
+      // 11. concurrent
+      const pRace = await mkC({ companyName: 'Racecourse Mills', contactEmail: 'r@racecourse.in' });
+      const [r1, r2] = await Promise.all([promote(cMember, pRace), promote(cMember, pRace)]);
+      const okN = [r1, r2].filter((r) => r.status === 'promoted').length;
+      const errN = [r1, r2].filter((r) => r.status === 'error' && r.error === 'promoted' && r.message === 'Already promoted to a lead.').length;
+      check('promote: concurrent', okN === 1 && errN === 1 && (await dealsFrom(pRace)).length === 1, { r1, r2 });
+
+      // 12. routing throws
+      const pThrow = await mkC({ companyName: 'Throwaway Ceramics', contactEmail: 't@throwaway.in' });
+      const o12 = await promote(cMember, pThrow, undefined, { sendEvent, distribute: (async () => { throw new Error('distribution down'); }) as never });
+      const d12 = (await dealsFrom(pThrow))[0];
+      check(
+        'promote: routing throws',
+        o12.status === 'promoted' && o12.routing === 'retry' && !!d12 && d12.routingStatus === 'pending' && !!d12.routingQueuedAt && (await prow(pThrow)).promotedDealId === d12.id,
+        { o12, d12: d12 && { rs: d12.routingStatus, q: d12.routingQueuedAt } },
+      );
+      const srcC = await inC((tx) => tx.select().from(s.leadSources).where(eq(s.leadSources.type, 'prospect_board')));
+      check('promote: lead source created once per tenant', srcC.length === 1, srcC.map((x) => x.name));
+
+      // 13. reuse an admin-created prospect_board source (tenant A has one from the schema test)
+      const srcA = await inA((tx) => tx.select().from(s.leadSources).where(eq(s.leadSources.type, 'prospect_board')));
+      const pA = await mk('Qwzx Reuse Source', { contactEmail: 'q@qwzx.in', emailNormalized: 'q@qwzx.in' });
+      const oA = await asA(() => pr.promoteProspect(A, member, pA, undefined, undefined, deps as never));
+      const dA = oA.status === 'promoted' ? (await inA((tx) => tx.select().from(s.deals).where(eq(s.deals.id, oA.dealId))))[0] : undefined;
+      const srcA2 = await inA((tx) => tx.select().from(s.leadSources).where(eq(s.leadSources.type, 'prospect_board')));
+      check('promote: lead source reused when an admin-created prospect_board source exists', srcA.length === 1 && oA.status === 'promoted' && dA?.leadSourceId === srcA[0]!.id && srcA2.length === 1, { oA, src: dA?.leadSourceId, srcA: srcA.map((x) => x.id), n: srcA2.length });
+
+      // manager scope over the claim holder: cOther reports to cMgr, cMember does not
+      await inC((tx) => tx.update(s.memberships).set({ reportsToUserId: cMgr.userId } as never).where(eq(s.memberships.userId, cOther.userId)));
+      const liveClaim = (by: string) => ({ claimedBy: by, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
+      const pOut = await mkC({ companyName: 'Outscope Valves', contactEmail: 'o@outscope.in' }, liveClaim(cMember.userId));
+      const pIn = await mkC({ companyName: 'Inscope Valves', contactEmail: 'i@inscope.in' }, liveClaim(cOther.userId));
+      const oOut = await promote(cMgr, pOut);
+      const oIn = await promote(cMgr, pIn);
+      const dIn = oIn.status === 'promoted' ? await dealById(oIn.dealId) : undefined;
+      check(
+        "promote: manager on out-of-team claim → out_of_scope; in-team → claimer owns it",
+        oOut.status === 'error' && oOut.error === 'out_of_scope' && (await dealsFrom(pOut)).length === 0 && oIn.status === 'promoted' && oIn.routing === 'claimer' && dIn?.ownerId === cOther.userId,
+        { oOut, oIn, owner: dIn?.ownerId },
+      );
+
+      // 14. bulk
+      const bClean = await mkC({ companyName: 'Bulkclean Agro', contactEmail: 'b@bulkclean.in' });
+      const bBlock = await mkC({ companyName: 'Blocker Industries', contactEmail: 'b2@blocker.in' });
+      const bPark = await mkC({ companyName: 'Parkside Tools', contactEmail: 'p@parkside.in' }, { stage: 'parked', parkedReason: 'manual' });
+      const bk = await asC(cMember.userId, () => pr.bulkPromote(C, cMember, [bClean, bBlock, bPark, 'abc'], {}, deps as never));
+      const st = bk.results.map((r) => (r.outcome.status === 'error' ? `error:${r.outcome.error}` : r.outcome.status));
+      check('bulk: mixed', JSON.stringify(st) === JSON.stringify(['promoted', 'blocked', 'error:parked', 'error:not_found']) && bk.results.map((r) => r.id).join() === [bClean, bBlock, bPark, 'abc'].join(), { st, bk });
+      const bkMany = await asC(cMember.userId, () => pr.bulkPromote(C, cMember, Array.from({ length: 101 }, () => bClean), {}, deps as never));
+      check('bulk: over 100 ids → all invalid', bkMany.results.length === 101 && bkMany.results.every((r) => r.outcome.status === 'error' && r.outcome.error === 'invalid'), bkMany.results.length);
+    }
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
-    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B})`);
+    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B}, ${C})`);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
