@@ -19,6 +19,7 @@ export const ACTIVITY_ENTITY_TYPES = [
   'task',
   'note',
   'email',
+  'prospect',
 ] as const;
 export type ActivityEntityType = (typeof ACTIVITY_ENTITY_TYPES)[number];
 

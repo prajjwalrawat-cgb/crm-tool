@@ -15,22 +15,25 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
+import { touchProspectActivity } from '@/lib/prospects/activity';
 import { recordNotificationsSafe } from '@/lib/notifications/recorder';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
-const ENTITY_TYPES = ['deal', 'company', 'contact'] as const;
+const ENTITY_TYPES = ['deal', 'company', 'contact', 'prospect'] as const;
 type EntityType = (typeof ENTITY_TYPES)[number];
 
-const PERMISSION_FOR: Record<EntityType, 'manageDeals' | 'manageCompanies' | 'manageContacts'> = {
+const PERMISSION_FOR: Record<EntityType, 'manageDeals' | 'manageCompanies' | 'manageContacts' | 'manageProspects'> = {
   deal: 'manageDeals',
   company: 'manageCompanies',
   contact: 'manageContacts',
+  prospect: 'manageProspects',
 };
 
 const PATH_FOR: Record<EntityType, (id: string) => string> = {
   deal: (id) => `/dashboard/deals/${id}`,
   company: (id) => `/dashboard/companies/${id}`,
   contact: (id) => `/dashboard/contacts/${id}`,
+  prospect: (id) => `/dashboard/prospects?p=${id}`,
 };
 
 const createSchema = z.object({
@@ -81,6 +84,12 @@ export async function createCommentAction(input: {
       const mentions = extractMentionUserIds(parsed.data.body);
 
       const inserted = await tenantTransaction(async (tx) => {
+        // A comment is prospect activity; promoted/deleted prospects are read-only.
+        if (parsed.data.entityType === 'prospect') {
+          const touched = await touchProspectActivity(tx, tenant.id, parsed.data.entityId);
+          if (touched === 'not_found') return { error: 'Prospect not found.' } as const;
+          if (touched === 'read_only') return { error: 'This prospect is read-only.' } as const;
+        }
         // Normalize threading: replies-to-replies collapse to the
         // top-level ancestor. Keeps the UI's depth==1 promise even
         // if a buggy client sends a deeper parent.
@@ -164,6 +173,8 @@ export async function createCommentAction(input: {
 
         return { row, mentions, preview };
       });
+
+      if ('error' in inserted) return { ok: false, message: inserted.error as string };
 
       // Post-commit, best-effort mention fan-out. Mention failures must
       // never roll back the comment itself.

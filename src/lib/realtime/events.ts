@@ -112,7 +112,7 @@ export type RealtimeEvent =
   | {
       type: 'comment.created';
       tenantId: string;
-      entityType: 'deal' | 'company' | 'contact';
+      entityType: 'deal' | 'company' | 'contact' | 'prospect';
       entityId: string;
       comment: SerializedComment;
     }

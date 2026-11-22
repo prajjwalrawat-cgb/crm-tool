@@ -317,6 +317,36 @@ async function main() {
     const b2 = await mk('Bulk Rel Other', { claimedBy: otherU, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
     const br = await asU(memberU, () => cl.bulkReleaseClaims(A, member, [b1, b2, 'abc']));
     check('bulk release: mixed', br.released.length === 1 && br.released[0] === b1 && JSON.stringify(br.skipped.map((x) => [x.id, x.reason])) === JSON.stringify([[b2, 'claimed_by_other'], ['abc', 'not_found']]) && (await row(b2)).claimedBy === otherU, br);
+
+    /* ---------------- votes + activity touch (Stage 2 Task 3) ---------------- */
+    const vt = await import('../src/lib/prospects/votes');
+    const act = await import('../src/lib/prospects/activity');
+    const viewer = { userId: viewerU, role: 'viewer' as const };
+    const v1 = await mk('Vote Co');
+    const va = await asU(memberU, () => vt.toggleVote(A, member, v1, 'priority'));
+    const vb = await asU(memberU, () => vt.toggleVote(A, member, v1, 'priority'));
+    check('vote: toggle on/off', va.ok && va.voted && va.priority === 1 && vb.ok && !vb.voted && vb.priority === 0, { va, vb });
+    await asU(memberU, () => vt.toggleVote(A, member, v1, 'priority'));
+    const vc = await asU(memberU, () => vt.toggleVote(A, member, v1, 'know_someone'));
+    const vd = await asU(otherU, () => vt.toggleVote(A, other, v1, 'priority'));
+    check('vote: two kinds independent', vc.ok && vc.voted && vc.knowSomeone === 1 && vc.priority === 1 && vd.ok && vd.priority === 2 && vd.knowSomeone === 1, { vc, vd });
+    const vDeal = await inA(async (tx) => (await tx.insert(s.deals).values({ tenantId: A, name: 'Vote deal' }).returning())[0]!.id);
+    const vpro = await mk('Vote Promoted', { promotedDealId: vDeal });
+    const vpr = await asU(memberU, () => vt.toggleVote(A, member, vpro, 'priority'));
+    check('vote: promoted blocked', !vpr.ok && vpr.error === 'promoted', vpr);
+    const vv = await asU(viewerU, () => vt.toggleVote(A, viewer, v1, 'priority'));
+    check('vote: viewer denied', !vv.ok && vv.error === 'no_permission', vv);
+    const vx = await asB(() => vt.toggleVote(B, { userId: 'usr_b', role: 'member' }, v1, 'priority'));
+    check('vote: cross-tenant -> not_found', !vx.ok && vx.error === 'not_found', vx);
+    const tp = await inA((tx) => act.touchProspectActivity(tx, A, vpro));
+    const tdId = await mk('Touch Deleted', { deletedAt: new Date() });
+    const td = await inA((tx) => act.touchProspectActivity(tx, A, tdId));
+    const tn = await inA((tx) => act.touchProspectActivity(tx, A, '00000000-0000-0000-0000-000000000000'));
+    check('touch: read_only for promoted/deleted, not_found for missing', tp === 'read_only' && td === 'read_only' && tn === 'not_found', { tp, td, tn });
+    const tv = await mk('Touch Co', { lastActivityAt: new Date(Date.now() - 10 * DAY) });
+    const lastBefore = (await row(tv)).lastActivityAt!.getTime();
+    const trr = await inA((tx) => act.touchProspectActivity(tx, A, tv));
+    check('touch: bumps last_activity_at', trr === 'ok' && (await row(tv)).lastActivityAt!.getTime() > lastBefore + DAY, trr);
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {

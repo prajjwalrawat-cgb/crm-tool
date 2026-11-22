@@ -85,6 +85,8 @@ function notificationHref(n: NotificationItem): string | null {
       return `/dashboard/companies`;
     case 'contact':
       return `/dashboard/contacts`;
+    case 'prospect':
+      return `/dashboard/prospects?p=${n.entityId}`;
     case 'workflow':
       return `/dashboard/workflows`;
     default:

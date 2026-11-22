@@ -117,6 +117,14 @@ async function main() {
         process.exitCode = 1;
         return;
       }
+      // Comments are not FK-cascaded from prospects, so remove the seeded ones first.
+      await inTenant((tx) =>
+        tx.delete(s.comments).where(and(
+          eq(s.comments.tenantId, tenantId),
+          eq(s.comments.entityType, 'prospect'),
+          inArray(s.comments.entityId, existing.map((e) => e.id)),
+        )),
+      );
       await inTenant((tx) =>
         tx.delete(s.prospects).where(and(eq(s.prospects.tenantId, tenantId), inArray(s.prospects.sourceTag, [...SOURCES]))),
       );
@@ -175,7 +183,39 @@ async function main() {
       }
     });
 
-    console.log(`Seeded ${created.length} prospects, ${claimable.length} claimed, ${votable.length} with votes.`);
+    // Comments: 2-3 on about 5 prospects; one per prospect mentions another member.
+    const names = await inTenant((tx) =>
+      tx.select({ id: s.users.id, first: s.users.firstName, last: s.users.lastName }).from(s.users)
+        .where(inArray(s.users.id, members.map((x) => x.userId))),
+    );
+    const nameOf = (uid: string) => {
+      const u = names.find((n) => n.id === uid);
+      return [u?.first, u?.last].filter(Boolean).join(' ').trim() || 'Teammate';
+    };
+    const SNIPPETS = [
+      'Spoke to their procurement team, looks promising.',
+      'Decision maker confirmed; needs a demo next week.',
+      'Budget cycle starts in Q1, worth keeping warm.',
+    ];
+    const commented = created.filter((_, i) => i % 6 === 1).slice(0, 5);
+    const commentRows: Array<typeof s.comments.$inferInsert> = [];
+    commented.forEach((pr, i) => {
+      const n = 2 + (i % 2);
+      for (let k = 0; k < n; k++) {
+        const author = members[(i + k) % members.length]!.userId;
+        const peer = members.find((x) => x.userId !== author);
+        const mention = k === 0 && peer ? ` @[${nameOf(peer.userId)}](${peer.userId}) can you take a look?` : '';
+        commentRows.push({
+          tenantId, entityType: 'prospect', entityId: pr.id, authorUserId: author,
+          body: `${SNIPPETS[(i + k) % SNIPPETS.length]}${mention}`,
+          mentionedUserIds: mention && peer ? [peer.userId] : [],
+          createdAt: new Date(now - (n - k) * 3_600_000 * (i + 1)),
+        });
+      }
+    });
+    await inTenant((tx) => tx.insert(s.comments).values(commentRows));
+
+    console.log(`Seeded ${created.length} prospects, ${claimable.length} claimed, ${votable.length} with votes, ${commentRows.length} comments on ${commented.length} prospects.`);
   } finally {
     await client.end({ timeout: 5 });
   }
