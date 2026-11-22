@@ -102,6 +102,24 @@ export async function getProspect(tenantId: string, id: string): Promise<Prospec
   });
 }
 
+/** Real vote totals for one prospect (not derived from the possibly-absent board card). */
+export async function getVoteCounts(
+  tenantId: string,
+  prospectId: string,
+): Promise<{ knowSomeone: number; priority: number }> {
+  if (!UUID_RE.test(prospectId)) return { knowSomeone: 0, priority: 0 };
+  return tenantTransaction(async (tx) => {
+    const rows = await tx
+      .select({ kind: prospectVotes.kind })
+      .from(prospectVotes)
+      .where(and(eq(prospectVotes.tenantId, tenantId), eq(prospectVotes.prospectId, prospectId)));
+    return {
+      knowSomeone: rows.filter((r) => r.kind === 'know_someone').length,
+      priority: rows.filter((r) => r.kind === 'priority').length,
+    };
+  });
+}
+
 /** Which vote kinds the viewer has cast on one prospect. */
 export async function listMyVotes(
   tenantId: string,

@@ -35,8 +35,8 @@ type Props = {
   reassignScope: string[] | null;
   comments: Comment[];
   authorLookup: Record<string, string>;
-  /** Votes on this prospect, from the board card (null when filtered off the board). */
-  voteCounts: { knowSomeone: number; priority: number } | null;
+  /** Real vote totals for this prospect, loaded by the page. */
+  voteCounts: { knowSomeone: number; priority: number };
   onClose: () => void;
 };
 
@@ -113,8 +113,9 @@ export function ProspectDrawer({
 
         <VoteButtons
           prospectId={prospect.id}
-          knowSomeone={voteCounts?.knowSomeone ?? 0}
-          priority={voteCounts?.priority ?? 0}
+          key={`${voteCounts.knowSomeone}:${voteCounts.priority}:${myVotes.knowSomeone}:${myVotes.priority}`}
+          knowSomeone={voteCounts.knowSomeone}
+          priority={voteCounts.priority}
           myVotes={myVotes}
           disabledReason={disabledReason}
         />

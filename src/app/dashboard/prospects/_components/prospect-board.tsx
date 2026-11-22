@@ -51,6 +51,7 @@ type Props = {
   /** Users the viewer may reassign claims to; null means everyone. */
   reassignScope: string[] | null;
   myVotes: { knowSomeone: boolean; priority: boolean };
+  voteCounts: { knowSomeone: number; priority: number };
   openComments: Comment[];
   authorLookup: Record<string, string>;
   /** The prospect named by `?p=`, when it exists. */
@@ -97,6 +98,7 @@ export function ProspectBoard({
   tenantId,
   reassignScope,
   myVotes,
+  voteCounts,
   openComments,
   authorLookup,
   openProspect,
@@ -244,8 +246,6 @@ export function ProspectBoard({
     });
   }
 
-  const openBoardCard = openProspect ? cards.find((c) => c.id === openProspect.id) : undefined;
-
   return (
     <div className="flex flex-1 flex-col">
       <BoardToolbar
@@ -337,7 +337,7 @@ export function ProspectBoard({
           reassignScope={reassignScope}
           comments={openComments}
           authorLookup={authorLookup}
-          voteCounts={openBoardCard ? { knowSomeone: openBoardCard.votesKnowSomeone, priority: openBoardCard.votesPriority } : null}
+          voteCounts={voteCounts}
           onClose={closeCard}
         />
       ) : null}

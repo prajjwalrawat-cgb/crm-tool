@@ -4,6 +4,7 @@ import { requireMembership } from '@/lib/membership';
 import { listOfferingOptions } from '@/lib/offerings/queries';
 import {
   getProspect,
+  getVoteCounts,
   listMyVotes,
   listProspectsForBoard,
   listProspectStageHistory,
@@ -28,17 +29,24 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
     const sp = await searchParams;
     const filters = parseProspectFilters(sp);
     const p = Array.isArray(sp.p) ? sp.p[0] : sp.p;
-    const [{ cards, truncated }, sourceTags, teammates, offerings, openProspect, openHistory, openComments, myVotes, scope] = await Promise.all([
+    const [{ cards, truncated }, sourceTags, teammates, offerings, openProspect, openHistory] = await Promise.all([
       listProspectsForBoard(tenant.id, userId, filters),
       listSourceTags(tenant.id),
       listTeammates(tenant.id, tenant.name),
       listOfferingOptions(tenant.id, { activeOnly: true }),
       p ? getProspect(tenant.id, p) : Promise.resolve(null),
       p ? listProspectStageHistory(tenant.id, p) : Promise.resolve([]),
-      p ? listCommentsForEntity(tenant.id, 'prospect', p, { limit: 200 }) : Promise.resolve([]),
-      p ? listMyVotes(tenant.id, userId, p) : Promise.resolve({ knowSomeone: false, priority: false }),
-      scopeUsers({ tenantId: tenant.id, userId, role: membership.role }),
     ]);
+
+    // Only after the prospect is known to exist (getProspect UUID-guards `p`).
+    const [openComments, myVotes, voteCounts, scope] = openProspect
+      ? await Promise.all([
+          listCommentsForEntity(tenant.id, 'prospect', openProspect.id, { limit: 200 }),
+          listMyVotes(tenant.id, userId, openProspect.id),
+          getVoteCounts(tenant.id, openProspect.id),
+          scopeUsers({ tenantId: tenant.id, userId, role: membership.role }),
+        ])
+      : [[], { knowSomeone: false, priority: false }, { knowSomeone: 0, priority: 0 }, null];
 
     const authorIds = new Set<string>();
     for (const c of openComments) {
@@ -66,7 +74,8 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
           role={membership.role}
           currentUserId={userId}
           tenantId={tenant.id}
-          reassignScope={scope.userIds}
+          reassignScope={scope ? scope.userIds : null}
+          voteCounts={voteCounts}
           myVotes={myVotes}
           openComments={openComments}
           authorLookup={authorLookup}
