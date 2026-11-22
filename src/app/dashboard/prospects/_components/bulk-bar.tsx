@@ -11,7 +11,8 @@ import { PROSPECT_STAGES } from '@/lib/prospects/rules';
 
 import { STAGE_LABELS } from './prospect-column';
 
-export type PromoteResults = { id: string; outcome: PromoteOutcome }[];
+/** `name` is snapshotted before the call: promoted cards leave the board on revalidate. */
+export type PromoteResults = { id: string; name?: string; outcome: PromoteOutcome }[];
 
 export type BulkResult = { label: string; moved: number; skipped: { id: string; reason: string }[] };
 
@@ -154,9 +155,9 @@ export function BulkBar({ count, canPark, canRelease, canPromote, busy, result, 
             </button>
           </div>
           <ul className="mt-1 max-h-48 space-y-0.5 overflow-y-auto text-[12px] text-slate-700">
-            {promoteResults.map(({ id, outcome }) => (
+            {promoteResults.map(({ id, name, outcome }) => (
               <li key={id} className="flex items-center gap-2">
-                <span className="font-medium">{names.get(id) ?? id}</span>
+                <span className="font-medium">{name ?? names.get(id) ?? 'Prospect'}</span>
                 {outcome.status === 'promoted' ? (
                   <>
                     <span className="text-slate-500">{outcome.linked ? 'Linked to the existing lead' : 'Promoted'}</span>

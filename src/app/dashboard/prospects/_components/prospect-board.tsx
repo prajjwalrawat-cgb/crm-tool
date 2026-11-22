@@ -268,6 +268,8 @@ export function ProspectBoard({
     setError(null);
     setBulkResult(null);
     setPromoteResults(null);
+    // Snapshot names now: promoted cards drop out of `cards` once the page revalidates.
+    const nameSnapshot = new Map(ids.map((id) => [id, names.get(id)]));
     startTransition(async () => {
       const result = await bulkPromoteAction(ids, ignoreWarnings);
       setBulkBusy(false);
@@ -275,7 +277,7 @@ export function ProspectBoard({
         setError(result.message);
         return;
       }
-      setPromoteResults(result.data?.results ?? []);
+      setPromoteResults((result.data?.results ?? []).map((r) => ({ ...r, name: nameSnapshot.get(r.id) })));
       setSelected(new Set());
     });
   }
