@@ -293,6 +293,26 @@ async function main() {
     const rin = await asU(mgrU, () => cl.reassignClaim(A, mgr, k4, otherU));
     check('reassign: manager out of scope', !ros.ok && ros.error === 'out_of_scope' && rin.ok, { ros, rin });
 
+    // Team scope over the CURRENT holder: mgr's team is {mgr, other}; member is outside it.
+    const viewerU = `usr_viewer_${stamp}`;
+    await inA((tx) => tx.insert(s.memberships).values({ tenantId: A, userId: viewerU, role: 'viewer' } as never));
+    const held = (by: string) => ({ claimedBy: by, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
+    const o1 = await mk('Scope Out Release', held(memberU));
+    const ro1 = await asU(mgrU, () => cl.releaseProspect(A, mgr, o1));
+    check("release: manager on out-of-team rep's claim -> out_of_scope", !ro1.ok && ro1.error === 'out_of_scope' && (await row(o1)).claimedBy === memberU, ro1);
+    const o1b = await asU(ownerU, () => cl.releaseProspect(A, owner, o1));
+    check("release: owner on any claim", o1b.ok, o1b);
+    const o2 = await mk('Scope Out Reassign', held(memberU));
+    const ro2 = await asU(mgrU, () => cl.reassignClaim(A, mgr, o2, otherU));
+    check('reassign: holder out of team -> out_of_scope', !ro2.ok && ro2.error === 'out_of_scope' && (await row(o2)).claimedBy === memberU, ro2);
+    const o3 = await mk('Scope In Bulk', held(otherU));
+    const o4 = await mk('Scope Out Bulk', held(memberU));
+    const bo = await asU(mgrU, () => cl.bulkReleaseClaims(A, mgr, [o3, o4]));
+    check('bulk release: manager mixes in-team and out-of-team', bo.released.length === 1 && bo.released[0] === o3 && bo.skipped.length === 1 && bo.skipped[0]!.id === o4 && bo.skipped[0]!.reason === 'out_of_scope', bo);
+    const o5 = await mk('Viewer Target');
+    const rv = await asU(ownerU, () => cl.reassignClaim(A, owner, o5, viewerU));
+    check('reassign: viewer target -> no_permission', !rv.ok && rv.error === 'no_permission' && rv.message === "That person can't claim prospects." && (await row(o5)).claimedBy === null, rv);
+
     const b1 = await mk('Bulk Rel Own', { claimedBy: memberU, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
     const b2 = await mk('Bulk Rel Other', { claimedBy: otherU, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
     const br = await asU(memberU, () => cl.bulkReleaseClaims(A, member, [b1, b2, 'abc']));

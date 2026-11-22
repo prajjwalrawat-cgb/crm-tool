@@ -152,7 +152,7 @@ export function releaseBlock(
   if (p.deletedAt) return 'deleted';
   if (p.promotedDealId) return 'promoted';
   if (!isClaimActive(p, now)) return 'not_claimed';
-  if (p.claimedBy !== actor.userId && !isManagerRole(actor.role)) return 'claimed_by_other';
+  if (p.claimedBy !== actor.userId && !can(actor.role, 'manageProspectClaims')) return 'claimed_by_other';
   return null;
 }
 

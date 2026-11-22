@@ -31,9 +31,10 @@ export const MESSAGES = {
   no_permission: 'You do not have permission.',
   not_claimed: 'Not claimed.',
   out_of_scope: 'That person is outside your team.',
+  cannot_claim: "That person can't claim prospects.",
 } as const;
 
-export const fail = (error: keyof typeof MESSAGES): MutationResult => ({ ok: false, error, message: MESSAGES[error] });
+export const fail = (error: Exclude<keyof typeof MESSAGES, 'cannot_claim'>): MutationResult => ({ ok: false, error, message: MESSAGES[error] });
 
 export const MAX_BULK = 500;
 
