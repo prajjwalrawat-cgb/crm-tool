@@ -347,6 +347,25 @@ async function main() {
     const lastBefore = (await row(tv)).lastActivityAt!.getTime();
     const trr = await inA((tx) => act.touchProspectActivity(tx, A, tv));
     check('touch: bumps last_activity_at', trr === 'ok' && (await row(tv)).lastActivityAt!.getTime() > lastBefore + DAY, trr);
+    // Mirrors updateCommentAction/deleteCommentAction: touch first, write only when 'ok', same transaction.
+    const editComment = (pid: string, cid: string, body: string) =>
+      inA(async (tx) => {
+        const r = await act.touchProspectActivity(tx, A, pid);
+        if (r === 'ok') await tx.update(s.comments).set({ body }).where(eq(s.comments.id, cid));
+        return r;
+      });
+    const mkComment = async (pid: string) =>
+      (await inA((tx) => tx.insert(s.comments).values({ tenantId: A, entityType: 'prospect', entityId: pid, authorUserId: memberU, body: 'orig' }).returning()))[0]!.id;
+    const cmtP = await mkComment(vpro);
+    const er = await editComment(vpro, cmtP, 'changed');
+    const cBody = (await inA((tx) => tx.select().from(s.comments).where(eq(s.comments.id, cmtP))))[0]!.body;
+    check('touch: comment edit on promoted -> read_only, comment unchanged', er === 'read_only' && cBody === 'orig', { er, cBody });
+    const actv = await mk('Edit Active', { lastActivityAt: new Date(Date.now() - 10 * DAY) });
+    const cmtA = await mkComment(actv);
+    const lastBefore2 = (await row(actv)).lastActivityAt!.getTime();
+    const ea = await editComment(actv, cmtA, 'changed');
+    const cBody2 = (await inA((tx) => tx.select().from(s.comments).where(eq(s.comments.id, cmtA))))[0]!.body;
+    check('touch: edit on active prospect bumps last_activity_at', ea === 'ok' && cBody2 === 'changed' && (await row(actv)).lastActivityAt!.getTime() > lastBefore2 + DAY, { ea, cBody2 });
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {

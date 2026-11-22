@@ -15,7 +15,7 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
-import { touchProspectActivity } from '@/lib/prospects/activity';
+import { PROSPECT_TOUCH_MESSAGE, touchProspectActivity } from '@/lib/prospects/activity';
 import { recordNotificationsSafe } from '@/lib/notifications/recorder';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 
@@ -87,8 +87,7 @@ export async function createCommentAction(input: {
         // A comment is prospect activity; promoted/deleted prospects are read-only.
         if (parsed.data.entityType === 'prospect') {
           const touched = await touchProspectActivity(tx, tenant.id, parsed.data.entityId);
-          if (touched === 'not_found') return { error: 'Prospect not found.' } as const;
-          if (touched === 'read_only') return { error: 'This prospect is read-only.' } as const;
+          if (touched !== 'ok') return { error: PROSPECT_TOUCH_MESSAGE[touched] } as const;
         }
         // Normalize threading: replies-to-replies collapse to the
         // top-level ancestor. Keeps the UI's depth==1 promise even
@@ -235,8 +234,15 @@ export async function updateCommentAction(input: {
         return { ok: false, message: 'You can only edit your own comments.' };
       }
 
+      const entityGate = await checkPermission(PERMISSION_FOR[c.entityType as EntityType]);
+      if (!entityGate.ok) return { ok: false, message: entityGate.message };
+
       const mentions = extractMentionUserIds(parsed.data.body);
       const updated = await tenantTransaction(async (tx) => {
+        if (c.entityType === 'prospect') {
+          const touched = await touchProspectActivity(tx, tenant.id, c.entityId);
+          if (touched !== 'ok') return { error: PROSPECT_TOUCH_MESSAGE[touched] };
+        }
         const [row] = await tx
           .update(comments)
           .set({
@@ -250,6 +256,7 @@ export async function updateCommentAction(input: {
         return row;
       });
 
+      if ('error' in updated) return { ok: false, message: updated.error };
       revalidatePath(
         PATH_FOR[c.entityType as EntityType](c.entityId),
       );
@@ -290,12 +297,21 @@ export async function deleteCommentAction(
         return { ok: false, message: 'You can only delete your own comments.' };
       }
 
-      await tenantTransaction(async (tx) => {
+      const entityGate = await checkPermission(PERMISSION_FOR[c.entityType as EntityType]);
+      if (!entityGate.ok) return { ok: false, message: entityGate.message };
+
+      const blocked = await tenantTransaction(async (tx) => {
+        if (c.entityType === 'prospect') {
+          const touched = await touchProspectActivity(tx, tenant.id, c.entityId);
+          if (touched !== 'ok') return PROSPECT_TOUCH_MESSAGE[touched];
+        }
         await tx
           .update(comments)
           .set({ deletedAt: new Date(), deletedBy: membership.userId })
           .where(eq(comments.id, parsed.data.id));
+        return null;
       });
+      if (blocked) return { ok: false, message: blocked };
 
       revalidatePath(
         PATH_FOR[c.entityType as EntityType](c.entityId),
