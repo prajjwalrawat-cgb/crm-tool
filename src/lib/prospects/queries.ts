@@ -14,7 +14,7 @@ import { tenantTransaction } from '@/lib/db-context';
 
 import type { ProspectCard, ProspectFilters } from './rules';
 
-const BOARD_LIMIT = 1000;
+export const BOARD_LIMIT = 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -24,7 +24,8 @@ export async function listProspectsForBoard(
   tenantId: string,
   viewerId: string,
   f: ProspectFilters,
-): Promise<ProspectCard[]> {
+  limit: number = BOARD_LIMIT,
+): Promise<{ cards: ProspectCard[]; truncated: boolean }> {
   return tenantTransaction(async (tx) => {
     const votes = tx
       .select({
@@ -76,14 +77,16 @@ export async function listProspectsForBoard(
       .leftJoin(votes, eq(votes.prospectId, prospects.id))
       .where(and(...conds))
       .orderBy(desc(prospects.lastActivityAt))
-      .limit(BOARD_LIMIT);
+      .limit(limit + 1);
 
-    return rows.map(({ know, prio, ...r }) => ({
+    const truncated = rows.length > limit;
+    const cards = rows.slice(0, limit).map(({ know, prio, ...r }) => ({
       ...r,
       productFitName: r.productFitName ?? null,
       votesKnowSomeone: know ?? 0,
       votesPriority: prio ?? 0,
     }));
+    return { cards, truncated };
   });
 }
 

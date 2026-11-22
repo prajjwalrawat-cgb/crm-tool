@@ -24,7 +24,7 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
     const sp = await searchParams;
     const filters = parseProspectFilters(sp);
     const p = Array.isArray(sp.p) ? sp.p[0] : sp.p;
-    const [cards, sourceTags, teammates, offerings, openProspect, openHistory] = await Promise.all([
+    const [{ cards, truncated }, sourceTags, teammates, offerings, openProspect, openHistory] = await Promise.all([
       listProspectsForBoard(tenant.id, userId, filters),
       listSourceTags(tenant.id),
       listTeammates(tenant.id, tenant.name),
@@ -44,6 +44,7 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
 
         <ProspectBoard
           cards={cards}
+          truncated={truncated}
           filters={filters}
           sourceTags={sourceTags}
           teammates={teammates}

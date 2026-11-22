@@ -191,12 +191,18 @@ export type ProspectCard = {
 
 const NONE = { key: '__none', label: 'None' } as const;
 
+/** Key by trimmed lowercase; label is this card's trimmed spelling (callers keep the first-seen lane label). */
+function caseInsensitiveLane(value: string | null): { key: string; label: string } {
+  const label = value?.trim();
+  return label ? { key: label.toLowerCase(), label } : NONE;
+}
+
 export function groupKeyOf(card: ProspectCard, by: GroupByKey): { key: string; label: string } {
   switch (by) {
     case 'industry':
-      return card.industry ? { key: card.industry, label: card.industry } : NONE;
+      return caseInsensitiveLane(card.industry);
     case 'source_tag':
-      return card.sourceTag ? { key: card.sourceTag, label: card.sourceTag } : NONE;
+      return caseInsensitiveLane(card.sourceTag);
     case 'product_fit':
       return card.productFitOfferingId
         ? { key: card.productFitOfferingId, label: card.productFitName ?? 'Unknown offering' }

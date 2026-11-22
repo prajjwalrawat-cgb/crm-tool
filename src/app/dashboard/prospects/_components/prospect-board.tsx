@@ -38,6 +38,8 @@ import { ProspectColumn } from './prospect-column';
 
 type Props = {
   cards: ProspectCard[];
+  /** More prospects matched than the board loads. */
+  truncated: boolean;
   filters: ProspectFilters;
   sourceTags: string[];
   teammates: Teammate[];
@@ -79,6 +81,7 @@ const collisionDetection: CollisionDetection = (args) => {
 
 export function ProspectBoard({
   cards: serverCards,
+  truncated,
   filters,
   sourceTags,
   teammates,
@@ -218,6 +221,12 @@ export function ProspectBoard({
         onChange={writeFilters}
         actions={interactive ? <NewProspectButton offerings={offerings} sourceTags={sourceTags} /> : null}
       />
+
+      {truncated ? (
+        <p role="status" className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Showing the 1,000 most recently active prospects. Use filters to narrow the board.
+        </p>
+      ) : null}
 
       {error ? (
         <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">

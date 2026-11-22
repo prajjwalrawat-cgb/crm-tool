@@ -173,7 +173,7 @@ async function main() {
     const lo = await mk('Filter Other', { sourceTag: 'src-y', claimedBy: otherU, createdBy: otherU, stage: 'qualified' });
     const deal2 = await inA(async (tx) => (await tx.insert(s.deals).values({ tenantId: A, name: 'Second' }).returning())[0]!.id);
     const lp = await mk('Filter Promoted', { sourceTag: 'src-x', promotedDealId: deal2 });
-    const ids = async (f: Record<string, unknown>) => (await asA(() => q.listProspectsForBoard(A, memberU, f as never))).map((c) => c.id);
+    const ids = async (f: Record<string, unknown>) => (await asA(() => q.listProspectsForBoard(A, memberU, f as never))).cards.map((c) => c.id);
     const mine = await ids({ mine: true });
     check('list: mine', mine.includes(lf) && mine.includes(lu) && !mine.includes(lo), mine.length);
     const uncl = await ids({ unclaimed: true });
@@ -196,8 +196,14 @@ async function main() {
         { tenantId: A, prospectId: vp, userId: 'v1', kind: 'know_someone' },
       ]),
     );
-    const card = (await asA(() => q.listProspectsForBoard(A, memberU, {}))).find((c) => c.id === vp);
+    const card = (await asA(() => q.listProspectsForBoard(A, memberU, {}))).cards.find((c) => c.id === vp);
     check('list: vote counts', card?.votesPriority === 2 && card?.votesKnowSomeone === 1, card);
+
+    for (const n of ['Trunc 1', 'Trunc 2', 'Trunc 3', 'Trunc 4']) await mk(n, { sourceTag: 'src-trunc' });
+    const tr = await asA(() => q.listProspectsForBoard(A, memberU, { source: 'src-trunc' } as never, 3));
+    check('list: truncated flag', tr.truncated === true && tr.cards.length === 3, { truncated: tr.truncated, n: tr.cards.length });
+    const tr2 = await asA(() => q.listProspectsForBoard(A, memberU, { source: 'src-trunc' } as never, 4));
+    check('list: not truncated at exact limit', tr2.truncated === false && tr2.cards.length === 4, { truncated: tr2.truncated, n: tr2.cards.length });
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {

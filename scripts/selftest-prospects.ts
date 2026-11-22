@@ -75,6 +75,8 @@ const card = (o: Partial<ProspectCard>): ProspectCard => ({
   promotedDealId: null, lastActivityAt: new Date(), ...o,
 });
 check('group: null industry -> None lane', groupKeyOf(card({}), 'industry').key === '__none' && groupKeyOf(card({}), 'industry').label === 'None');
+check('group: industry case-insensitive', groupKeyOf(card({ industry: 'Textiles' }), 'industry').key === groupKeyOf(card({ industry: 'textiles ' }), 'industry').key && groupKeyOf(card({ industry: ' Textiles ' }), 'industry').label === 'Textiles');
+check('group: source_tag case-insensitive', groupKeyOf(card({ sourceTag: 'Expo' }), 'source_tag').key === groupKeyOf(card({ sourceTag: 'expo' }), 'source_tag').key);
 check('group: territory', groupKeyOf(card({ state: 'MH', city: 'Pune' }), 'territory').label === 'MH · Pune', groupKeyOf(card({ state: 'MH', city: 'Pune' }), 'territory'));
 check('group: product_fit', groupKeyOf(card({ productFitOfferingId: 'o1', productFitName: 'CRM' }), 'product_fit').label === 'CRM');
 
