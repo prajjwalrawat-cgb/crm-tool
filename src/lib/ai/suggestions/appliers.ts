@@ -9,10 +9,11 @@ import { createTaskAction } from '@/app/dashboard/tasks/actions';
 import { calls, type FollowUpValue } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
+import { prospectAppliers } from './prospect-appliers';
 import type { ApplyResult, Appliers } from './service';
 
 /**
- * The ONLY way an accepted suggestion reaches a deal or contact: the same
+ * The ONLY way an accepted suggestion reaches a deal, contact or prospect: the same
  * server actions a user's manual edit calls. They read the session (the
  * accepting user), check permissions, enforce stage gates / governance /
  * validation, and write the normal audit rows. Nothing here writes a deal or
@@ -20,8 +21,6 @@ import type { ApplyResult, Appliers } from './service';
  */
 
 const dealId = (s: { entityType: string; entityId: string }) => s.entityId;
-
-const notAvailableYet = async (): Promise<ApplyResult> => ({ ok: false, message: 'Not available yet.' });
 
 function stageHint(r: Awaited<ReturnType<typeof updateDealStageAction>>): string {
   if (r.ok) return '';
@@ -98,10 +97,6 @@ export const defaultAppliers: Appliers = {
     }
     return { ok: true };
   },
-  // Prospect enrichment fields (0079). Stubs until the prospect appliers land
-  // (Stage 3 Task 7), which will go through updateProspect as the accepting user.
-  industry: notAvailableYet,
-  size_band: notAvailableYet,
-  product_fit: notAvailableYet,
-  icp_score: notAvailableYet,
+  // Prospect enrichment fields (0079): updateProspect as the accepting user.
+  ...prospectAppliers,
 };

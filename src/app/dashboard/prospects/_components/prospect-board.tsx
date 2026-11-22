@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 
 import type { Comment, MembershipRole, Prospect, ProspectStage } from '@/db/schema';
+import type { SuggestionView } from '@/lib/ai/suggestions/view';
 import {
   groupKeyOf,
   PROSPECT_STAGES,
@@ -59,6 +60,8 @@ type Props = {
   /** The prospect named by `?p=`, when it exists. */
   openProspect: Prospect | null;
   openHistory: StageHistoryEntry[];
+  /** Pending AI suggestions on the open prospect the viewer may review. */
+  openSuggestions: SuggestionView[];
   /** The open prospect's claim holder is within the viewer's team scope. */
   holderInScope: boolean;
 };
@@ -107,6 +110,7 @@ export function ProspectBoard({
   authorLookup,
   openProspect,
   openHistory,
+  openSuggestions,
   holderInScope,
 }: Props) {
   const router = useRouter();
@@ -373,6 +377,7 @@ export function ProspectBoard({
           holderInScope={holderInScope}
           prospect={openProspect}
           history={openHistory}
+          suggestions={openSuggestions}
           teammates={teammates}
           offerings={offerings}
           sourceTags={sourceTags}

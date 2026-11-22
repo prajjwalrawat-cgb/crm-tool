@@ -1,9 +1,11 @@
 'use client';
 
+import { Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import type { Comment, MembershipRole, Prospect, ProspectStage } from '@/db/schema';
+import { LOW_CONFIDENCE, type SuggestionView } from '@/lib/ai/suggestions/view';
 import { promoteBlock } from '@/lib/prospects/promote/rules';
 import { editBlock } from '@/lib/prospects/rules';
 import { can } from '@/lib/rbac';
@@ -11,6 +13,7 @@ import type { Teammate } from '@/lib/teammates/queries';
 
 import { CommentsThread } from '../../_components/comments-thread';
 import { Drawer } from '../../_components/drawer';
+import { SuggestionItem } from '../../suggestions/_components/suggestion-item';
 import { ClaimPanel } from './claim-panel';
 import { STAGE_LABELS } from './prospect-column';
 import { PromoteDialog, type PromoteSeed } from './promote-dialog';
@@ -27,6 +30,8 @@ export type StageHistoryEntry = {
 type Props = {
   prospect: Prospect;
   history: StageHistoryEntry[];
+  /** Pending AI suggestions on this prospect that the viewer may review. */
+  suggestions: SuggestionView[];
   teammates: Teammate[];
   offerings: { id: string; name: string }[];
   sourceTags: string[];
@@ -53,6 +58,7 @@ const fmt = (d: Date | string) => new Date(d).toLocaleString('en-IN', { dateStyl
 export function ProspectDrawer({
   prospect,
   history,
+  suggestions,
   teammates,
   offerings,
   sourceTags,
@@ -161,6 +167,8 @@ export function ProspectDrawer({
           onSaved={() => undefined}
         />
 
+        {suggestions.length > 0 ? <ProspectSuggestions suggestions={suggestions} /> : null}
+
         <ClaimPanel
           key={prospect.id}
           prospect={prospect}
@@ -231,5 +239,47 @@ export function ProspectDrawer({
           )}
         </section>
     </Drawer>
+  );
+}
+
+/**
+ * "AI suggestions" for the open prospect: enrichment proposals, each with
+ * Accept / Edit / Reject (the review queue's own item and actions). Accepting
+ * goes through updateProspect as this user, so a read-only prospect refuses.
+ */
+function ProspectSuggestions({ suggestions }: { suggestions: SuggestionView[] }) {
+  const strong = suggestions.filter((v) => v.confidence >= LOW_CONFIDENCE);
+  const weak = suggestions.filter((v) => v.confidence < LOW_CONFIDENCE);
+  return (
+    <section className="mt-6 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3" aria-labelledby="prospect-ai-suggestions-h">
+      <div className="mb-2 flex items-center gap-1.5">
+        <Sparkles className="h-4 w-4 text-indigo-500" aria-hidden />
+        <h3 id="prospect-ai-suggestions-h" className="text-[13px] font-semibold text-slate-900">
+          AI suggestions
+        </h3>
+        <span className="rounded-full bg-indigo-100 px-1.5 text-[11px] font-medium text-indigo-700">{suggestions.length}</span>
+        <Link href="/dashboard/suggestions" className="ml-auto text-[11px] text-indigo-600 hover:underline">
+          Review queue
+        </Link>
+      </div>
+      <p className="mb-2 text-[11px] text-slate-500">Nothing changes until you accept.</p>
+      <ul className="space-y-2">
+        {strong.map((s) => (
+          <SuggestionItem key={s.id} s={s} />
+        ))}
+      </ul>
+      {weak.length ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[11px] font-medium text-slate-500 hover:text-slate-800">
+            {weak.length} low-confidence suggestion{weak.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {weak.map((s) => (
+              <SuggestionItem key={s.id} s={s} />
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </section>
   );
 }

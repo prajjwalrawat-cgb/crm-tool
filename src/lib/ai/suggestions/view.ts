@@ -33,6 +33,10 @@ export type SuggestionView = {
   sourceHref: string | null;
   createdAt: string;
   model: string;
+  /** product_fit: offering id -> name, resolved on the server. */
+  valueLabels: Record<string, string> | null;
+  /** product_fit: the tenant's active offerings, for Edit. */
+  options: Array<{ value: string; label: string }> | null;
 };
 
 /** Below this, an item is collapsed by default. */
@@ -53,6 +57,8 @@ export function toSuggestionView(r: {
   sourceId: string;
   createdAt: Date;
   model: string;
+  valueLabels?: Record<string, string> | null;
+  options?: Array<{ value: string; label: string }> | null;
 }): SuggestionView {
   const entityHref =
     r.entityType === 'contact'
@@ -79,6 +85,8 @@ export function toSuggestionView(r: {
     sourceHref,
     createdAt: r.createdAt.toISOString(),
     model: r.model,
+    valueLabels: r.valueLabels ?? null,
+    options: r.options ?? null,
   };
 }
 
@@ -92,8 +100,10 @@ const STAGE_LABEL: Record<string, string> = {
   lost: 'Lost',
 };
 
-export function formatSuggestionValue(field: SuggestionField, v: SuggestionValue): string {
+export function formatSuggestionValue(field: SuggestionField, v: SuggestionValue, labels?: Record<string, string> | null): string {
   if (v == null || v === '') return '—';
+  if (field === 'icp_score') return `${String(v)} / 100`;
+  if (field === 'product_fit') return labels?.[String(v)] ?? 'Unknown offering';
   if (field === 'follow_up_task' && typeof v === 'object') {
     const f = v as FollowUpValue;
     return `${f.title} (due ${f.due_date})`;

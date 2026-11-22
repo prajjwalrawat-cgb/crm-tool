@@ -1,3 +1,5 @@
+import { listSuggestions } from '@/lib/ai/suggestions/service';
+import { toSuggestionView } from '@/lib/ai/suggestions/view';
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCommentsForEntity } from '@/lib/comments/queries';
 import { requireMembership } from '@/lib/membership';
@@ -39,14 +41,19 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
     ]);
 
     // Only after the prospect is known to exist (getProspect UUID-guards `p`).
-    const [openComments, myVotes, voteCounts, scope] = openProspect
+    const scopeP = openProspect ? scopeUsers({ tenantId: tenant.id, userId, role: membership.role }) : null;
+    const [openComments, myVotes, voteCounts, scope, openSuggestions] = openProspect && scopeP
       ? await Promise.all([
           listCommentsForEntity(tenant.id, 'prospect', openProspect.id, { limit: 200 }),
           listMyVotes(tenant.id, userId, openProspect.id),
           getVoteCounts(tenant.id, openProspect.id),
-          scopeUsers({ tenantId: tenant.id, userId, role: membership.role }),
+          scopeP,
+          // Pending AI suggestions on this prospect the viewer may review (same scope as the queue).
+          scopeP.then((sc) =>
+            listSuggestions({ scope: { tenantId: tenant.id, userIds: sc.userIds }, entity: { type: 'prospect', ids: [openProspect.id] }, limit: 50 }),
+          ),
         ])
-      : [[], { knowSomeone: false, priority: false }, { knowSomeone: 0, priority: 0 }, null];
+      : [[], { knowSomeone: false, priority: false }, { knowSomeone: 0, priority: 0 }, null, []];
 
     // Same rule as promoteProspect: only a manager's team scope can exclude the holder.
     const holderInScope =
@@ -85,6 +92,7 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
           authorLookup={authorLookup}
           openProspect={openProspect}
           openHistory={openHistory}
+          openSuggestions={openSuggestions.map((r) => toSuggestionView(r))}
           holderInScope={holderInScope}
         />
       </main>

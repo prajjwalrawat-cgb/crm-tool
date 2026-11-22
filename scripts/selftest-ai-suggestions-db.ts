@@ -31,6 +31,8 @@ async function main() {
   const { blockMessage } = await import('../src/lib/stage-gates/enforce');
   const { toMinorUnits } = await import('../src/lib/deals/currency');
   const { suggestionsFromCallHandler } = await import('../src/lib/inngest/workflows/ai-suggestions');
+  const { prospectAppliers } = await import('../src/lib/ai/suggestions/prospect-appliers');
+  const { toSuggestionView, formatSuggestionValue } = await import('../src/lib/ai/suggestions/view');
   type Appliers = import('../src/lib/ai/suggestions/service').Appliers;
 
   const step = { run: <T,>(_id: string, fn: () => Promise<T>) => fn(), sleep: async () => {} };
@@ -98,11 +100,8 @@ async function main() {
     contact_phone: async () => ({ ok: false, message: 'not used' }),
     contact_designation: async () => ({ ok: false, message: 'not used' }),
     follow_up_task: async () => ({ ok: true }),
-    // Prospect fields (0079): not exercised here.
-    industry: async () => ({ ok: false, message: 'Not available yet.' }),
-    size_band: async () => ({ ok: false, message: 'Not available yet.' }),
-    product_fit: async () => ({ ok: false, message: 'Not available yet.' }),
-    icp_score: async () => ({ ok: false, message: 'Not available yet.' }),
+    // Prospect fields (0079): the real appliers (updateProspect as the accepting user; no session needed).
+    ...prospectAppliers,
   };
 
   try {
@@ -301,6 +300,100 @@ async function main() {
     extractRuns = 0;
     const nr = await suggestionsFromCallHandler({ event: { data: { tenantId: A, callId: retryCallId } }, step: retryingStep }, failing(false));
     check('retry: non-retryable failure returns normally (one attempt, no throw)', nr.status === 'failed' && stepAttempts === 1 && extractRuns === 1, { nr, stepAttempts, extractRuns });
+
+    // ------------------------------------------------ prospect suggestions (Stage 3 Task 7)
+    const pids = await runWithSystemContext(A, () =>
+      tenantTransaction(async (tx) => {
+        const [o1] = await tx.insert(s.offerings).values({ tenantId: A, name: 'CRM Suite', category: 'product' }).returning();
+        const [o2] = await tx.insert(s.offerings).values({ tenantId: A, name: 'Old Thing', category: 'product', active: false }).returning();
+        const old = new Date(Date.now() - 3 * 86_400_000);
+        const future = new Date(Date.now() + 3 * 86_400_000);
+        const [p1] = await tx.insert(s.prospects).values({ tenantId: A, companyName: 'Doon Biotech', sourceTag: 'test', createdBy: rep2, claimedBy: rep1, claimExpiresAt: future, lastActivityAt: old }).returning();
+        const [p2] = await tx.insert(s.prospects).values({ tenantId: A, companyName: 'Unclaimed Co', sourceTag: 'test', createdBy: rep1, lastActivityAt: old }).returning();
+        const [p3] = await tx.insert(s.prospects).values({ tenantId: A, companyName: 'Promoted Co', sourceTag: 'test', createdBy: rep1, promotedDealId: ids.dealId, lastActivityAt: old }).returning();
+        type F = import('../src/db/schema').SuggestionField;
+        type V = import('../src/db/schema').SuggestionValue;
+        const enrich = (pid: string, items: Array<{ field: F; value: V }>) =>
+          svc.persistSuggestions(tx, {
+            tenantId: A,
+            sourceType: 'enrichment',
+            sourceId: pid,
+            model: 'test',
+            items: items.map((i) => ({ entityType: 'prospect' as const, entityId: pid, field: i.field, current: null, value: i.value, evidenceQuote: 'reasoning', confidence: 0.8 })),
+          });
+        await enrich(p1!.id, [{ field: 'industry', value: 'Biotechnology' }, { field: 'size_band', value: '11-50' }]);
+        await enrich(p2!.id, [{ field: 'product_fit', value: o1!.id }, { field: 'icp_score', value: 72 }, { field: 'industry', value: 'Retail' }, { field: 'size_band', value: '51-200' }]);
+        await enrich(p3!.id, [{ field: 'industry', value: 'Pharma' }]);
+        return { o1: o1!.id, o2: o2!.id, p1: p1!.id, p2: p2!.id, p3: p3!.id, old };
+      }),
+    );
+    const pSug = async (pid: string, field: string) => (await sugs()).find((x) => x.entityId === pid && x.field === field)!;
+    const readP = (pid: string) => runWithSystemContext(A, () => tenantTransaction(async (tx) => (await tx.select().from(s.prospects).where(eq(s.prospects.id, pid)))[0]!));
+    const prospectRows = async (userId: string, role: 'owner' | 'manager' | 'member') =>
+      (await asUser(A, userId, async () =>
+        svc.listSuggestions({ scope: await svc.suggestionScope(A, { userId, role }), entity: { type: 'prospect', ids: [pids.p1, pids.p2, pids.p3] } }),
+      )) as Awaited<ReturnType<typeof svc.listSuggestions>>;
+    const decideAs = (userId: string, role: 'owner' | 'manager' | 'member', id: string, action: 'accept' | 'reject' | 'edit', value?: unknown) =>
+      asUser(A, userId, () => svc.decideSuggestion({ tenantId: A, viewer: { userId, role }, id, action, value }, appliers)) as Promise<{ ok: boolean; message?: string; stale?: boolean; live?: unknown }>;
+
+    const r1Rows = await prospectRows(rep1, 'member');
+    check('suggest: prospect suggestion visible to its claimer, and to creator when unclaimed', r1Rows.length === 7 && r1Rows.some((r) => r.entityId === pids.p1) && r1Rows.some((r) => r.entityId === pids.p2), r1Rows.length);
+    const p1Row = r1Rows.find((r) => r.entityId === pids.p1 && r.field === 'industry');
+    check('suggest: prospect owner = claimer, name = company name', p1Row?.ownerId === rep1 && p1Row.entityName === 'Doon Biotech', { owner: p1Row?.ownerId, name: p1Row?.entityName });
+    check("suggest: manager sees team's prospect suggestions", (await prospectRows(mgr, 'manager')).length === 7);
+    check('suggest: other manager sees none', (await prospectRows(mgr2, 'manager')).length === 0);
+    check("suggest: other rep doesn't (even the creator of a prospect someone else claimed)", (await prospectRows(rep2, 'member')).length === 0);
+    const badgeP = await asUser(A, rep1, () => svc.countMyPending(A, rep1));
+    check('badge: counts prospect suggestions the rep owns', badgeP === 1 + 7, badgeP);
+
+    // View: link, offering name resolved server-side, ICP formatting.
+    const pfRow = r1Rows.find((r) => r.field === 'product_fit');
+    const pfView = pfRow ? toSuggestionView(pfRow) : null;
+    check('view: prospect link /dashboard/prospects?p=<id>', pfView?.entityHref === `/dashboard/prospects?p=${pids.p2}`, pfView?.entityHref);
+    check('view: product fit shows the offering name', !!pfView && formatSuggestionValue('product_fit', pfView.suggested, pfView.valueLabels) === 'CRM Suite', pfView?.valueLabels);
+    check('view: product fit edit options are the active offerings only', JSON.stringify(pfView?.options) === JSON.stringify([{ value: pids.o1, label: 'CRM Suite' }]), pfView?.options);
+    check('view: ICP shown as NN / 100, size band as-is', formatSuggestionValue('icp_score', 72) === '72 / 100' && formatSuggestionValue('size_band', '51-200') === '51-200');
+
+    // RBAC on decide.
+    const rep2Try = await decideAs(rep2, 'member', (await pSug(pids.p1, 'industry')).id, 'accept');
+    check('accept: a rep outside scope cannot accept a prospect suggestion', !rep2Try.ok && (await readP(pids.p1)).industry === null);
+
+    // Accept industry.
+    const accInd = await decideAs(rep1, 'member', (await pSug(pids.p1, 'industry')).id, 'accept');
+    const p1After = await readP(pids.p1);
+    check('accept: writes industry via updateProspect and bumps activity', accInd.ok && p1After.industry === 'Biotechnology' && p1After.lastActivityAt.getTime() > pids.old.getTime() + 60_000, accInd);
+    check('accept: suggestion accepted', (await pSug(pids.p1, 'industry')).status === 'accepted');
+    const pActs = await runWithSystemContext(A, () => tenantTransaction((tx) => tx.select().from(s.activityLogs).where(and(eq(s.activityLogs.tenantId, A), eq(s.activityLogs.entityId, pids.p1)))));
+    check('accept: decision logged on the prospect (entity type prospect)', pActs.some((a) => a.action === 'ai_suggestion_accepted' && a.entityType === 'prospect' && a.actorUserId === rep1), pActs.map((a) => [a.entityType, a.action]));
+
+    // Product fit: edit with an inactive offering is refused; accept sets the id.
+    const pfId = (await pSug(pids.p2, 'product_fit')).id;
+    const badPf = await decideAs(rep1, 'member', pfId, 'edit', pids.o2);
+    check('edit: product fit must be an active offering', !badPf.ok && (await pSug(pids.p2, 'product_fit')).status === 'pending' && (await readP(pids.p2)).productFitOfferingId === null, badPf);
+    const accPf = await decideAs(rep1, 'member', pfId, 'accept');
+    check('accept: product_fit sets offering id', accPf.ok && (await readP(pids.p2)).productFitOfferingId === pids.o1, accPf);
+
+    // ICP edit-and-accept, size band accepted by the manager.
+    const icp = await decideAs(rep1, 'member', (await pSug(pids.p2, 'icp_score')).id, 'edit', '80');
+    check('edit: icp_score edited to 80 and applied', icp.ok && (await readP(pids.p2)).icpScore === 80, icp);
+    const sb = await decideAs(mgr, 'manager', (await pSug(pids.p2, 'size_band')).id, 'accept');
+    check('accept: size_band applied by the manager', sb.ok && (await readP(pids.p2)).sizeBand === '51-200', sb);
+
+    // Promoted prospect: updateProspect refuses; the suggestion stays pending (claim released).
+    const prom = await decideAs(rep1, 'member', (await pSug(pids.p3, 'industry')).id, 'accept');
+    const promRow = await pSug(pids.p3, 'industry');
+    check("accept: promoted prospect -> not applied, error 'Already promoted to a lead.', stays pending", !prom.ok && prom.message === 'Already promoted to a lead.' && promRow.status === 'pending' && promRow.decidedAt === null && (await readP(pids.p3)).industry === null, { prom, status: promRow.status });
+
+    // Reject: no write.
+    const p1Before = await readP(pids.p1);
+    const rejP = await decideAs(rep1, 'member', (await pSug(pids.p1, 'size_band')).id, 'reject');
+    const p1Rej = await readP(pids.p1);
+    check('reject: no write', rejP.ok && p1Rej.sizeBand === null && p1Rej.updatedAt.getTime() === p1Before.updatedAt.getTime() && (await pSug(pids.p1, 'size_band')).status === 'rejected');
+
+    // Stale: industry changed after the suggestion was made.
+    await runWithSystemContext(A, () => tenantTransaction((tx) => tx.update(s.prospects).set({ industry: 'Food' }).where(eq(s.prospects.id, pids.p2))));
+    const st = await decideAs(rep1, 'member', (await pSug(pids.p2, 'industry')).id, 'accept');
+    check('stale: field changed after suggestion -> stale on decide', !st.ok && st.stale === true && st.live === 'Food' && (await pSug(pids.p2, 'industry')).status === 'stale' && (await readP(pids.p2)).industry === 'Food', st);
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
