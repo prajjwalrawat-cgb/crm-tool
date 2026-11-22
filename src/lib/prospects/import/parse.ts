@@ -18,7 +18,9 @@ export type { DumpRow } from './csv-map';
  *
  * API notes (claude-api skill, 2026-11), mirroring ai/suggestions/extract.ts:
  *  - model claude-opus-5-5 (env PROSPECT_PARSE_MODEL).
- *  - Structured output via messages.parse + zodOutputFormat. No forced
+ *  - Structured output via zodOutputFormat, streamed (messages.stream ->
+ *    finalMessage(), which returns a ParsedMessage) so max_tokens can be 64k
+ *    for 500-row dumps without the SDK non-streaming timeout. No forced
  *    tool_choice, prefill, temperature or disabled thinking (all 400 here).
  *  - Server-side refusal fallback on (`fallbacks: "default"` + beta header).
  *    SDK 0.94 has no type for the field, so it goes through a cast.
@@ -34,8 +36,8 @@ export type { DumpRow } from './csv-map';
 
 export const MAX_DUMP_ROWS = 500;
 /** Free-text dumps longer than this are rejected rather than silently cut. */
-export const MAX_DUMP_CHARS = 100_000;
-const MAX_TOKENS = 16_000;
+export const MAX_DUMP_CHARS = 60_000;
+const MAX_TOKENS = 64_000;
 const PLACEHOLDER_SOURCE_TAG = 'dump';
 
 const parseModel = () => process.env.PROSPECT_PARSE_MODEL?.trim() || 'claude-opus-5-5';
@@ -90,10 +92,10 @@ export type ParseOutcome =
   | { ok: true; rows: DumpRow[]; dropped: number; model: string | null; usage: ParseUsage }
   | { ok: false; error: string; retryable: boolean };
 
-/** A `client.messages.parse`-compatible function (injected in selftests). */
+/** Stream-shaped seam: production is `client.messages.stream(p, o).finalMessage()` (injected in selftests). */
 export type ParseFn = (
   params: Anthropic.MessageCreateParamsNonStreaming,
-  options?: Parameters<Anthropic['messages']['parse']>[1],
+  options?: Parameters<Anthropic['messages']['stream']>[1],
 ) => Promise<Anthropic.Message & { parsed_output: DumpOutput | null }>;
 
 export type ParseDeps = { create?: ParseFn };
@@ -108,9 +110,9 @@ export function dumpParsingConfigured(): boolean {
   return (process.env.ANTHROPIC_API_KEY ?? '').trim().length > 0;
 }
 
-const defaultParse: ParseFn = (params, options) => {
+const defaultStream: ParseFn = (params, options) => {
   client ??= new Anthropic();
-  return client.messages.parse(params, options) as unknown as ReturnType<ParseFn>;
+  return client.messages.stream(params, options).finalMessage() as unknown as ReturnType<ParseFn>;
 };
 
 const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
@@ -157,7 +159,7 @@ export function validateDumpRows(candidates: unknown[]): { rows: DumpRow[]; drop
 async function callClaude(content: Anthropic.MessageParam['content'], deps: ParseDeps): Promise<ParseOutcome> {
   if (!dumpParsingConfigured()) return { ok: false, error: NOT_CONFIGURED, retryable: false };
   const model = parseModel();
-  const parse = deps.create ?? defaultParse;
+  const parse = deps.create ?? defaultStream;
   const params = {
     model,
     max_tokens: MAX_TOKENS,
@@ -203,7 +205,9 @@ export async function parseDumpText(text: string, deps: ParseDeps = {}): Promise
   if (trimmed.length > MAX_DUMP_CHARS) {
     return { ok: false, error: 'This dump is too long to read in one go. Split it into smaller parts and try again.', retryable: false };
   }
-  return callClaude(`<dump>\n${trimmed}\n</dump>`, deps);
+  // The dump can't close its own wrapper: any `</dump` inside becomes `<\/dump`.
+  const guarded = trimmed.replace(/<\/dump/gi, '<\\/dump');
+  return callClaude(`<dump>\n${guarded}\n</dump>`, deps);
 }
 
 export async function parseDumpImage(bytes: Buffer, mediaType: DumpImageMediaType, deps: ParseDeps = {}): Promise<ParseOutcome> {
