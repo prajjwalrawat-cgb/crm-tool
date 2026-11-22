@@ -15,6 +15,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 
@@ -252,7 +253,19 @@ export function ProspectBoard({
         filters={filters}
         sourceTags={sourceTags}
         onChange={writeFilters}
-        actions={interactive ? <NewProspectButton offerings={offerings} sourceTags={sourceTags} /> : null}
+        actions={
+          interactive ? (
+            <div className="ml-auto flex items-center gap-2">
+              <Link
+                href="/dashboard/prospects/import"
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50 dark:border-[#2A2A2A] dark:bg-[#111111] dark:text-[#E4E4E7] dark:hover:bg-[#181818]"
+              >
+                Quick dump
+              </Link>
+              <NewProspectButton offerings={offerings} sourceTags={sourceTags} />
+            </div>
+          ) : null
+        }
       />
 
       {truncated ? (
