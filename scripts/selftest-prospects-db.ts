@@ -561,6 +561,16 @@ async function main() {
       check('promote match: cross-tenant not returned', cross.every((x) => x.label !== 'Acme Steel B'), cross);
       const gone = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Gone Corp', normalizedName: 'gone' })));
       check('promote match: soft-deleted not returned', gone.every((x) => x.label !== 'Gone Corp'), gone);
+      // fix round 1: lookups use the caller's transaction; no cap on open-lead text matches.
+      const inTx = await inA(async (tx) => {
+        await tx.insert(s.companies).values({ tenantId: A, name: 'Txn Only Works', normalizedName: 'txn only works' });
+        return findPromoteCandidates(A, pc({ companyName: 'Txn Only Works', normalizedName: 'txn only works' }), tx);
+      });
+      check('promote match: sees caller transaction writes', inTx.some((x) => x.kind === 'company' && x.strength === 'strong' && x.label === 'Txn Only Works'), inTx);
+      await inA((tx) => tx.insert(s.deals).values(Array.from({ length: 60 }, (_, i) => ({ tenantId: A, name: `Shree lead ${i}`, stage: 'lead' as const, companyNameText: `Shree Filler ${i}` }))));
+      await inA((tx) => tx.insert(s.deals).values({ tenantId: A, name: 'Balaji lead', stage: 'lead', companyNameText: 'Shree Balaji Traders' }));
+      const shree = await asA(() => findPromoteCandidates(A, pc({ companyName: 'Shree Balaji Traders Pvt Ltd', normalizedName: 'shree balaji traders' })));
+      check('promote match: exact open lead found past 60 same-word leads', shree.some((x) => x.kind === 'open_lead' && x.label === 'Balaji lead'), shree);
     }
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));

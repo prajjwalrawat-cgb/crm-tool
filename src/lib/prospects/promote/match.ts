@@ -10,7 +10,7 @@ import {
   findContactByPhone,
 } from '@/lib/dedup/queries';
 import { companyNameCore, normalizeCompanyName } from '@/lib/dedup/normalize';
-import { tenantTransaction } from '@/lib/db-context';
+import { tenantTransaction, type DbExecutor } from '@/lib/db-context';
 
 import type { MatchCandidate } from './rules';
 
@@ -18,7 +18,9 @@ import type { MatchCandidate } from './rules';
  * Existing records a prospect could be merged into before a new lead is made.
  * Strong matches block a plain promote; weak ones only warn.
  */
-export async function findPromoteCandidates(tenantId: string, p: Prospect): Promise<MatchCandidate[]> {
+export async function findPromoteCandidates(tenantId: string, p: Prospect,
+  exec?: DbExecutor,
+): Promise<MatchCandidate[]> {
   const out = new Map<string, MatchCandidate>();
   const add = (c: MatchCandidate) => {
     const key = `${c.kind}:${c.id}`;
@@ -26,12 +28,25 @@ export async function findPromoteCandidates(tenantId: string, p: Prospect): Prom
     if (!prev || (prev.strength === 'weak' && c.strength === 'strong')) out.set(key, c);
   };
 
-  const [byName, byDomain, byEmail, byPhone] = await Promise.all([
-    findCompanyMatches(tenantId, p.companyName),
-    p.domain ? findCompanyByDomain(tenantId, p.domain) : null,
-    p.emailNormalized ? findContactByEmail(tenantId, p.emailNormalized) : null,
-    p.phoneNormalized ? findContactByPhone(tenantId, p.phoneNormalized) : null,
-  ]);
+  const lookups = {
+    name: () => findCompanyMatches(tenantId, p.companyName, 5, exec),
+    domain: () => (p.domain ? findCompanyByDomain(tenantId, p.domain, exec) : Promise.resolve(null)),
+    email: () => (p.emailNormalized ? findContactByEmail(tenantId, p.emailNormalized, exec) : Promise.resolve(null)),
+    phone: () => (p.phoneNormalized ? findContactByPhone(tenantId, p.phoneNormalized, exec) : Promise.resolve(null)),
+  };
+  // Inside a caller's transaction run one at a time (one connection); otherwise in parallel.
+  let byName: Awaited<ReturnType<typeof lookups.name>>;
+  let byDomain: Awaited<ReturnType<typeof lookups.domain>>;
+  let byEmail: Awaited<ReturnType<typeof lookups.email>>;
+  let byPhone: Awaited<ReturnType<typeof lookups.phone>>;
+  if (exec) {
+    byName = await lookups.name();
+    byDomain = await lookups.domain();
+    byEmail = await lookups.email();
+    byPhone = await lookups.phone();
+  } else {
+    [byName, byDomain, byEmail, byPhone] = await Promise.all([lookups.name(), lookups.domain(), lookups.email(), lookups.phone()]);
+  }
 
   for (const m of byName) {
     add({
@@ -55,28 +70,30 @@ export async function findPromoteCandidates(tenantId: string, p: Prospect): Prom
   const word = companyNameCore(norm).split(' ')[0] ?? '';
   const escaped = word.replace(/[\\%_]/g, (ch) => `\\${ch}`);
   const nameLike = word.length >= 2 ? sql`${deals.companyNameText} ILIKE ${'%' + escaped + '%'}` : sql`false`;
-  const filter = strongCompanyIds.length
-    ? sql`(${inArray(deals.companyId, strongCompanyIds)} OR ${nameLike})`
-    : nameLike;
-
-  const rows = await tenantTransaction((tx) =>
+  const cols = {
+    id: deals.id,
+    name: deals.name,
+    companyId: deals.companyId,
+    companyNameText: deals.companyNameText,
+    ownerId: deals.ownerId,
+    firstName: users.firstName,
+    lastName: users.lastName,
+    email: users.email,
+  };
+  const openLeads = (extra: ReturnType<typeof sql>) => (tx: DbExecutor) =>
     tx
-      .select({
-        id: deals.id,
-        name: deals.name,
-        companyId: deals.companyId,
-        companyNameText: deals.companyNameText,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        email: users.email,
-        ownerId: deals.ownerId,
-      })
+      .select(cols)
       .from(deals)
       .leftJoin(users, eq(users.id, deals.ownerId))
-      .where(and(eq(deals.tenantId, tenantId), eq(deals.stage, 'lead'), isNull(deals.deletedAt), filter))
-      .limit(50),
-  );
-  for (const d of rows) {
+      .where(and(eq(deals.tenantId, tenantId), eq(deals.stage, 'lead'), isNull(deals.deletedAt), extra));
+  const run = <T,>(fn: (tx: DbExecutor) => Promise<T>) => (exec ? fn(exec) : tenantTransaction(fn));
+  // (a) leads on a strong company, (b) leads whose typed company name shares the first word. No caps.
+  const onCompany = strongCompanyIds.length ? await run(openLeads(sql`${inArray(deals.companyId, strongCompanyIds)}`)) : [];
+  const byTextRows = word.length >= 2 ? await run(openLeads(nameLike)) : [];
+  const seen = new Set<string>();
+  for (const d of [...onCompany, ...byTextRows]) {
+    if (seen.has(d.id)) continue;
+    seen.add(d.id);
     const byCompany = d.companyId != null && strongCompanyIds.includes(d.companyId);
     const byText = !!d.companyNameText && norm !== '' && normalizeCompanyName(d.companyNameText) === norm;
     if (!byCompany && !byText) continue;

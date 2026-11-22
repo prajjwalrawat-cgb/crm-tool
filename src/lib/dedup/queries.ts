@@ -18,6 +18,11 @@ import {
   normalizeEmail,
 } from './normalize';
 
+/** Runs on the caller's executor when given, else in its own tenant transaction. */
+function withExec<T>(exec: DbExecutor | undefined, fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
+  return exec ? fn(exec) : tenantTransaction(fn);
+}
+
 /** Similarity threshold for a "possible duplicate" (spec: ≥ 0.55). */
 const SIM_THRESHOLD = 0.55;
 
@@ -47,6 +52,7 @@ export async function findCompanyMatches(
   tenantId: string,
   name: string,
   limit = 5,
+  exec?: DbExecutor,
 ): Promise<DedupMatch[]> {
   const norm = normalizeCompanyName(name);
   if (norm.length < 2) return [];
@@ -62,7 +68,7 @@ export async function findCompanyMatches(
   const sameFirst =
     fuzzy && firstWord.length >= 2 ? sql`split_part(${stored}, ' ', 1) = ${firstWord}` : sql`false`;
 
-  const rows = (await tenantTransaction((tx) =>
+  const rows = (await withExec(exec, (tx) =>
     tx.execute(sql`
       SELECT id, name, domain,
         (normalized_name = ${norm}) AS exact,
@@ -110,10 +116,11 @@ export async function findCompanyMatches(
 export async function findContactByEmail(
   tenantId: string,
   email: string,
+  exec?: DbExecutor,
 ): Promise<{ id: string; name: string } | null> {
   const norm = normalizeEmail(email);
   if (!norm) return null;
-  const [row] = await tenantTransaction((tx) =>
+  const [row] = await withExec(exec,(tx) =>
     tx
       .select({
         id: contacts.id,
@@ -159,11 +166,11 @@ export function storedCompanyDomainHost() {
  * domain is compared with its scheme, `www.`, path and port taken off, so
  * "https://www.acme.in/" matches "acme.in".
  */
-export async function findCompanyByDomain(tenantId: string, domain: string): Promise<DedupMatch | null> {
+export async function findCompanyByDomain(tenantId: string, domain: string, exec?: DbExecutor): Promise<DedupMatch | null> {
   const host = domainHost(domain);
   if (!host) return null;
   const stored = storedCompanyDomainHost();
-  const [row] = await tenantTransaction((tx) =>
+  const [row] = await withExec(exec,(tx) =>
     tx
       .select({ id: companies.id, name: companies.name, domain: companies.domain })
       .from(companies)
@@ -185,10 +192,11 @@ export async function findCompanyByDomain(tenantId: string, domain: string): Pro
 export async function findContactByPhone(
   tenantId: string,
   phoneNormalized: string,
+  exec?: DbExecutor,
 ): Promise<{ id: string; label: string } | null> {
   const phone = phoneNormalized.trim();
   if (!phone) return null;
-  const [row] = await tenantTransaction((tx) =>
+  const [row] = await withExec(exec,(tx) =>
     tx
       .select({ id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName })
       .from(contacts)
