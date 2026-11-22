@@ -1,9 +1,13 @@
 'use server';
 
 import { withTenantSession } from '@/lib/auth-guard';
+import { getCurrentMembership } from '@/lib/membership';
+import { PROSPECT_BOARD_CSV_COLUMNS } from '@/lib/reports/queries/prospect-board';
+import { parseDateRangePreset } from '@/lib/reports/filters';
 import { rowsToCsv } from '@/lib/reports/csv';
 import { parseFunnelScope } from '@/lib/reports/funnel-scope';
 import {
+  canAccessReport,
   getReport,
   isReportEnabled,
   type ReportId,
@@ -88,6 +92,7 @@ const REPORT_COLUMNS: Record<ReportId, { key: string; label: string }[]> = {
     { key: 'medianDays', label: 'Median days' },
     { key: 'maxDays', label: 'Max days' },
   ],
+  'prospect-board': PROSPECT_BOARD_CSV_COLUMNS,
 };
 
 export async function buildReportCsvAction(input: {
@@ -103,11 +108,16 @@ export async function buildReportCsvAction(input: {
      */
     offering?: string;
     category?: string;
+    /** Date-range preset; only honoured by reports that support a range. */
+    range?: string;
   };
 }): Promise<{ ok: true; filename: string; csv: string } | { ok: false; message: string }> {
   const report = getReport(input.reportId);
   if (!report) return { ok: false, message: 'Unknown report' };
   if (!report.supportsCsv) return { ok: false, message: 'CSV not supported for this report' };
+  if (!canAccessReport((await getCurrentMembership())?.role ?? null, report)) {
+    return { ok: false, message: 'Not allowed' };
+  }
 
   return await withTenantSession(async ({ tenant, userId }) => {
     if (!(await isReportEnabled(tenant.id, report))) {
@@ -117,7 +127,12 @@ export async function buildReportCsvAction(input: {
       input.filters.owner === 'mine'
         ? { type: 'mine' }
         : { type: 'all' };
-    const filter: ReportFilter = { range: 'all_time', owner };
+    const filter: ReportFilter = {
+      range:
+        (report.id === 'prospect-board' ? parseDateRangePreset(input.filters.range) : null) ??
+        'all_time',
+      owner,
+    };
 
     const result = await report.runner(
       tenant.id,

@@ -1,6 +1,6 @@
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 import { withTenantSession } from '@/lib/auth-guard';
 import {
@@ -8,9 +8,11 @@ import {
   type TenantCurrencyContext,
 } from '@/lib/currency/format';
 import { formatDateTime, formatNumber } from '@/lib/dates/format';
+import { getCurrentMembership } from '@/lib/membership';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { requirePersonas } from '@/lib/personas/guards';
 import {
+  canAccessReport,
   getReport,
   isReportEnabled,
   type ReportId,
@@ -28,6 +30,7 @@ import type {
   FunnelByOfferingExtras,
   FunnelByOfferingRow,
 } from '@/lib/reports/queries/funnel-by-offering';
+import type { ProspectBoardReport } from '@/lib/reports/queries/prospect-board';
 import type { PipelineByStageRow } from '@/lib/reports/queries/pipeline-by-stage';
 import type { RepPerformanceRow } from '@/lib/reports/queries/rep-performance';
 import type {
@@ -60,6 +63,7 @@ import { DealVelocitySection } from '../_components/deal-velocity-section';
 import { EmailEngagementSection } from '../_components/email-engagement-section';
 import { OfferingFunnelSection } from '../_components/offering-funnel-section';
 import { PipelineByStageChart } from '../_components/pipeline-by-stage-chart';
+import { ProspectBoardSection } from '../_components/prospect-board-section';
 import { RepPerformanceSection } from '../_components/rep-performance-section';
 import { ReportFilterBar } from '../_components/report-filter-bar';
 import { RevenueForecastSection } from '../_components/revenue-forecast-section';
@@ -91,6 +95,10 @@ export default async function ReportDetailPage({
   const { reportId } = await params;
   const report = getReport(reportId);
   if (!report) notFound();
+  // Same not-allowed path as the persona guard above: back to the dashboard.
+  if (!canAccessReport((await getCurrentMembership())?.role ?? null, report)) {
+    redirect('/dashboard');
+  }
 
   const sp = await searchParams;
   const ownerParam =
@@ -189,6 +197,7 @@ export default async function ReportDetailPage({
             <CsvDownloadButton
               reportId={report.id}
               owner={ownerParam}
+              range={report.id === 'prospect-board' ? rangePreset : undefined}
               scopeParams={
                 isFunnel
                   ? {
@@ -327,6 +336,8 @@ function ReportBody({
           currency={currency}
         />
       );
+    case 'prospect-board':
+      return <ProspectBoardSection report={result.extras as ProspectBoardReport} />;
     case 'deal-velocity':
       return (
         <DealVelocitySection

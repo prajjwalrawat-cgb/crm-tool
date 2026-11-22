@@ -118,6 +118,7 @@ export function ProspectBoard({
   const canPark = can(role, 'bulkParkProspects');
   const canClaim = can(role, 'claimProspects');
   const canPromote = can(role, 'promoteProspects');
+  const canReport = can(role, 'viewProspectReports');
 
   const [cards, setCards] = useState<BoardCard[]>(serverCards);
   // Adopt the fresh server list after revalidatePath re-renders the page.
@@ -289,15 +290,27 @@ export function ProspectBoard({
         sourceTags={sourceTags}
         onChange={writeFilters}
         actions={
-          interactive ? (
+          interactive || canReport ? (
             <div className="ml-auto flex items-center gap-2">
-              <Link
-                href="/dashboard/prospects/import"
-                className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50 dark:border-[#2A2A2A] dark:bg-[#111111] dark:text-[#E4E4E7] dark:hover:bg-[#181818]"
-              >
-                Quick dump
-              </Link>
-              <NewProspectButton offerings={offerings} sourceTags={sourceTags} />
+              {canReport ? (
+                <Link
+                  href="/dashboard/reports/prospect-board"
+                  className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50 dark:border-[#2A2A2A] dark:bg-[#111111] dark:text-[#E4E4E7] dark:hover:bg-[#181818]"
+                >
+                  Report
+                </Link>
+              ) : null}
+              {interactive ? (
+                <>
+                  <Link
+                    href="/dashboard/prospects/import"
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50 dark:border-[#2A2A2A] dark:bg-[#111111] dark:text-[#E4E4E7] dark:hover:bg-[#181818]"
+                  >
+                    Quick dump
+                  </Link>
+                  <NewProspectButton offerings={offerings} sourceTags={sourceTags} />
+                </>
+              ) : null}
             </div>
           ) : null
         }

@@ -21,6 +21,10 @@ import {
   type RevenueForecastRow,
 } from './queries/revenue-forecast';
 import {
+  prospectBoardRunner,
+  type ProspectBoardCsvRow,
+} from './queries/prospect-board';
+import {
   repPerformanceRunner,
   type RepPerformanceRow,
 } from './queries/rep-performance';
@@ -33,6 +37,8 @@ import {
   type WinLossRateRow,
 } from './queries/win-loss-rate';
 import type { WorkspaceFeatureFlag } from '@/db/schema';
+import type { MembershipRole } from '@/db/schema';
+import { can, type Permission } from '@/lib/rbac';
 import { isFeatureEnabled } from '@/lib/workspace-settings/queries';
 
 import type {
@@ -77,6 +83,18 @@ export type ReportRegistrationBase = {
    * the registry will forget it.
    */
   requiresFlag?: WorkspaceFeatureFlag;
+  /**
+   * A permission the viewer's role must hold to see this report. Unlike
+   * `requiresFlag` the report still exists for the tenant; it is just not for
+   * this viewer: hidden from the list, redirected away on its URL, refused for
+   * CSV. Check it with `canAccessReport`, never `can()` at a call site.
+   */
+  requiresPermission?: Permission;
+  /**
+   * True when the list tile must not run the runner for a headline number
+   * (the runner is heavier than a tile is worth, or calls out to a service).
+   */
+  skipListHeadline?: boolean;
 };
 
 const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
@@ -173,6 +191,21 @@ const REPORTS_INTERNAL: Record<string, ReportRegistrationBase> = {
     supportsOwnerScope: true,
     runner: dealVelocityRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
   },
+  'prospect-board': {
+    title: 'Prospect board',
+    description:
+      'Prospects added, prospect → lead conversion by source, tag and rep, days in each stage, and stale prospects.',
+    category: 'performance',
+    chart: 'table-only',
+    supportsCsv: true,
+    supportsDateRange: true,
+    supportsOwnerScope: true,
+    runner: prospectBoardRunner as ReportRunner<AnyReportFilter, unknown, unknown>,
+    requiresPermission: 'viewProspectReports',
+    // 8 queries plus a Clerk teammate lookup: too heavy for a list tile that
+    // would run it on every Reports page load.
+    skipListHeadline: true,
+  },
 };
 
 export type ReportId =
@@ -183,7 +216,8 @@ export type ReportId =
   | 'rep-performance'
   | 'email-engagement'
   | 'revenue-forecast'
-  | 'deal-velocity';
+  | 'deal-velocity'
+  | 'prospect-board';
 
 /** The full registration including its id — handy for list rendering. */
 export type ReportRegistration = ReportRegistrationBase & { id: ReportId };
@@ -215,6 +249,19 @@ export async function isReportEnabled(
 }
 
 /**
+ * May this role see this report? True unless it declares a
+ * `requiresPermission` the role lacks. Every registry consumer goes through
+ * here, alongside `isReportEnabled`.
+ */
+export function canAccessReport(
+  role: MembershipRole | null | undefined,
+  report: ReportRegistration,
+): boolean {
+  if (!report.requiresPermission) return true;
+  return can(role, report.requiresPermission);
+}
+
+/**
  * Compile-time mapping from `reportId` → row type. Lets the detail
  * page narrow `result.rows` without `as` casts when it dispatches to
  * the right chart component.
@@ -228,4 +275,5 @@ export type ReportRowMap = {
   'email-engagement': EmailEngagementRow;
   'revenue-forecast': RevenueForecastRow;
   'deal-velocity': DealVelocityRow;
+  'prospect-board': ProspectBoardCsvRow;
 };
