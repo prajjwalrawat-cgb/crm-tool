@@ -4,13 +4,16 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 import type { Comment, MembershipRole, Prospect, ProspectStage } from '@/db/schema';
+import { promoteBlock } from '@/lib/prospects/promote/rules';
 import { editBlock } from '@/lib/prospects/rules';
+import { can } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 
 import { CommentsThread } from '../../_components/comments-thread';
 import { Drawer } from '../../_components/drawer';
 import { ClaimPanel } from './claim-panel';
 import { STAGE_LABELS } from './prospect-column';
+import { PromoteDialog } from './promote-dialog';
 import { ProspectForm } from './prospect-form';
 import { VoteButtons } from './vote-buttons';
 
@@ -37,6 +40,10 @@ type Props = {
   authorLookup: Record<string, string>;
   /** Real vote totals for this prospect, loaded by the page. */
   voteCounts: { knowSomeone: number; priority: number };
+  /** The claim holder is within the viewer's team scope (page-computed). */
+  holderInScope: boolean;
+  /** Open the promote dialog straight away (from the bulk result list). */
+  autoPromote?: boolean;
   onClose: () => void;
 };
 
@@ -56,9 +63,12 @@ export function ProspectDrawer({
   comments,
   authorLookup,
   voteCounts,
+  holderInScope,
+  autoPromote = false,
   onClose,
 }: Props) {
   const [now] = useState(() => Date.now());
+  const [promoteOpen, setPromoteOpen] = useState(autoPromote);
 
   const block = editBlock(prospect, { userId: currentUserId, role });
   const disabledReason =
@@ -69,6 +79,16 @@ export function ProspectDrawer({
         : block === 'no_permission'
           ? 'You have read-only access to prospects.'
           : null;
+  const canPromote = can(role, 'promoteProspects');
+  const promoteReason = promoteBlock(prospect, { userId: currentUserId, role }, { holderInScope }, new Date(now));
+  const PROMOTE_REASONS: Record<string, string> = {
+    parked: 'Unpark it first.',
+    missing_contact: 'Add an email or phone before promoting.',
+    promoted: 'Already promoted to a lead.',
+    deleted: 'This prospect was deleted.',
+    claimed_by_other: 'Claimed by someone else.',
+    out_of_scope: 'That person is outside your team.',
+  };
   const nameOf = (id: string | null) => {
     if (!id) return 'Unknown';
     if (id.startsWith('system:')) return 'System';
@@ -89,6 +109,32 @@ export function ProspectDrawer({
           </p>
         ) : block === 'no_permission' ? (
           <p className="mb-4 text-[12px] text-slate-500">You have read-only access to prospects.</p>
+        ) : null}
+
+        {canPromote && (promoteReason !== 'promoted' || promoteOpen) ? (
+          <div className="mb-4">
+            {promoteReason === 'promoted' ? null : (
+              <button
+                type="button"
+                disabled={promoteReason !== null || promoteOpen}
+                onClick={() => setPromoteOpen(true)}
+                className="rounded-md bg-indigo-600 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+              >
+                Promote to lead
+              </button>
+            )}
+            {promoteReason && promoteReason !== 'promoted' ? (
+              <p className="mt-1 text-[12px] text-slate-500">{PROMOTE_REASONS[promoteReason] ?? ''}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {promoteOpen ? (
+          <PromoteDialog
+            prospectId={prospect.id}
+            claimerName={prospect.claimedBy ? nameOf(prospect.claimedBy) : null}
+            canCreateAnyway={can(role, 'manageProspectClaims') || role === 'owner' || role === 'admin'}
+            onClose={() => setPromoteOpen(false)}
+          />
         ) : null}
 
         {/* Remount when the row changes so defaults reflect the saved values. */}

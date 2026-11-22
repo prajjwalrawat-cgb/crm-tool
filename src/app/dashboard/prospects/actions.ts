@@ -8,6 +8,7 @@ import { checkPermission } from '@/lib/auth-guard';
 import { runWithTenantContext } from '@/lib/db-context';
 import { bulkReleaseClaims, claimProspect, reassignClaim, releaseProspect } from '@/lib/prospects/claims';
 import { confirmImport, discardImport } from '@/lib/prospects/import/imports';
+import { bulkPromote, MAX_BULK_PROMOTE, promoteProspect, type PromoteChoice, type PromoteOutcome } from '@/lib/prospects/promote/promote';
 import { toggleVote, type VoteKind } from '@/lib/prospects/votes';
 import type { Permission } from '@/lib/rbac';
 import {
@@ -152,6 +153,52 @@ export async function bulkReleaseClaimsAction(
   );
   revalidatePath(BOARD_PATH);
   return { ok: true, data: { released: r.released.length, skipped: r.skipped } };
+}
+
+/* ---------------- Promote to lead ---------------- */
+
+const DEALS_PATH = '/dashboard/deals';
+
+/** Only forward known, well-typed choice fields from the client. */
+function cleanChoice(c: unknown): PromoteChoice {
+  const o = c && typeof c === 'object' ? (c as Record<string, unknown>) : {};
+  const id = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  return {
+    leadId: id(o.leadId),
+    companyId: id(o.companyId),
+    contactId: id(o.contactId),
+    createAnyway: o.createAnyway === true,
+    ignoreWarnings: o.ignoreWarnings === true,
+  };
+}
+
+export async function promoteProspectAction(id: string, choice?: PromoteChoice): Promise<ActionResult<PromoteOutcome>> {
+  const g = await gate('promoteProspects');
+  if (!g.ok) return g;
+  const outcome = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    promoteProspect(g.tenantId, g.actor, String(id), cleanChoice(choice)),
+  );
+  if (outcome.status === 'promoted') {
+    revalidatePath(BOARD_PATH);
+    revalidatePath(DEALS_PATH);
+  }
+  return { ok: true, data: outcome };
+}
+
+export async function bulkPromoteAction(
+  ids: string[],
+  ignoreWarnings: boolean,
+): Promise<ActionResult<{ results: { id: string; outcome: PromoteOutcome }[] }>> {
+  const g = await gate('promoteProspects');
+  if (!g.ok) return g;
+  if (!Array.isArray(ids) || ids.length === 0) return { ok: false, message: 'Select at least one prospect.' };
+  if (ids.length > MAX_BULK_PROMOTE) return { ok: false, message: `Promote at most ${MAX_BULK_PROMOTE} prospects at a time.` };
+  const r = await runWithTenantContext({ tenantId: g.tenantId, userId: g.actor.userId }, () =>
+    bulkPromote(g.tenantId, g.actor, ids.map(String), { ignoreWarnings: ignoreWarnings === true }),
+  );
+  revalidatePath(BOARD_PATH);
+  revalidatePath(DEALS_PATH);
+  return { ok: true, data: r };
 }
 
 /* ---------------- Quick Dump imports ---------------- */

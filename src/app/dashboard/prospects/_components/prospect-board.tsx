@@ -29,9 +29,9 @@ import {
 import { can } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 
-import { bulkMoveStageAction, bulkReleaseClaimsAction, moveProspectStageAction } from '../actions';
+import { bulkMoveStageAction, bulkPromoteAction, bulkReleaseClaimsAction, moveProspectStageAction } from '../actions';
 import { BoardToolbar } from './board-toolbar';
-import { BulkBar, type BulkResult } from './bulk-bar';
+import { BulkBar, type BulkResult, type PromoteResults } from './bulk-bar';
 import { NewProspectButton } from './new-prospect-button';
 import { ProspectDrawer, type StageHistoryEntry } from './prospect-drawer';
 import { type BoardCard, ProspectCardView } from './prospect-card';
@@ -58,6 +58,8 @@ type Props = {
   /** The prospect named by `?p=`, when it exists. */
   openProspect: Prospect | null;
   openHistory: StageHistoryEntry[];
+  /** The open prospect's claim holder is within the viewer's team scope. */
+  holderInScope: boolean;
 };
 
 type Lane = { key: string; label: string; cards: BoardCard[] };
@@ -104,11 +106,13 @@ export function ProspectBoard({
   authorLookup,
   openProspect,
   openHistory,
+  holderInScope,
 }: Props) {
   const router = useRouter();
   const interactive = can(role, 'manageProspects');
   const canPark = can(role, 'bulkParkProspects');
   const canClaim = can(role, 'claimProspects');
+  const canPromote = can(role, 'promoteProspects');
 
   const [cards, setCards] = useState<BoardCard[]>(serverCards);
   // Adopt the fresh server list after revalidatePath re-renders the page.
@@ -125,6 +129,9 @@ export function ProspectBoard({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [promoteResults, setPromoteResults] = useState<PromoteResults | null>(null);
+  // Prospect whose promote dialog should open with its drawer (from the bulk list).
+  const [autoPromoteId, setAutoPromoteId] = useState<string | null>(null);
   // Guards a slow rollback from clobbering a newer drag.
   const dragSeqRef = useRef(0);
 
@@ -247,6 +254,25 @@ export function ProspectBoard({
     });
   }
 
+  function handleBulkPromote(ignoreWarnings: boolean) {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setError(null);
+    setBulkResult(null);
+    setPromoteResults(null);
+    startTransition(async () => {
+      const result = await bulkPromoteAction(ids, ignoreWarnings);
+      setBulkBusy(false);
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      setPromoteResults(result.data?.results ?? []);
+      setSelected(new Set());
+    });
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       <BoardToolbar
@@ -338,6 +364,9 @@ export function ProspectBoard({
 
       {openProspect ? (
         <ProspectDrawer
+          key={openProspect.id}
+          autoPromote={autoPromoteId === openProspect.id}
+          holderInScope={holderInScope}
           prospect={openProspect}
           history={openHistory}
           teammates={teammates}
@@ -360,6 +389,14 @@ export function ProspectBoard({
           count={selected.size}
           canPark={canPark}
           canRelease={canClaim}
+          canPromote={canPromote}
+          promoteResults={promoteResults}
+          onPromote={handleBulkPromote}
+          onOpenPromote={(id) => {
+            setAutoPromoteId(id);
+            openCard(id);
+          }}
+          onDismissPromote={() => setPromoteResults(null)}
           busy={bulkBusy}
           result={bulkResult}
           names={names}

@@ -48,6 +48,10 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
         ])
       : [[], { knowSomeone: false, priority: false }, { knowSomeone: 0, priority: 0 }, null];
 
+    // Same rule as promoteProspect: only a manager's team scope can exclude the holder.
+    const holderInScope =
+      !openProspect?.claimedBy || !scope || scope.userIds === null || scope.userIds.includes(openProspect.claimedBy);
+
     const authorIds = new Set<string>();
     for (const c of openComments) {
       authorIds.add(c.authorUserId);
@@ -81,6 +85,7 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
           authorLookup={authorLookup}
           openProspect={openProspect}
           openHistory={openHistory}
+          holderInScope={holderInScope}
         />
       </main>
     );

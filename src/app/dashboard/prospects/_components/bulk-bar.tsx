@@ -1,11 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 
 import type { ProspectStage } from '@/db/schema';
+import type { PromoteOutcome } from '@/lib/prospects/promote/promote';
 import { PROSPECT_STAGES } from '@/lib/prospects/rules';
 
 import { STAGE_LABELS } from './prospect-column';
+
+export type PromoteResults = { id: string; outcome: PromoteOutcome }[];
 
 export type BulkResult = { label: string; moved: number; skipped: { id: string; reason: string }[] };
 
@@ -13,12 +17,17 @@ type Props = {
   count: number;
   canPark: boolean;
   canRelease: boolean;
+  canPromote: boolean;
   busy: boolean;
   result: BulkResult | null;
+  promoteResults: PromoteResults | null;
   /** id to company name, for the skipped list. */
   names: Map<string, string>;
   onMove: (to: ProspectStage) => void;
   onRelease: () => void;
+  onPromote: (ignoreWarnings: boolean) => void;
+  onOpenPromote: (id: string) => void;
+  onDismissPromote: () => void;
   onClear: () => void;
   onDismissResult: () => void;
 };
@@ -35,9 +44,11 @@ const REASONS: Record<string, string> = {
   error: 'Failed',
 };
 
-export function BulkBar({ count, canPark, canRelease, busy, result, names, onMove, onRelease, onClear, onDismissResult }: Props) {
+export function BulkBar({ count, canPark, canRelease, canPromote, busy, result, promoteResults, names, onMove, onRelease, onPromote, onOpenPromote, onDismissPromote, onClear, onDismissResult }: Props) {
   const [to, setTo] = useState('');
-  if (count === 0 && !result) return null;
+  const [confirming, setConfirming] = useState(false);
+  const [ignoreWarnings, setIgnoreWarnings] = useState(false);
+  if (count === 0 && !result && !promoteResults) return null;
   return (
     <div className="sticky bottom-4 z-20 mx-auto mt-4 w-full max-w-2xl rounded-lg border border-slate-300 bg-white p-3 shadow-lg">
       {count > 0 ? (
@@ -88,9 +99,89 @@ export function BulkBar({ count, canPark, canRelease, busy, result, names, onMov
               Release claims
             </button>
           ) : null}
+          {canPromote ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirming((v) => !v)}
+              className="rounded-md border border-slate-300 px-3 py-1 text-[13px] text-slate-700 disabled:opacity-50"
+            >
+              Promote
+            </button>
+          ) : null}
           <button type="button" onClick={onClear} className="ml-auto text-[12px] text-slate-500 hover:text-slate-700">
             Clear
           </button>
+        </div>
+      ) : null}
+      {count > 0 && confirming ? (
+        <div className="mt-2 border-t border-slate-100 pt-2 text-[13px] text-slate-800">
+          <p>
+            Promote {count} {count === 1 ? 'prospect' : 'prospects'} to leads?
+          </p>
+          <label className="mt-1 flex items-center gap-2 text-[12px] text-slate-600">
+            <input type="checkbox" checked={ignoreWarnings} onChange={(e) => setIgnoreWarnings(e.target.checked)} />
+            Ignore similar-name warnings
+          </label>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setConfirming(false);
+                onPromote(ignoreWarnings);
+              }}
+              className="rounded-md bg-indigo-600 px-3 py-1 text-[13px] font-medium text-white disabled:opacity-50"
+            >
+              Confirm promote
+            </button>
+            <button type="button" onClick={() => setConfirming(false)} className="text-[12px] text-slate-500 hover:text-slate-700">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {promoteResults ? (
+        <div role="status" className={count > 0 ? 'mt-2 border-t border-slate-100 pt-2' : ''}>
+          <div className="flex items-center justify-between text-[13px] text-slate-800">
+            <span>
+              Promoted {promoteResults.filter((r) => r.outcome.status === 'promoted').length} of {promoteResults.length}
+            </span>
+            <button type="button" onClick={onDismissPromote} className="text-[12px] text-slate-500 hover:text-slate-700">
+              Dismiss
+            </button>
+          </div>
+          <ul className="mt-1 max-h-48 space-y-0.5 overflow-y-auto text-[12px] text-slate-700">
+            {promoteResults.map(({ id, outcome }) => (
+              <li key={id} className="flex items-center gap-2">
+                <span className="font-medium">{names.get(id) ?? id}</span>
+                {outcome.status === 'promoted' ? (
+                  <>
+                    <span className="text-slate-500">{outcome.linked ? 'Linked to the existing lead' : 'Promoted'}</span>
+                    <Link href={`/dashboard/deals/${outcome.dealId}`} className="text-indigo-700 underline">
+                      Open lead →
+                    </Link>
+                  </>
+                ) : outcome.status === 'blocked' ? (
+                  <>
+                    <span className="text-amber-700">Matches existing records</span>
+                    <button type="button" onClick={() => onOpenPromote(id)} className="text-indigo-700 underline">
+                      Open
+                    </button>
+                  </>
+                ) : outcome.status === 'warn' ? (
+                  <>
+                    <span className="text-amber-700">Similar name</span>
+                    <button type="button" onClick={() => onOpenPromote(id)} className="text-indigo-700 underline">
+                      Open
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-red-700">{outcome.message}</span>
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
       {result ? (
