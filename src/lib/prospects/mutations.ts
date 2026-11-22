@@ -1,8 +1,8 @@
 import 'server-only';
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
-import { prospects, prospectStageHistory, type ProspectStage } from '@/db/schema';
+import { offerings, prospects, prospectStageHistory, type ProspectStage } from '@/db/schema';
 import { tenantTransaction, type DbExecutor } from '@/lib/db-context';
 import { can } from '@/lib/rbac';
 
@@ -35,6 +35,9 @@ export const MESSAGES = {
   cannot_claim: "That person can't claim prospects.",
 } as const;
 
+/** A product-fit offering id that is not one of the tenant's offerings. */
+export const UNKNOWN_PRODUCT = 'Unknown product.';
+
 export const fail = (error: Exclude<keyof typeof MESSAGES, 'cannot_claim'>): MutationResult => ({ ok: false, error, message: MESSAGES[error] });
 
 export const MAX_BULK = 500;
@@ -51,15 +54,30 @@ export async function createProspect(
   if (!parsed.success) return { ok: false, error: parsed.error.message };
   const values = normalizeProspectInput(parsed.data);
   return tenantTransaction(async (tx) => {
-    const [id] = await insertProspectRows(tx, tenantId, actor, [values]);
-    return { ok: true as const, id: id! };
+    const r = await insertProspectRows(tx, tenantId, actor, [values]);
+    if (!r.ok) return { ok: false as const, error: UNKNOWN_PRODUCT };
+    return { ok: true as const, id: r.ids[0]! };
   });
+}
+
+/** Indexes of rows whose non-null productFitOfferingId is not one of this tenant's offerings. */
+async function unknownOfferingRows(tx: DbExecutor, tenantId: string, ids: Array<string | null>): Promise<number[]> {
+  const wanted = [...new Set(ids.filter((id): id is string => !!id))];
+  if (wanted.length === 0) return [];
+  const found = await tx
+    .select({ id: offerings.id })
+    .from(offerings)
+    .where(and(eq(offerings.tenantId, tenantId), inArray(offerings.id, wanted)));
+  const known = new Set(found.map((o) => o.id));
+  return ids.flatMap((id, i) => (id && !known.has(id) ? [i] : []));
 }
 
 /**
  * Inserts already-validated, normalised prospect rows in stage `dump` and
  * writes one history row each (null -> 'dump'). Shared by createProspect and
- * the Quick Dump confirm; runs inside the caller's transaction.
+ * the Quick Dump confirm; runs inside the caller's transaction. Nothing is
+ * inserted when any row's product-fit offering is not one of the tenant's
+ * (`unknownOffering` lists those rows' indexes).
  */
 export async function insertProspectRows(
   tx: DbExecutor,
@@ -67,8 +85,10 @@ export async function insertProspectRows(
   actor: Actor,
   rows: ProspectRowValues[],
   opts: { importId?: string } = {},
-): Promise<string[]> {
-  if (rows.length === 0) return [];
+): Promise<{ ok: true; ids: string[] } | { ok: false; unknownOffering: number[] }> {
+  if (rows.length === 0) return { ok: true, ids: [] };
+  const unknownOffering = await unknownOfferingRows(tx, tenantId, rows.map((r) => r.productFitOfferingId));
+  if (unknownOffering.length > 0) return { ok: false, unknownOffering };
   const now = new Date();
   const inserted = await tx
     .insert(prospects)
@@ -77,7 +97,7 @@ export async function insertProspectRows(
   await tx.insert(prospectStageHistory).values(
     inserted.map((r) => ({ tenantId, prospectId: r.id, fromStage: null, toStage: 'dump' as const, changedBy: actor.userId })),
   );
-  return inserted.map((r) => r.id);
+  return { ok: true, ids: inserted.map((r) => r.id) };
 }
 
 export async function updateProspect(
@@ -120,6 +140,9 @@ export async function updateProspect(
     const parsed = prospectInputSchema.safeParse(merged);
     if (!parsed.success) return { ok: false, error: 'invalid', message: parsed.error.message } as MutationResult;
     const values = normalizeProspectInput(parsed.data);
+    if ((await unknownOfferingRows(tx, tenantId, [values.productFitOfferingId])).length > 0) {
+      return { ok: false, error: 'invalid', message: UNKNOWN_PRODUCT } as MutationResult;
+    }
     const now = new Date();
     await tx
       .update(prospects)

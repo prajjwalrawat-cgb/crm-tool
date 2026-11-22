@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ilike, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 
 import {
   offerings,
@@ -39,8 +39,17 @@ export async function listProspectsForBoard(
       .as('v');
 
     const conds: (SQL | undefined)[] = [eq(prospects.tenantId, tenantId), isNull(prospects.deletedAt)];
-    if (f.mine) conds.push(or(eq(prospects.claimedBy, viewerId), eq(prospects.createdBy, viewerId)));
-    if (f.unclaimed) conds.push(isNull(prospects.claimedBy));
+    // An expired claim counts as no claim: it is "unclaimed", and no longer "mine" through the claim.
+    const now = sql`now()`;
+    if (f.mine) {
+      conds.push(
+        or(
+          and(eq(prospects.claimedBy, viewerId), or(isNull(prospects.claimExpiresAt), gt(prospects.claimExpiresAt, now))),
+          eq(prospects.createdBy, viewerId),
+        ),
+      );
+    }
+    if (f.unclaimed) conds.push(or(isNull(prospects.claimedBy), lte(prospects.claimExpiresAt, now)));
     if (f.source) conds.push(eq(prospects.sourceTag, f.source));
     if (f.stage) conds.push(eq(prospects.stage, f.stage));
     if (!f.showPromoted) conds.push(isNull(prospects.promotedDealId));

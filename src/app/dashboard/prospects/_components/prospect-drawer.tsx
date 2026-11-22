@@ -103,6 +103,7 @@ export function ProspectDrawer({
         />
 
         <ClaimPanel
+          key={prospect.id}
           prospect={prospect}
           teammates={teammates}
           role={role}
@@ -113,7 +114,7 @@ export function ProspectDrawer({
 
         <VoteButtons
           prospectId={prospect.id}
-          key={`${voteCounts.knowSomeone}:${voteCounts.priority}:${myVotes.knowSomeone}:${myVotes.priority}`}
+          key={`${prospect.id}:${voteCounts.knowSomeone}:${voteCounts.priority}:${myVotes.knowSomeone}:${myVotes.priority}`}
           knowSomeone={voteCounts.knowSomeone}
           priority={voteCounts.priority}
           myVotes={myVotes}

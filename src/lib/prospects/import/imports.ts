@@ -10,7 +10,7 @@ import { captureError } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 import { isStorageConfigured, prospectImportsBucket, uploadPrivateFile } from '@/lib/storage/supabase';
 
-import { insertProspectRows, MESSAGES, UUID_RE } from '../mutations';
+import { insertProspectRows, MESSAGES, UNKNOWN_PRODUCT, UUID_RE } from '../mutations';
 import { normalizeProspectInput, prospectInputSchema, type Actor, type ProspectRowValues } from '../rules';
 import { computeDedupHints, type DedupHint } from './dedup-hints';
 import {
@@ -223,12 +223,20 @@ export async function confirmImport(
     });
     if (rowErrors.length > 0) return { ok: false, message: IMPORT_MESSAGES.invalidRows, rowErrors };
 
-    const ids = await insertProspectRows(tx, tenantId, actor, values, { importId });
+    // Every row passed validation, so values[i] is rows[i].
+    const ins = await insertProspectRows(tx, tenantId, actor, values, { importId });
+    if (!ins.ok) {
+      return {
+        ok: false,
+        message: IMPORT_MESSAGES.invalidRows,
+        rowErrors: ins.unknownOffering.map((index) => ({ index, message: UNKNOWN_PRODUCT })),
+      };
+    }
     await tx
       .update(prospectImports)
-      .set({ status: 'confirmed', rowsInserted: ids.length, confirmedAt: new Date() })
+      .set({ status: 'confirmed', rowsInserted: ins.ids.length, confirmedAt: new Date() })
       .where(and(eq(prospectImports.tenantId, tenantId), eq(prospectImports.id, importId)));
-    return { ok: true, inserted: ids.length };
+    return { ok: true, inserted: ins.ids.length };
   });
 }
 

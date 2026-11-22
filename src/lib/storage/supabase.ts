@@ -109,7 +109,7 @@ export async function deleteDealDocument(path: string): Promise<void> {
 
 /** Private bucket for Prospect Board Quick Dump images (never public URLs). */
 export function prospectImportsBucket(): string {
-  return process.env.SUPABASE_PROSPECT_IMPORTS_BUCKET ?? 'prospect-imports';
+  return process.env.SUPABASE_PROSPECT_IMPORTS_BUCKET?.trim() || 'prospect-imports';
 }
 
 /** Upload to a private bucket and return the object path (never a public URL). */

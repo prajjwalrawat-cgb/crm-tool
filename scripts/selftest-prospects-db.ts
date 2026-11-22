@@ -164,6 +164,19 @@ async function main() {
 
     const upd = await asA(() => m.updateProspect(A, member, c1, { industry: 'Steel' }));
     check('update: ok and merges', upd.ok && (await stageOf(c1)).industry === 'Steel' && (await stageOf(c1)).companyName === 'Create Co');
+    // Product fit must be one of the tenant's own offerings.
+    const cat = s.offeringCategory.enumValues[0];
+    const [offA] = await inA((tx) => tx.insert(s.offerings).values({ tenantId: A, name: 'Own Product', category: cat }).returning());
+    const [offB] = await runWithSystemContext(B, () =>
+      tenantTransaction((tx) => tx.insert(s.offerings).values({ tenantId: B, name: 'Other Tenant Product', category: cat }).returning()),
+    );
+    const cOwn = await asA(() => m.createProspect(A, member, { companyName: 'Own Fit Co', sourceTag: 'selftest', clusterTags: [], productFitOfferingId: offA!.id } as never));
+    const cFor = await asA(() => m.createProspect(A, member, { companyName: 'Foreign Fit Co', sourceTag: 'selftest', clusterTags: [], productFitOfferingId: offB!.id } as never));
+    const forCount = (await inA((tx) => tx.select().from(s.prospects).where(eq(s.prospects.companyName, 'Foreign Fit Co')))).length;
+    check('offering: create accepts own, rejects other tenant\'s', cOwn.ok && !cFor.ok && cFor.error === 'Unknown product.' && forCount === 0, { cOwn, cFor, forCount });
+    const uFor = await asA(() => m.updateProspect(A, member, c1, { productFitOfferingId: offB!.id }));
+    const uOwn = await asA(() => m.updateProspect(A, member, c1, { productFitOfferingId: offA!.id }));
+    check('offering: update rejects other tenant\'s, accepts own', !uFor.ok && uFor.error === 'invalid' && uFor.message === 'Unknown product.' && uOwn.ok && (await stageOf(c1)).productFitOfferingId === offA!.id, { uFor, uOwn });
     const gone = await asA(() => q.getProspect(A, c8));
     check('get: deleted is null', gone === null);
 
@@ -178,6 +191,17 @@ async function main() {
     check('list: mine', mine.includes(lf) && mine.includes(lu) && !mine.includes(lo), mine.length);
     const uncl = await ids({ unclaimed: true });
     check('list: unclaimed', uncl.includes(lu) && !uncl.includes(lf) && !uncl.includes(lo));
+    // An expired claim is no claim: "unclaimed" includes it, and "mine" no longer does through it.
+    const past = new Date(Date.now() - 60_000);
+    const future = new Date(Date.now() + 86_400_000);
+    const lxOther = await mk('Filter Expired Other', { sourceTag: 'src-x', claimedBy: otherU, claimExpiresAt: past, createdBy: otherU });
+    const lxMine = await mk('Filter Expired Mine', { sourceTag: 'src-x', claimedBy: memberU, claimExpiresAt: past, createdBy: otherU });
+    const lvMine = await mk('Filter Live Mine', { sourceTag: 'src-x', claimedBy: memberU, claimExpiresAt: future, createdBy: otherU });
+    const lvOther = await mk('Filter Live Other', { sourceTag: 'src-x', claimedBy: otherU, claimExpiresAt: future, createdBy: otherU });
+    const uncl2 = await ids({ unclaimed: true });
+    const mine2 = await ids({ mine: true });
+    check('list: unclaimed includes expired claims', uncl2.includes(lxOther) && uncl2.includes(lxMine) && !uncl2.includes(lvMine) && !uncl2.includes(lvOther), { uncl2 });
+    check('list: mine = live claim or created by me', mine2.includes(lvMine) && !mine2.includes(lxMine) && !mine2.includes(lxOther) && !mine2.includes(lvOther) && mine2.includes(lf), { mine2 });
     const src = await ids({ source: 'src-y' });
     check('list: source', src.length === 1 && src[0] === lo, src);
     const stg = await ids({ stage: 'qualified' });
@@ -486,6 +510,23 @@ async function main() {
     const dx = it3.ok ? await asB(() => imp.discardImport(B, { userId: 'usr_b', role: 'member' }, it3.importId)) : null;
     const cmal = await asA(() => imp.confirmImport(A, member, 'abc', []));
     check('confirm: cross-tenant import id -> not found', !!cx && !cx.ok && cx.message === 'Import not found.' && !!dx && !dx.ok && dx.message === 'Import not found.' && !cmal.ok && (await prospectCount()) === before3 && (it3.ok ? (await importRow(it3.importId))?.status === 'parsed' : false), { cx, dx, cmal });
+
+    // Confirm: a row with another tenant's offering -> rowErrors for that row, nothing inserted.
+    const before4 = await prospectCount();
+    const cfo = it3.ok
+      ? await asA(() => imp.confirmImport(A, member, it3.importId, [{ ...it3.rows[0], productFitOfferingId: offA!.id }, { ...it3.rows[1], productFitOfferingId: offB!.id }]))
+      : null;
+    check(
+      'confirm: other tenant\'s offering -> rowErrors, nothing inserted',
+      !!cfo && !cfo.ok && cfo.rowErrors?.length === 1 && cfo.rowErrors[0]!.index === 1 && cfo.rowErrors[0]!.message === 'Unknown product.' && (await prospectCount()) === before4 && (it3.ok ? (await importRow(it3.importId))?.status === 'parsed' : false),
+      cfo,
+    );
+
+    // Rows past 500 are reported as capped, apart from dropped ones.
+    const icap = await asA(() =>
+      imp.createImport(A, member, { sourceTag: 'cap', kind: 'text', text: 'many' }, stubParse([...Array.from({ length: 600 }, (_, i) => dumpRow({ companyName: `Cap Co ${i}` })), dumpRow({ companyName: '' })])),
+    );
+    check('import: capped reported apart from dropped', icap.ok && icap.rows.length === 500 && icap.capped === 100 && icap.dropped === 1, icap.ok ? { n: icap.rows.length, c: icap.capped, d: icap.dropped } : icap);
 
     const dd = it3.ok ? await asA(() => imp.discardImport(A, member, it3.importId)) : null;
     const cd = it3.ok ? await asA(() => imp.confirmImport(A, member, it3.importId, it3.rows)) : null;
