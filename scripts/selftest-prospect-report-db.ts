@@ -33,6 +33,8 @@ async function main() {
   const [tb] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PBR B', ${`zz-pbr-b-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
   const A = ta!.id;
   const B = tb!.id;
+  const [tcc] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PBR C', ${`zz-pbr-c-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
+  const C = tcc!.id;
   const U = (n: string) => `usr_pbr_${stamp}_${n}`;
   const [owner, mgr, rep1, rep2, bUser] = ['owner', 'mgr', 'rep1', 'rep2', 'b1'].map(U) as [string, string, string, string, string];
 
@@ -117,12 +119,23 @@ async function main() {
     const pb = await mkP({ tenant: B, name: 'BP', createdAt: at(t0), createdBy: rep1, source: 'zzB', tags: ['zztag'], stage: 'parked', lastActivityAt: old });
     await mkH(B, pb, 'dump', 'parked', 'system:auto-park', '2026-03-20T00:00:00Z');
 
+    // ---- tenant C: duplicate tags and odd history, isolated from the counts above ----
+    await db.execute(sql`INSERT INTO memberships (tenant_id, user_id, role) VALUES (${C}::uuid, ${owner}, 'owner')`);
+    await mkP({ tenant: C, name: 'C8', createdAt: at(t0), createdBy: rep1, source: 'dup', tags: ['a', 'a'] });
+    const c9 = await mkP({ tenant: C, name: 'C9', createdAt: at(t0), createdBy: rep1, source: 'odd', stage: 'ready', promotedBy: rep1, promotedAt: at(t0 + 1 * DAY), deal: await mkDeal(C, 'd9') });
+    await mkH(C, c9, 'dump', 'ready', rep1, at(t0 + 3 * DAY)); // after promoted_at
+    await mkH(C, c9, null, 'parked', rep1, at(t0 + 3 * DAY)); // equal timestamp
+    await mkH(C, c9, null, 'dump', rep1, at(t0 + 2 * DAY)); // inserted out of order
+
     const run = (tenant: string, userId: string, role: 'owner' | 'manager', range: unknown = RANGE) =>
       runWithSystemContext(tenant, async () => {
         const scope = await scopeUsers({ tenantId: tenant, userId, role });
         const res = await prospectBoardRunner(tenant, { range: range as never, scope }, { currentUserId: userId });
         return res.extras!;
       });
+
+    const runNoScope = (tenant: string, userId: string) =>
+      runWithSystemContext(tenant, async () => (await prospectBoardRunner(tenant, { range: RANGE as never }, { currentUserId: userId })).extras!);
 
     const rep = (r: { userId: string; count: number }[], u: string) => r.find((x) => x.userId === u)?.count;
     const row = <T extends { key: string }>(rows: T[], k: string) => rows.find((x) => x.key === k);
@@ -190,6 +203,28 @@ async function main() {
 
     check('owner sees all', own.addedByRep.length === 3 && own.stale.count === 3, own.addedByRep);
 
+    const mgNo = await runNoScope(A, mgr);
+    check('fail closed: manager without scope gets team-scoped results, rep2 absent everywhere',
+      JSON.stringify(mgNo) === JSON.stringify({ ...mg, range: mgNo.range }) && !JSON.stringify(mgNo).includes(rep2) && mgNo.stale.count === 2,
+      mgNo);
+    const ownNo = await runNoScope(A, owner);
+    check('fail closed: owner without scope still sees all', ownNo.addedByRep.length === 3 && ownNo.stale.count === 3, ownNo.addedByRep);
+    const stranger = await runNoScope(A, U('nobody'));
+    check('fail closed: non-member viewer gets empty results',
+      stranger.addedByRep.length === 0 && stranger.addedBySource.length === 0 && stranger.conversionByTag.length === 0 &&
+        stranger.conversionByRep.length === 0 && stranger.daysInStage.every((d) => d.intervals === 0) &&
+        stranger.stale.count === 0 && stranger.stale.autoParkedInRange === 0,
+      stranger);
+
+    const cv = await run(C, owner, 'owner');
+    check('tags: a prospect with duplicate tags counts once in that tag',
+      cv.conversionByTag.length === 2 && row(cv.conversionByTag, 'a')?.cohort === 1 && row(cv.conversionByTag, '(no tag)')?.cohort === 1,
+      cv.conversionByTag);
+    check('days: history after promoted_at / equal / out-of-order timestamps never negative or NaN',
+      cv.daysInStage.every((d) => d.avgDays === null || (Number.isFinite(d.avgDays) && d.avgDays >= 0)) &&
+        !JSON.stringify(cv).includes('NaN') && cv.daysInStage.reduce((n, d) => n + d.intervals, 0) === 3,
+      cv.daysInStage);
+
     const bView = await run(B, bUser, 'owner');
     check('cross-tenant data never included',
       !JSON.stringify(own).includes('zzB') && !JSON.stringify(own).includes('zztag') && own.stale.autoParkedInRange === 2 &&
@@ -198,7 +233,7 @@ async function main() {
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
-    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B})`);
+    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B}, ${C})`);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

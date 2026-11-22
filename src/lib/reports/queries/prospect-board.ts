@@ -3,12 +3,13 @@ import 'server-only';
 import { sql, type SQL } from 'drizzle-orm';
 
 import { PROSPECT_STAGES, type ProspectStage } from '@/db/schema/prospects';
+import type { MembershipRole } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 import { getProspectSettings } from '@/lib/prospects/settings';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import { resolveDateRange } from '../filters';
-import { textArray, type ReportScope } from '../manager/scope';
+import { scopeUsers, textArray, type ReportScope } from '../manager/scope';
 import type { ReportFilter, ReportRunner } from '../types';
 
 /**
@@ -40,7 +41,11 @@ export type ProspectBoardReport = {
 };
 
 export type ProspectBoardFilter = ReportFilter & {
-  /** The viewer's report scope; `userIds: null` means the whole tenant. */
+  /**
+   * Optional override (tests, pre-resolved callers); `userIds: null` means the
+   * whole tenant. When absent the runner derives the scope from the viewer's
+   * membership and fails closed (empty) if there is none.
+   */
   scope?: Pick<ReportScope, 'userIds'>;
 };
 
@@ -93,7 +98,20 @@ export const prospectBoardRunner: ReportRunner<
 
   // Effective user set: the viewer's scope, narrowed by an owner filter. Someone
   // outside the scope gets an empty set, never a wider one.
-  let userIds: string[] | null = filters.scope?.userIds ?? null;
+  let userIds: string[] | null;
+  if (filters.scope) {
+    userIds = filters.scope.userIds;
+  } else {
+    const [m] = (await tenantTransaction((tx) =>
+      tx.execute(sql`
+        SELECT role FROM memberships
+        WHERE tenant_id = ${tenantId}::uuid AND user_id = ${context.currentUserId} AND status = 'active'
+        LIMIT 1`),
+    )) as unknown as Array<{ role: MembershipRole }>;
+    userIds = m
+      ? (await scopeUsers({ tenantId, userId: context.currentUserId, role: m.role })).userIds
+      : [];
+  }
   const owner = filters.owner;
   const target =
     !owner || owner.type === 'all' ? null : owner.type === 'mine' ? context.currentUserId : owner.userId;
