@@ -65,6 +65,8 @@ function routingLine(routing: PromoteRouting, claimerName: string | null): strin
   }
 }
 
+const THROWN = { ok: false, message: 'Something went wrong. Try again.' } as const;
+
 export function PromoteDialog({ prospectId, seed = null, claimerName, canCreateAnyway, onClose }: Props) {
   const [view, setView] = useState<View>(seed ? { kind: seed.kind, candidates: seed.candidates } : { kind: 'checking' });
   const [busy, setBusy] = useState(false);
@@ -100,14 +102,15 @@ export function PromoteDialog({ prospectId, seed = null, claimerName, canCreateA
     // The ref keeps React strict-mode's double effect from promoting twice.
     if (seed || started.current) return;
     started.current = true;
-    void promoteProspectAction(prospectId).then((r) => apply(r));
+    // A thrown action (network, server crash) shows an error and re-enables Close.
+    void promoteProspectAction(prospectId).then((r) => apply(r), () => apply(THROWN));
   }, [prospectId, seed]);
 
   function send(choice: PromoteChoice) {
     if (view.kind === 'checking') return;
     setBusy(true);
     setNotice(null);
-    void promoteProspectAction(prospectId, choice).then((r) => apply(r, view));
+    void promoteProspectAction(prospectId, choice).then((r) => apply(r, view), () => apply(THROWN, view));
   }
 
   const candidates = view.kind === 'blocked' || view.kind === 'warn' ? view.candidates : [];

@@ -249,3 +249,29 @@ export function groupKeyOf(card: ProspectCard, by: GroupByKey): { key: string; l
     }
   }
 }
+
+/* ---------------- workspace settings ---------------- */
+
+export const SETTINGS_MESSAGES = {
+  claimDays: 'Claim length must be 1–90 days.',
+  autoParkDays: 'Auto-park must be 7–365 days.',
+} as const;
+
+const dayRange = (min: number, max: number, message: string) =>
+  z.number({ error: message }).int({ error: message }).min(min, { error: message }).max(max, { error: message });
+
+/** Prospect Board settings input. Client-safe so the form validates before saving. */
+export const prospectSettingsSchema = z.object({
+  claimDays: dayRange(1, 90, SETTINGS_MESSAGES.claimDays),
+  claimExpiryEnabled: z.boolean(),
+  autoParkDays: dayRange(7, 365, SETTINGS_MESSAGES.autoParkDays),
+  autoParkEnabled: z.boolean(),
+  enrichmentEnabled: z.boolean(),
+});
+export type ProspectSettingsInput = z.infer<typeof prospectSettingsSchema>;
+
+/** First human-readable problem with a settings input, or null when it is valid. */
+export function prospectSettingsError(input: unknown): string | null {
+  const r = prospectSettingsSchema.safeParse(input);
+  return r.success ? null : (r.error.issues[0]?.message ?? 'Check the settings and try again.');
+}

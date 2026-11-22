@@ -7,6 +7,8 @@ import {
   releaseBlock,
   parseProspectFilters,
   prospectInputSchema,
+  prospectSettingsError,
+  SETTINGS_MESSAGES,
   stageMoveBlock,
   type ProspectCard,
 } from '../src/lib/prospects/rules';
@@ -118,6 +120,20 @@ check('rbac: manager bulkParkProspects', can('manager', 'bulkParkProspects') ===
   check('promote: manager out of scope', promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: active }), { userId: 'm', role: 'manager' }, out) === 'out_of_scope');
   check('promote: manager in scope', promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: active }), { userId: 'm', role: 'manager' }, scoped) === null);
   check("promote: owner on other's claim", promoteBlock(pr({ claimedBy: 'u2', claimExpiresAt: active }), { userId: 'o', role: 'owner' }, out) === null);
+}
+
+/* ---------------- settings validation (final review M5) ---------------- */
+{
+  const ok = { claimDays: 14, claimExpiryEnabled: true, autoParkDays: 45, autoParkEnabled: true, enrichmentEnabled: false };
+  check('settings: valid input -> null', prospectSettingsError(ok) === null);
+  check('settings: bounds accepted (1, 90, 7, 365)', prospectSettingsError({ ...ok, claimDays: 1, autoParkDays: 7 }) === null && prospectSettingsError({ ...ok, claimDays: 90, autoParkDays: 365 }) === null);
+  for (const bad of [0, 91, 1.5, Number.NaN]) {
+    check(`settings: claimDays ${bad} -> friendly message`, prospectSettingsError({ ...ok, claimDays: bad }) === SETTINGS_MESSAGES.claimDays, prospectSettingsError({ ...ok, claimDays: bad }));
+  }
+  for (const bad of [6, 366, 10.5, Number.NaN]) {
+    check(`settings: autoParkDays ${bad} -> friendly message`, prospectSettingsError({ ...ok, autoParkDays: bad }) === SETTINGS_MESSAGES.autoParkDays, prospectSettingsError({ ...ok, autoParkDays: bad }));
+  }
+  check('settings: claim length is 1–90 days', SETTINGS_MESSAGES.claimDays === 'Claim length must be 1–90 days.' && SETTINGS_MESSAGES.autoParkDays === 'Auto-park must be 7–365 days.');
 }
 
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

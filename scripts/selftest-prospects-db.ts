@@ -317,6 +317,12 @@ async function main() {
     ].map((i) => asU(ownerU, () => ps.updateProspectSettings(A, owner, i))));
     const backBad = await asU(ownerU, () => ps.getProspectSettings(A));
     check('settings: out of range rejected', bad.every((r) => !r.ok && r.error === 'invalid') && backBad.claimDays === 30 && backBad.autoParkDays === 60, { bad, backBad });
+    const msgs = bad.map((r) => (r.ok ? null : r.message));
+    check(
+      'settings: friendly messages, not zod JSON',
+      JSON.stringify(msgs) === JSON.stringify(['Claim length must be 1–90 days.', 'Claim length must be 1–90 days.', 'Claim length must be 1–90 days.', 'Auto-park must be 7–365 days.', 'Auto-park must be 7–365 days.']),
+      msgs,
+    );
 
     const denied = await asU(memberU, () => ps.updateProspectSettings(A, member, { ...full, claimDays: 5 }));
     const mgrDenied = await asU(mgrU, () => ps.updateProspectSettings(A, mgr, { ...full, claimDays: 5 }));
@@ -931,7 +937,7 @@ async function main() {
       const sug3 = (await sugFor(pSugB)).find((x) => x.field === 'industry');
       check('promote blocked: suggestions stay pending', oSugB.status === 'blocked' && sug3?.status === 'pending', { oSugB: oSugB.status, sug3: sug3?.status });
 
-      // a real distribution rule, so the promotes below also emit crm/lead.assigned
+      // final review M6: a real distribution rule → owner assigned, routing 'distributed'
       const srcBoard = (await inC((tx) => tx.select().from(s.leadSources).where(eq(s.leadSources.type, 'prospect_board'))))[0]!;
       await inC((tx) =>
         tx.insert(s.distributionRules).values({
@@ -944,6 +950,14 @@ async function main() {
       const sendEvents = (async (evs: Array<{ name: string; data: Record<string, unknown> }>) => void batches.push(evs)) as never;
       const pDist = await mkC({ companyName: 'Routable Ropes', contactEmail: 'r@routable.in' });
       const oDist = await promote(cOwner, pDist, undefined, { sendEvents });
+      const dDist = oDist.status === 'promoted' ? await dealById(oDist.dealId) : undefined;
+      const laDist = dDist ? await inC((tx) => tx.select().from(s.leadAssignments).where(eq(s.leadAssignments.dealId, dDist.id))) : [];
+      check(
+        "promote: matching distribution rule → routing 'distributed', owner assigned",
+        oDist.status === 'promoted' && oDist.routing === 'distributed' && dDist?.ownerId === cMember.userId && dDist?.routingStatus !== 'pending' &&
+          laDist.some((a) => a.assignedTo === cMember.userId && a.releasedAt === null),
+        { oDist, owner: dDist?.ownerId, rs: dDist?.routingStatus, laDist: laDist.map((a) => a.assignedTo) },
+      );
       // final review I4: a single promote sends its events in one batch (lead.assigned included)
       const names1 = (batches[0] ?? []).map((e) => e.name);
       check(
@@ -1048,6 +1062,23 @@ async function main() {
       check('maint: exactly 45 days is not parked (strict <)', (await rowD(bEdge)).stage === 'dump' && rB.parked === 1, rB);
       check('maint: claim expiring exactly now is released (<=)', (await rowD(bExact)).claimedBy === null && rB.released === 1, rB);
       check('maint: auto-parked prospect keeps its claim', cpRow.stage === 'parked' && cpRow.claimedBy === claimer && cpRow.claimExpiresAt !== null, cpRow);
+
+      // final review M4: a tenant that still fails after its step's retries does not stop later tenants
+      const wfP = await import('../src/lib/inngest/workflows/prospects');
+      const ran: string[] = [];
+      const inlineStep = { run: <T,>(_id: string, fn: () => Promise<T>) => fn() };
+      const multi = await wfP.runMaintenanceForTenants(inlineStep, ['t1', 't2', 't3'], async (tid) => {
+        ran.push(tid);
+        if (tid === 't2') throw new Error('tenant t2 is broken');
+        return { parked: 1, released: 0 };
+      });
+      check(
+        'maint workflow: failing tenant is recorded, later tenants still run',
+        JSON.stringify(ran) === '["t1","t2","t3"]' && JSON.stringify(multi.failedTenantIds) === '["t2"]' && multi.results.map((r) => r.tenantId).join() === 't1,t3',
+        { ran, multi },
+      );
+      const real = await wfP.runMaintenanceForTenants(inlineStep, [D]);
+      check('maint workflow: default handler runs the real maintenance', real.failedTenantIds.length === 0 && real.results.length === 1 && real.results[0]!.tenantId === D, real);
     }
     /* ---------------- enrichment (Stage 3 Task 6) ---------------- */
     {

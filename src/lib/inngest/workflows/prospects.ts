@@ -40,21 +40,48 @@ export const prospectMaintenanceDaily = inngest.createFunction(
           db.select({ id: tenants.id }).from(tenants),
         );
 
-        const results: Array<{ tenantId: string; parked: number; released: number }> = [];
-        for (const tenant of allTenants) {
-          const r = await step.run(`maintenance-${tenant.id}`, async () =>
-            runWithSystemContext(tenant.id, () => prospectMaintenanceHandler(tenant.id)),
-          );
-          results.push({ tenantId: tenant.id, ...r });
-        }
+        const { results, failedTenantIds } = await runMaintenanceForTenants(
+          step as unknown as LocalStepAPI,
+          allTenants.map((t) => t.id),
+        );
 
         incr('workflow.success', 1, { workflow: WORKFLOW_ID });
         observe('workflow.duration_ms', Date.now() - startedAt, { workflow: WORKFLOW_ID });
-        return { tenants: allTenants.length, results };
+        return { tenants: allTenants.length, results, failedTenantIds };
       },
     );
   },
 );
+
+/**
+ * One step per tenant. A tenant whose step still fails after the step's own
+ * retries is recorded in `failedTenantIds` and the loop moves on, so one bad
+ * tenant never stops the rest. Exported for tests (handler injectable).
+ */
+export async function runMaintenanceForTenants(
+  step: Pick<LocalStepAPI, 'run'>,
+  tenantIds: string[],
+  handler: (tenantId: string) => Promise<{ parked: number; released: number }> = (tenantId) =>
+    runWithSystemContext(tenantId, () => prospectMaintenanceHandler(tenantId)),
+): Promise<{ results: Array<{ tenantId: string; parked: number; released: number }>; failedTenantIds: string[] }> {
+  const results: Array<{ tenantId: string; parked: number; released: number }> = [];
+  const failedTenantIds: string[] = [];
+  for (const tenantId of tenantIds) {
+    try {
+      const r = await step.run(`maintenance-${tenantId}`, () => handler(tenantId));
+      results.push({ tenantId, ...r });
+    } catch (err) {
+      captureError(err, {
+        category: 'workflow.prospects-daily-maintenance.tenant',
+        severity: 'high',
+        retryable: false,
+        fields: { tenantId },
+      });
+      failedTenantIds.push(tenantId);
+    }
+  }
+  return { results, failedTenantIds };
+}
 
 /** Plain handler for one tenant (exported for tests). */
 export async function prospectMaintenanceHandler(

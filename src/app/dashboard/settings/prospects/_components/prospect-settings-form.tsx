@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
+import { prospectSettingsError } from '@/lib/prospects/rules';
 import type { ProspectSettings } from '@/lib/prospects/settings';
 
 import { saveProspectSettings } from '../actions';
@@ -23,14 +24,18 @@ export function ProspectSettingsForm({ initial }: { initial: ProspectSettings })
   const router = useRouter();
 
   function save() {
+    const input = {
+      // A blank field is NaN, which fails validation like any out-of-range value.
+      claimDays: claimDays.trim() === '' ? Number.NaN : Number(claimDays),
+      claimExpiryEnabled,
+      autoParkDays: autoParkDays.trim() === '' ? Number.NaN : Number(autoParkDays),
+      autoParkEnabled,
+      enrichmentEnabled,
+    };
+    const invalid = prospectSettingsError(input);
+    if (invalid) return void toast.error(invalid);
     start(async () => {
-      const r = await saveProspectSettings({
-        claimDays: Number(claimDays),
-        claimExpiryEnabled,
-        autoParkDays: Number(autoParkDays),
-        autoParkEnabled,
-        enrichmentEnabled,
-      });
+      const r = await saveProspectSettings(input);
       if (!r.ok) return void toast.error(r.message);
       toast.success('Prospect board settings saved');
       router.refresh();
@@ -71,14 +76,18 @@ export function ProspectSettingsForm({ initial }: { initial: ProspectSettings })
         <label className={label}>
           <input
             type="checkbox"
-            checked={enrichmentEnabled && initial.aiSuggestionsEnabled}
+            checked={enrichmentEnabled}
             disabled={pending || !initial.aiSuggestionsEnabled}
             onChange={(e) => setEnrichmentEnabled(e.target.checked)}
           />
           AI enrichment
         </label>
         <p className={help}>Suggest ICP scores and fit notes for prospects. Suggestions are reviewed by a person.</p>
-        {!initial.aiSuggestionsEnabled ? <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">Turn on AI suggestions first</p> : null}
+        {!initial.aiSuggestionsEnabled ? (
+          <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">
+            Turn on AI suggestions first (saved setting: {enrichmentEnabled ? 'on' : 'off'} — takes effect when AI suggestions are turned on)
+          </p>
+        ) : null}
       </div>
       <button
         type="button"

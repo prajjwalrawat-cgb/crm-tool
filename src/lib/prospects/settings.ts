@@ -1,13 +1,14 @@
 import 'server-only';
 
 import { eq } from 'drizzle-orm';
-import { z } from 'zod';
 
 import { organizationSettings } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
 import type { MutationResult } from './mutations';
-import type { Actor } from './rules';
+import { prospectSettingsSchema, type Actor, type ProspectSettingsInput } from './rules';
+
+export { prospectSettingsSchema, type ProspectSettingsInput };
 
 export type ProspectSettings = {
   claimDays: number;
@@ -27,14 +28,6 @@ export const PROSPECT_SETTING_DEFAULTS: ProspectSettings = {
   aiSuggestionsEnabled: false,
 };
 
-export const prospectSettingsSchema = z.object({
-  claimDays: z.number().int().min(1).max(90),
-  claimExpiryEnabled: z.boolean(),
-  autoParkDays: z.number().int().min(7).max(365),
-  autoParkEnabled: z.boolean(),
-  enrichmentEnabled: z.boolean(),
-});
-export type ProspectSettingsInput = z.infer<typeof prospectSettingsSchema>;
 
 type Tx = Parameters<Parameters<typeof tenantTransaction>[0]>[0];
 
@@ -69,7 +62,7 @@ export async function updateProspectSettings(
     return { ok: false, error: 'no_permission', message: 'Only owners and admins can change this.' };
   }
   const parsed = prospectSettingsSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: 'invalid', message: parsed.error.message };
+  if (!parsed.success) return { ok: false, error: 'invalid', message: parsed.error.issues[0]?.message ?? 'Check the settings and try again.' };
   const v = {
     prospectClaimDays: parsed.data.claimDays,
     prospectClaimExpiryEnabled: parsed.data.claimExpiryEnabled,
