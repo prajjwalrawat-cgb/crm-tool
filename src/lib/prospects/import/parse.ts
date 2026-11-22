@@ -5,6 +5,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 
 import { parseCsv } from '@/lib/lead-capture/csv';
+import { captureError } from '@/lib/observability';
 import { prospectInputSchema, SIZE_BANDS } from '@/lib/prospects/rules';
 
 import { csvRowsToCandidates, type DumpRow, mapCsvHeaders } from './csv-map';
@@ -16,16 +17,22 @@ export type { DumpRow } from './csv-map';
  * card, notes, a printed list) or a CSV becomes candidate prospect rows.
  * Nothing is written to the DB here; the caller shows the rows for review.
  *
- * API notes (claude-api skill, 2026-11), mirroring ai/suggestions/extract.ts:
+ * API notes (claude-api skill, 2026-11):
  *  - model claude-opus-5-5 (env PROSPECT_PARSE_MODEL).
- *  - Structured output via zodOutputFormat, streamed (messages.stream ->
- *    finalMessage(), which returns a ParsedMessage) so max_tokens can be 64k
- *    for 500-row dumps without the SDK non-streaming timeout. No forced
- *    tool_choice, prefill, temperature or disabled thinking (all 400 here).
+ *  - Structured output as a plain `json_schema` format (the JSON schema from
+ *    zodOutputFormat(...).schema, with no SDK-side parsing): the SDK's
+ *    auto-parse throws on truncated JSON before stop_reason can be read, and
+ *    mis-reads a turn that carries a server-side fallback. We check
+ *    stop_reason first, then read the text after the last `fallback` block,
+ *    JSON.parse it and validate with DumpOutputSchema ourselves.
+ *  - Streamed (messages.stream -> finalMessage()), max_tokens 16k, effort
+ *    `low` (extraction is a simple task). Long text dumps and the CSV
+ *    fallback are split into chunks read in parallel (at most 5 at a time)
+ *    so a large dump stays well inside the route's time limit.
+ *  - No forced tool_choice, prefill, temperature or disabled thinking (all
+ *    400 here).
  *  - Server-side refusal fallback on (`fallbacks: "default"` + beta header).
  *    SDK 0.94 has no type for the field, so it goes through a cast.
- *  - effort `medium`; stop_reason checked for refusal / max_tokens before
- *    the output is read.
  *
  * Prompt-injection posture: the system prompt is fixed and never contains
  * dump text or image content; the dump is wrapped in <dump> tags in the
@@ -37,7 +44,14 @@ export type { DumpRow } from './csv-map';
 export const MAX_DUMP_ROWS = 500;
 /** Free-text dumps longer than this are rejected rather than silently cut. */
 export const MAX_DUMP_CHARS = 60_000;
-const MAX_TOKENS = 64_000;
+const MAX_TOKENS = 16_000;
+const EFFORT = 'low' as const;
+/** Text dumps are read in chunks of about this many characters (split on blank lines, then lines). */
+export const CHUNK_CHARS = 6_000;
+/** CSV rows per chunk when Claude reads a CSV without a company column. */
+export const CSV_CHUNK_ROWS = 100;
+/** Chunks read at once. */
+const CHUNK_CONCURRENCY = 5;
 const PLACEHOLDER_SOURCE_TAG = 'dump';
 
 const parseModel = () => process.env.PROSPECT_PARSE_MODEL?.trim() || 'claude-opus-5-5';
@@ -89,14 +103,23 @@ export type DumpOutput = z.infer<typeof DumpOutputSchema>;
 export type ParseUsage = { inputTokens: number; outputTokens: number };
 
 export type ParseOutcome =
-  | { ok: true; rows: DumpRow[]; dropped: number; model: string | null; usage: ParseUsage }
+  | {
+      ok: true;
+      rows: DumpRow[];
+      /** Entries that failed validation (no company name, bad size band, ...). */
+      dropped: number;
+      /** Valid entries past MAX_DUMP_ROWS that were not kept. */
+      capped: number;
+      model: string | null;
+      usage: ParseUsage;
+    }
   | { ok: false; error: string; retryable: boolean };
 
 /** Stream-shaped seam: production is `client.messages.stream(p, o).finalMessage()` (injected in selftests). */
 export type ParseFn = (
   params: Anthropic.MessageCreateParamsNonStreaming,
   options?: Parameters<Anthropic['messages']['stream']>[1],
-) => Promise<Anthropic.Message & { parsed_output: DumpOutput | null }>;
+) => Promise<Anthropic.Message>;
 
 export type ParseDeps = { create?: ParseFn };
 
@@ -104,6 +127,14 @@ export type DumpImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'im
 const IMAGE_TYPES: readonly DumpImageMediaType[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 const NOT_CONFIGURED = 'AI parsing is not configured.';
+export const PARSE_MESSAGES = {
+  refusal: 'The AI declined to read this dump.',
+  tooLong: 'This dump is too long to read in one go. Split it into smaller parts and try again.',
+  unreadable: "The AI's answer could not be read. Try again.",
+  busy: 'The AI service is busy. Try again in a minute.',
+  failed: 'Something went wrong reading this dump. Try again.',
+  noCompanyColumn: 'No company column found in this CSV. Rename the company column (e.g. "Company Name") or split the file.',
+} as const;
 
 let client: Anthropic | undefined;
 export function dumpParsingConfigured(): boolean {
@@ -112,15 +143,23 @@ export function dumpParsingConfigured(): boolean {
 
 const defaultStream: ParseFn = (params, options) => {
   client ??= new Anthropic();
-  return client.messages.stream(params, options).finalMessage() as unknown as ReturnType<ParseFn>;
+  return client.messages.stream(params, options).finalMessage();
 };
+
+/** The JSON schema sent as `output_config.format` (no SDK-side parsing; see the module notes). */
+const OUTPUT_FORMAT: Anthropic.JSONOutputFormat = { type: 'json_schema', schema: zodOutputFormat(DumpOutputSchema).schema };
 
 const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
 
-/** Re-validates candidate rows with prospectInputSchema and caps them at MAX_DUMP_ROWS. */
-export function validateDumpRows(candidates: unknown[]): { rows: DumpRow[]; dropped: number } {
+/**
+ * Re-validates candidate rows with prospectInputSchema and keeps the first
+ * MAX_DUMP_ROWS valid ones. Invalid entries count as `dropped`; valid ones
+ * past the cap count as `capped`.
+ */
+export function validateDumpRows(candidates: unknown[]): { rows: DumpRow[]; dropped: number; capped: number } {
   const rows: DumpRow[] = [];
   let dropped = 0;
+  let capped = 0;
   for (const c of candidates) {
     if (!c || typeof c !== 'object') {
       dropped++;
@@ -144,8 +183,12 @@ export function validateDumpRows(candidates: unknown[]): { rows: DumpRow[]; drop
       icpScore: null,
       sourceTag: PLACEHOLDER_SOURCE_TAG,
     });
-    if (!parsed.success || rows.length >= MAX_DUMP_ROWS) {
+    if (!parsed.success) {
       dropped++;
+      continue;
+    }
+    if (rows.length >= MAX_DUMP_ROWS) {
+      capped++;
       continue;
     }
     const rest: Partial<typeof parsed.data> = { ...parsed.data };
@@ -153,11 +196,31 @@ export function validateDumpRows(candidates: unknown[]): { rows: DumpRow[]; drop
     const note = typeof raw.note === 'string' ? raw.note.trim().slice(0, 500) : '';
     rows.push({ ...(rest as Omit<typeof parsed.data, 'sourceTag'>), confidence: clamp01(Number(raw.confidence)), note: note || null });
   }
-  return { rows, dropped };
+  return { rows, dropped, capped };
 }
 
-async function callClaude(content: Anthropic.MessageParam['content'], deps: ParseDeps): Promise<ParseOutcome> {
-  if (!dumpParsingConfigured()) return { ok: false, error: NOT_CONFIGURED, retryable: false };
+/**
+ * The answer text: the text blocks after the last `fallback` block (a
+ * server-side fallback restarts the answer on the fallback model, so text
+ * before it is a partial first attempt), or all text blocks when there is none.
+ */
+export function answerText(content: ReadonlyArray<{ type: string }>): string {
+  let start = 0;
+  content.forEach((b, i) => {
+    if (b.type === 'fallback') start = i + 1;
+  });
+  return content
+    .slice(start)
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('');
+}
+
+type CallResult =
+  | { ok: true; candidates: unknown[]; model: string; usage: ParseUsage }
+  | { ok: false; error: string; retryable: boolean };
+
+async function callClaude(content: Anthropic.MessageParam['content'], deps: ParseDeps): Promise<CallResult> {
   const model = parseModel();
   const parse = deps.create ?? defaultStream;
   const params = {
@@ -165,58 +228,147 @@ async function callClaude(content: Anthropic.MessageParam['content'], deps: Pars
     max_tokens: MAX_TOKENS,
     system: DUMP_SYSTEM,
     messages: [{ role: 'user', content }],
-    output_config: { effort: 'medium', format: zodOutputFormat(DumpOutputSchema) },
+    output_config: { effort: EFFORT, format: OUTPUT_FORMAT },
     fallbacks: 'default',
   } as Anthropic.MessageCreateParamsNonStreaming & { fallbacks?: 'default' };
 
-  let res: Awaited<ReturnType<ParseFn>>;
+  let res: Anthropic.Message;
   try {
     res = await parse(params as Anthropic.MessageCreateParamsNonStreaming, {
       headers: { 'anthropic-beta': 'server-side-fallback-2026-07-01' },
     });
   } catch (err) {
-    const retryable =
-      err instanceof Anthropic.RateLimitError || err instanceof Anthropic.InternalServerError || err instanceof Anthropic.APIConnectionError;
-    if (retryable) return { ok: false, error: 'The AI service is busy. Try again in a minute.', retryable: true };
-    const status = err instanceof Anthropic.APIError ? ` (${err.status ?? 'error'})` : '';
-    return { ok: false, error: `AI parsing failed${status}.`, retryable: false };
+    if (err instanceof Anthropic.APIError) {
+      const busy =
+        err instanceof Anthropic.RateLimitError || err instanceof Anthropic.InternalServerError || err instanceof Anthropic.APIConnectionError;
+      captureError(err, {
+        category: 'prospects.import.parse_api_error',
+        severity: busy ? 'low' : 'medium',
+        retryable: busy,
+        fields: { model, status: err.status ?? null },
+      });
+      if (busy) return { ok: false, error: PARSE_MESSAGES.busy, retryable: true };
+      return { ok: false, error: `AI parsing failed (${err.status ?? 'error'}).`, retryable: false };
+    }
+    // Not an API error (a dropped stream, an SDK error): worth another try.
+    captureError(err, { category: 'prospects.import.parse_failed', severity: 'medium', retryable: true, fields: { model } });
+    return { ok: false, error: PARSE_MESSAGES.failed, retryable: true };
   }
 
-  if (res.stop_reason === 'refusal') return { ok: false, error: 'The AI declined to read this dump.', retryable: false };
-  if (res.stop_reason === 'max_tokens') {
-    return { ok: false, error: 'This dump is too long to read in one go. Split it into smaller parts and try again.', retryable: false };
-  }
-  const out = res.parsed_output;
-  if (!out || !Array.isArray(out.rows)) return { ok: false, error: 'The AI returned rows we could not read. Try again.', retryable: true };
+  // stop_reason first: a refused or truncated answer is never parsed.
+  if (res.stop_reason === 'refusal') return { ok: false, error: PARSE_MESSAGES.refusal, retryable: false };
+  if (res.stop_reason === 'max_tokens') return { ok: false, error: PARSE_MESSAGES.tooLong, retryable: false };
 
-  const { rows, dropped } = validateDumpRows(out.rows);
+  let json: unknown;
+  try {
+    json = JSON.parse(answerText(res.content ?? []));
+  } catch {
+    return { ok: false, error: PARSE_MESSAGES.unreadable, retryable: true };
+  }
+  const out = DumpOutputSchema.safeParse(json);
+  if (!out.success) return { ok: false, error: PARSE_MESSAGES.unreadable, retryable: true };
+
   return {
     ok: true,
-    rows,
-    dropped,
+    candidates: out.data.rows,
     model: res.model || model,
     usage: { inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0 },
   };
 }
 
+/** Runs `fn` over `items` with at most `limit` in flight; results keep the input order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/**
+ * Reads every chunk (at most CHUNK_CONCURRENCY at once) and merges the rows
+ * in chunk order. All or nothing: a non-retryable failure in any chunk wins,
+ * else the first retryable one; partial results are never returned.
+ */
+async function parseChunks(contents: Anthropic.MessageParam['content'][], deps: ParseDeps): Promise<ParseOutcome> {
+  if (!dumpParsingConfigured()) return { ok: false, error: NOT_CONFIGURED, retryable: false };
+  const results = await mapLimit(contents, CHUNK_CONCURRENCY, (c) => callClaude(c, deps));
+  const failures = results.filter((r): r is Extract<CallResult, { ok: false }> => !r.ok);
+  const fatal = failures.find((f) => !f.retryable) ?? failures[0];
+  if (fatal) return { ok: false, error: fatal.error, retryable: fatal.retryable };
+
+  const done = results as Array<Extract<CallResult, { ok: true }>>;
+  const { rows, dropped, capped } = validateDumpRows(done.flatMap((r) => r.candidates));
+  return {
+    ok: true,
+    rows,
+    dropped,
+    capped,
+    model: done[0]?.model ?? parseModel(),
+    usage: {
+      inputTokens: done.reduce((n, r) => n + r.usage.inputTokens, 0),
+      outputTokens: done.reduce((n, r) => n + r.usage.outputTokens, 0),
+    },
+  };
+}
+
+/**
+ * Splits a dump into chunks of at most `max` characters on blank-line
+ * boundaries, falling back to line boundaries for a paragraph longer than
+ * `max`. A line is never split: one longer than `max` is a chunk of its own.
+ */
+export function chunkDumpText(text: string, max = CHUNK_CHARS): string[] {
+  const chunks: string[] = [];
+  let cur = '';
+  const add = (piece: string, sep: string) => {
+    if (!cur) cur = piece;
+    else if (cur.length + sep.length + piece.length <= max) cur += sep + piece;
+    else {
+      chunks.push(cur);
+      cur = piece;
+    }
+  };
+  for (const raw of text.split(/\r?\n[ \t]*\r?\n/)) {
+    const para = raw.replace(/^[\r\n]+|[\r\n]+$/g, '');
+    if (!para.trim()) continue;
+    if (para.length <= max) {
+      add(para, '\n\n');
+      continue;
+    }
+    if (cur) {
+      chunks.push(cur);
+      cur = '';
+    }
+    for (const line of para.split('\n')) if (line.trim()) add(line, '\n');
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
+/** The dump can't close its own wrapper: any `</dump` inside becomes `<\/dump`. */
+const wrapDump = (text: string) => `<dump>\n${text.replace(/<\/dump/gi, '<\\/dump')}\n</dump>`;
+
 export async function parseDumpText(text: string, deps: ParseDeps = {}): Promise<ParseOutcome> {
   const trimmed = text.trim();
   if (!trimmed) return { ok: false, error: 'The dump is empty.', retryable: false };
-  if (trimmed.length > MAX_DUMP_CHARS) {
-    return { ok: false, error: 'This dump is too long to read in one go. Split it into smaller parts and try again.', retryable: false };
-  }
-  // The dump can't close its own wrapper: any `</dump` inside becomes `<\/dump`.
-  const guarded = trimmed.replace(/<\/dump/gi, '<\\/dump');
-  return callClaude(`<dump>\n${guarded}\n</dump>`, deps);
+  if (trimmed.length > MAX_DUMP_CHARS) return { ok: false, error: PARSE_MESSAGES.tooLong, retryable: false };
+  return parseChunks(chunkDumpText(trimmed).map(wrapDump), deps);
 }
 
 export async function parseDumpImage(bytes: Buffer, mediaType: DumpImageMediaType, deps: ParseDeps = {}): Promise<ParseOutcome> {
   if (!bytes || bytes.length === 0) return { ok: false, error: 'The image is empty.', retryable: false };
   if (!IMAGE_TYPES.includes(mediaType)) return { ok: false, error: 'Unsupported image type.', retryable: false };
-  return callClaude(
+  return parseChunks(
     [
-      { type: 'image', source: { type: 'base64', media_type: mediaType, data: bytes.toString('base64') } },
-      { type: 'text', text: IMAGE_INSTRUCTION },
+      [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: bytes.toString('base64') } },
+        { type: 'text', text: IMAGE_INSTRUCTION },
+      ],
     ],
     deps,
   );
@@ -231,11 +383,19 @@ export async function parseDumpCsv(csvText: string, deps: ParseDeps = {}): Promi
 
   const map = mapCsvHeaders(headers);
   if (map.companyName !== undefined) {
-    const { rows: valid, dropped } = validateDumpRows(csvRowsToCandidates(rows, map));
-    return { ok: true, rows: valid, dropped, model: null, usage: { inputTokens: 0, outputTokens: 0 } };
+    const { rows: valid, dropped, capped } = validateDumpRows(csvRowsToCandidates(rows, map, headers));
+    return { ok: true, rows: valid, dropped, capped, model: null, usage: { inputTokens: 0, outputTokens: 0 } };
   }
 
-  // No company column we recognise: let Claude read the first MAX_DUMP_ROWS rows.
-  const lines = [headers.map(csvField).join(','), ...rows.slice(0, MAX_DUMP_ROWS).map((r) => headers.map((h) => csvField(r[h] ?? '')).join(','))];
-  return parseDumpText(lines.join('\n'), deps);
+  // No company column we recognise: Claude reads the rows, CSV_CHUNK_ROWS at a
+  // time (each chunk with the header line), when the file is small enough.
+  const header = headers.map(csvField).join(',');
+  const lines = rows.map((r) => headers.map((h) => csvField(r[h] ?? '')).join(','));
+  const size = header.length + lines.reduce((n, l) => n + l.length + 1, 0);
+  if (rows.length > MAX_DUMP_ROWS || size > MAX_DUMP_CHARS) {
+    return { ok: false, error: PARSE_MESSAGES.noCompanyColumn, retryable: false };
+  }
+  const chunks: string[] = [];
+  for (let i = 0; i < lines.length; i += CSV_CHUNK_ROWS) chunks.push([header, ...lines.slice(i, i + CSV_CHUNK_ROWS)].join('\n'));
+  return parseChunks(chunks.map(wrapDump), deps);
 }

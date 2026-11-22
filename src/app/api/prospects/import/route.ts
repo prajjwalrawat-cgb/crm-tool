@@ -10,7 +10,7 @@ import { getCurrentTenant } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Streaming Claude parses of large dumps can take minutes.
+// Streaming Claude parses of large dumps can take minutes (chunks run in parallel).
 export const maxDuration = 300;
 
 /** Largest file (5 MB image) plus room for the multipart envelope and text fields. */
@@ -26,7 +26,7 @@ const error = (message: string, status: number) => NextResponse.json({ error: me
  * `file`. Parses and stores a `prospect_imports` row for review; nothing is
  * added to the board until confirmImportAction.
  *
- * 200 { importId, rows, dropped, hints } · 400 bad input · 401 no session ·
+ * 200 { importId, rows, dropped, capped, hints } · 400 bad input · 401 no session ·
  * 403 no manageProspects · 413 too large · 422 unreadable dump · 502 AI failure.
  */
 export async function POST(request: NextRequest): Promise<Response> {
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const r = await createImport(tenant.id, { userId, role: membership.role }, input);
       if (!r.ok) return error(r.message, r.status);
       return NextResponse.json(
-        { importId: r.importId, rows: r.rows, dropped: r.dropped, hints: r.hints },
+        { importId: r.importId, rows: r.rows, dropped: r.dropped, capped: r.capped, hints: r.hints },
         { headers: { 'Cache-Control': 'no-store' } },
       );
     });

@@ -378,9 +378,9 @@ async function main() {
     });
     const stubParse = (rows: unknown[]) => ({
       create: (async () => ({
-        id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [],
+        id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-opus-5-5',
+        content: [{ type: 'text', text: JSON.stringify({ rows }), citations: null }],
         stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 },
-        parsed_output: { rows },
       })) as never,
     });
     const failParse = { create: (async () => { throw new Error('boom'); }) as never };
@@ -438,6 +438,24 @@ async function main() {
     const hk = (i: number) => (ih.ok ? ih.hints.filter((h) => h.index === i).map((h) => h.kind).sort().join(',') : '');
     check('import: hints', ih.ok && hk(0) === 'company,prospect' && hk(1) === 'company' && hk(2) === 'contact' && hk(3) === 'contact' && hk(4) === '', ih.ok ? ih.hints : ih);
     check('dedup: findCompanyByDomain / findContactByPhone', ih.ok && ih.hints.some((h) => h.index === 1 && h.label === 'Domainly') && ih.hints.some((h) => h.index === 3 && h.label === 'Priya Shah'), ih.ok ? ih.hints : ih);
+    check(
+      'import: hint labels (batched lookups)',
+      ih.ok &&
+        JSON.stringify(ih.hints) ===
+          JSON.stringify([
+            { index: 0, kind: 'prospect', label: 'Hintco Industries' },
+            { index: 0, kind: 'company', label: 'Hintco Industries' },
+            { index: 1, kind: 'company', label: 'Domainly' },
+            { index: 2, kind: 'contact', label: 'Priya Shah' },
+            { index: 3, kind: 'contact', label: 'Priya Shah' },
+          ]),
+      ih.ok ? ih.hints : ih,
+    );
+    // Fuzzy company-name search still runs for rows with no exact hit, but only in the first 100 rows.
+    const { computeDedupHints } = await import('../src/lib/prospects/import/dedup-hints');
+    const fuzzyRows = [dumpRow({ companyName: 'Hintco Zebra' }), ...Array.from({ length: 100 }, (_, i) => dumpRow({ companyName: `Qqzz Filler ${i}` })), dumpRow({ companyName: 'Hintco Zebra' })];
+    const fh = await asA(() => computeDedupHints(A, fuzzyRows as never));
+    check('hints: fuzzy match in the first 100 rows only', fh.some((h) => h.index === 0 && h.kind === 'company' && h.label === 'Hintco Industries') && !fh.some((h) => h.index === 101 && h.kind === 'company'), fh);
 
     // confirm
     const before1 = await prospectCount();

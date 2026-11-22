@@ -76,7 +76,7 @@ export type CreateImportInput = {
 export type ImportFailureStatus = 400 | 403 | 413 | 422 | 502;
 
 export type CreateImportResult =
-  | { ok: true; importId: string; rows: DumpRow[]; dropped: number; hints: DedupHint[] }
+  | { ok: true; importId: string; rows: DumpRow[]; dropped: number; capped: number; hints: DedupHint[] }
   | { ok: false; message: string; status: ImportFailureStatus };
 
 const reject = (message: string, status: ImportFailureStatus): CreateImportResult => ({ ok: false, message, status });
@@ -184,7 +184,7 @@ export async function createImport(
     captureError(err, { category: 'prospects.import.hints_failed', severity: 'low' });
   }
 
-  return { ok: true, importId: row!.id, rows: outcome.rows, dropped: outcome.dropped, hints };
+  return { ok: true, importId: row!.id, rows: outcome.rows, dropped: outcome.dropped, capped: outcome.capped, hints };
 }
 
 export type ConfirmImportResult =

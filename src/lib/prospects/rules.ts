@@ -19,6 +19,8 @@ export const GROUP_BY_KEYS = ['industry', 'territory', 'product_fit', 'source_ta
 export type GroupByKey = (typeof GROUP_BY_KEYS)[number];
 
 const MAX_TAGS = 20;
+/** Longest prospect notes (prospectInputSchema.notes). */
+export const MAX_NOTES = 5000;
 const MAX_TAG_LEN = 40;
 
 /** Optional text: trimmed, '' / null / undefined become null. */
@@ -64,7 +66,7 @@ export const prospectInputSchema = z.object({
   icpScore: z.preprocess(emptyToNull, z.number().int().min(0).max(100).nullish().transform((v) => v ?? null)),
   clusterTags,
   sourceTag: z.string().trim().min(1).max(80),
-  notes: optText(5000),
+  notes: optText(MAX_NOTES),
 });
 export type ProspectInput = z.output<typeof prospectInputSchema>;
 
