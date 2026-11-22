@@ -32,6 +32,8 @@ export const NOTIFICATION_TYPES = [
   'call_missed',
   /** Prospect Board: a manager assigned the recipient a prospect claim. */
   'prospect_claim_assigned',
+  /** Prospect Board: the recipient's claim expired and was released. */
+  'prospect_claim_expired',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

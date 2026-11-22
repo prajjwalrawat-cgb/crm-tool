@@ -39,6 +39,8 @@ async function main() {
   const A = ta!.id;
   const B = tb!.id;
   const C = tc!.id; // clean tenant for promote tests
+  const [td] = (await db.execute(sql`INSERT INTO tenants (name, slug) VALUES ('ZZ PROS D', ${`zz-pros-d-${stamp}`}) RETURNING id`)) as unknown as Array<{ id: string }>;
+  const D = td!.id; // clean tenant for maintenance tests
   const user = `usr_prostest_${stamp}`;
   const inA = <T,>(fn: (tx: Parameters<Parameters<typeof tenantTransaction>[0]>[0]) => Promise<T>) =>
     runWithSystemContext(A, () => tenantTransaction(fn as never)) as Promise<T>;
@@ -893,10 +895,77 @@ async function main() {
       const bkMany = await asC(cMember.userId, () => pr.bulkPromote(C, cMember, Array.from({ length: 101 }, () => bClean), {}, deps as never));
       check('bulk: over 100 ids → all invalid', bkMany.results.length === 101 && bkMany.results.every((r) => r.outcome.status === 'error' && r.outcome.error === 'invalid'), bkMany.results.length);
     }
+
+    /* ---------------- daily maintenance (Stage 3 Task 5) ---------------- */
+    {
+      const mt = await import('../src/lib/prospects/maintenance');
+      const inD = <T,>(fn: (tx: Parameters<Parameters<typeof tenantTransaction>[0]>[0]) => Promise<T>) =>
+        runWithSystemContext(D, () => tenantTransaction(fn as never)) as Promise<T>;
+      const NOW = new Date('2026-06-01T12:00:00Z');
+      const ago = (days: number) => new Date(NOW.getTime() - days * DAY);
+      const mkD = async (name: string, extra: Record<string, unknown> = {}) =>
+        (await inD((tx) => tx.insert(s.prospects).values({ tenantId: D, companyName: name, sourceTag: 'maint', lastActivityAt: ago(1), stageChangedAt: ago(1), ...extra } as never).returning({ id: s.prospects.id })))[0]!.id;
+      const rowD = async (id: string) => (await inD((tx) => tx.select().from(s.prospects).where(eq(s.prospects.id, id))))[0]!;
+      const histD = (id: string) => inD((tx) => tx.select().from(s.prospectStageHistory).where(eq(s.prospectStageHistory.prospectId, id)));
+      const setD = (v: { claimDays?: number; claimExpiryEnabled?: boolean; autoParkDays?: number; autoParkEnabled?: boolean }) =>
+        inD((tx) => {
+          const set = {
+            ...(v.claimDays !== undefined && { prospectClaimDays: v.claimDays }),
+            ...(v.claimExpiryEnabled !== undefined && { prospectClaimExpiryEnabled: v.claimExpiryEnabled }),
+            ...(v.autoParkDays !== undefined && { prospectAutoParkDays: v.autoParkDays }),
+            ...(v.autoParkEnabled !== undefined && { prospectAutoParkEnabled: v.autoParkEnabled }),
+          };
+          return tx.insert(s.organizationSettings).values({ tenantId: D, ...set }).onConflictDoUpdate({ target: s.organizationSettings.tenantId, set });
+        });
+
+      const stale = await mkD('Stale Co', { stage: 'researching', lastActivityAt: ago(50) });
+      const recent = await mkD('Recent Co', { lastActivityAt: ago(40) });
+      const promoted = await mkD('Promoted Old', { lastActivityAt: ago(90), promotedDealId: (await inD((tx) => tx.insert(s.deals).values({ tenantId: D, name: 'D deal' }).returning({ id: s.deals.id })))[0]!.id });
+      const deleted = await mkD('Deleted Old', { lastActivityAt: ago(90), deletedAt: ago(5) });
+      const parkedAlready = await mkD('Parked Old', { lastActivityAt: ago(90), stage: 'parked', parkedReason: 'manual', stageChangedAt: ago(70) });
+      const staleLast = (await rowD(stale)).lastActivityAt;
+      const r1 = await mt.runProspectMaintenance(D, NOW);
+      const sRow = await rowD(stale);
+      const sHist = await histD(stale);
+      check('maint: parks stale', r1.parked === 1 && sRow.stage === 'parked' && sRow.parkedReason === 'stale' && sRow.stageChangedAt.getTime() === NOW.getTime() && sHist.length === 1 && sHist[0]!.changedBy === 'system:auto-park' && sHist[0]!.fromStage === 'researching' && sHist[0]!.toStage === 'parked', { r1, sRow, sHist });
+      check('maint: keeps recent', (await rowD(recent)).stage === 'dump');
+      const pRow = await rowD(promoted);
+      const dRow = await rowD(deleted);
+      const paRow = await rowD(parkedAlready);
+      check('maint: skips promoted/deleted/parked', pRow.stage === 'dump' && dRow.stage === 'dump' && paRow.parkedReason === 'manual' && paRow.stageChangedAt.getTime() === ago(70).getTime() && (await histD(parkedAlready)).length === 0 && (await histD(promoted)).length === 0 && (await histD(deleted)).length === 0);
+      check('maint: last_activity_at unchanged by park', sRow.lastActivityAt.getTime() === staleLast.getTime(), [staleLast, sRow.lastActivityAt]);
+      const r2 = await mt.runProspectMaintenance(D, NOW);
+      check('maint: rerun is no-op', r2.parked === 0 && r2.released === 0 && (await histD(stale)).length === 1, r2);
+
+      await setD({ autoParkEnabled: false });
+      const off = await mkD('Off Co', { lastActivityAt: ago(60) });
+      const rOff = await mt.runProspectMaintenance(D, NOW);
+      check('maint: auto-park disabled → none', rOff.parked === 0 && (await rowD(off)).stage === 'dump', rOff);
+      await setD({ autoParkEnabled: true, autoParkDays: 10 });
+      const c10 = await mkD('Ten Days Co', { lastActivityAt: ago(12) });
+      const c10r = await mkD('Nine Days Co', { lastActivityAt: ago(8) });
+      const rC = await mt.runProspectMaintenance(D, NOW);
+      check('maint: custom days (10)', (await rowD(c10)).stage === 'parked' && (await rowD(c10r)).stage === 'dump' && (await rowD(recent)).stage === 'parked', rC);
+      await setD({ autoParkDays: 45 });
+
+      const claimer = `usr_claimer_${stamp}`;
+      const expired = await mkD('Expired Claim Co', { claimedBy: claimer, claimedAt: ago(20), claimExpiresAt: ago(1) });
+      const active = await mkD('Active Claim Co', { claimedBy: claimer, claimedAt: ago(1), claimExpiresAt: new Date(NOW.getTime() + 5 * DAY) });
+      await setD({ claimExpiryEnabled: false });
+      const rNoExp = await mt.runProspectMaintenance(D, NOW);
+      check('maint: expiry disabled → no release', rNoExp.released === 0 && (await rowD(expired)).claimedBy === claimer, rNoExp);
+      await setD({ claimExpiryEnabled: true });
+      const rRel = await mt.runProspectMaintenance(D, NOW);
+      const eRow = await rowD(expired);
+      const notesD = await runWithTenantContext({ tenantId: D, userId: claimer }, () => tenantTransaction((tx) => tx.select().from(s.notifications).where(eq(s.notifications.recipientUserId, claimer))));
+      const nx = notesD.filter((n) => n.type === 'prospect_claim_expired');
+      check('maint: releases expired claim + notification row', rRel.released === 1 && eRow.claimedBy === null && eRow.claimedAt === null && eRow.claimExpiresAt === null && nx.length === 1 && nx[0]!.entityType === 'prospect' && nx[0]!.entityId === expired && nx[0]!.title === 'Your claim on Expired Claim Co expired', { rRel, eRow, nx });
+      check('maint: keeps active claim', (await rowD(active)).claimedBy === claimer && (await rowD(active)).claimExpiresAt !== null);
+    }
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
-    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B}, ${C})`);
+    await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B}, ${C}, ${D})`);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

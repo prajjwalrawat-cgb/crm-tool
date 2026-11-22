@@ -64,6 +64,7 @@ import {
   regenerateEmbedding,
   regenerateEmbeddingHandler,
 } from './regenerate-embedding';
+import { prospectMaintenanceDaily } from './prospects';
 import { notificationsRetention } from './notifications-retention';
 import { relationshipSignalsDerive } from './relationship-signals-derive';
 import { staleDealsScan } from './stale-deals-scan';
@@ -118,6 +119,7 @@ export {
   leadUnassignedRetry,
   newMemberOnboarding,
   notificationsRetention,
+  prospectMaintenanceDaily,
   regenerateEmbedding,
   relationshipSignalsDerive,
   reportBackfill,

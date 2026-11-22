@@ -56,6 +56,7 @@ const TYPE_ICON: Record<string, LucideIcon> = {
   lead_sla_breach: Bell,
   call_missed: PhoneMissed,
   prospect_claim_assigned: UserCog,
+  prospect_claim_expired: Bell,
 };
 
 const TYPE_TINT: Record<string, string> = {
@@ -72,6 +73,7 @@ const TYPE_TINT: Record<string, string> = {
   lead_sla_breach: 'text-rose-500',
   call_missed: 'text-rose-500',
   prospect_claim_assigned: 'text-blue-500',
+  prospect_claim_expired: 'text-amber-500',
 };
 
 function notificationHref(n: NotificationItem): string | null {
