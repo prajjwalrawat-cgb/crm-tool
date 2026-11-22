@@ -3,6 +3,8 @@ import {
   groupKeyOf,
   normalizeProspectInput,
   editBlock,
+  claimBlock,
+  releaseBlock,
   parseProspectFilters,
   prospectInputSchema,
   stageMoveBlock,
@@ -79,6 +81,18 @@ check('group: industry case-insensitive', groupKeyOf(card({ industry: 'Textiles'
 check('group: source_tag case-insensitive', groupKeyOf(card({ sourceTag: 'Expo' }), 'source_tag').key === groupKeyOf(card({ sourceTag: 'expo' }), 'source_tag').key);
 check('group: territory', groupKeyOf(card({ state: 'MH', city: 'Pune' }), 'territory').label === 'MH · Pune', groupKeyOf(card({ state: 'MH', city: 'Pune' }), 'territory'));
 check('group: product_fit', groupKeyOf(card({ productFitOfferingId: 'o1', productFitName: 'CRM' }), 'product_fit').label === 'CRM');
+
+const dayMs = 86_400_000;
+check('claim: member on unclaimed', claimBlock(mk(), me) === null);
+check("claim: member on other's active", claimBlock(mk({ claimedBy: 'u2', claimExpiresAt: new Date(Date.now() + dayMs) }), me) === 'claimed_by_other');
+check("claim: member on other's expired", claimBlock(mk({ claimedBy: 'u2', claimExpiresAt: new Date(Date.now() - dayMs) }), me) === null);
+check('claim: viewer', claimBlock(mk(), { userId: 'v', role: 'viewer' }) === 'no_permission');
+check('claim: own active claim extends', claimBlock(mk({ claimedBy: 'u1', claimExpiresAt: new Date(Date.now() + dayMs) }), me) === null);
+check('claim: promoted/deleted', claimBlock(mk({ promotedDealId: 'd' }), me) === 'promoted' && claimBlock(mk({ deletedAt: new Date() }), me) === 'deleted');
+check("release: manager on other's claim", releaseBlock(mk({ claimedBy: 'u2', claimExpiresAt: new Date(Date.now() + dayMs) }), { userId: 'm', role: 'manager' }) === null);
+check("release: member on other's claim", releaseBlock(mk({ claimedBy: 'u2', claimExpiresAt: new Date(Date.now() + dayMs) }), me) === 'claimed_by_other');
+check('release: unclaimed', releaseBlock(mk(), me) === 'not_claimed');
+check('release: own claim', releaseBlock(mk({ claimedBy: 'u1' }), me) === null);
 
 check('rbac: viewer manageProspects', can('viewer', 'manageProspects') === false);
 check('rbac: member manageProspectClaims', can('member', 'manageProspectClaims') === false);

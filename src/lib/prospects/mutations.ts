@@ -19,23 +19,25 @@ export type MutationResult =
   | { ok: true }
   | {
       ok: false;
-      error: 'not_found' | 'promoted' | 'deleted' | 'claimed_by_other' | 'no_permission' | 'invalid';
+      error: 'not_found' | 'promoted' | 'deleted' | 'claimed_by_other' | 'no_permission' | 'invalid' | 'not_claimed' | 'out_of_scope';
       message: string;
     };
 
-const MESSAGES = {
+export const MESSAGES = {
   not_found: 'Prospect not found.',
   promoted: 'Already promoted to a lead.',
   deleted: 'This prospect was deleted.',
   claimed_by_other: 'Claimed by someone else. Only they or a manager can move it.',
   no_permission: 'You do not have permission.',
+  not_claimed: 'Not claimed.',
+  out_of_scope: 'That person is outside your team.',
 } as const;
 
-const fail = (error: keyof typeof MESSAGES): MutationResult => ({ ok: false, error, message: MESSAGES[error] });
+export const fail = (error: keyof typeof MESSAGES): MutationResult => ({ ok: false, error, message: MESSAGES[error] });
 
-const MAX_BULK = 500;
+export const MAX_BULK = 500;
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function createProspect(
   tenantId: string,

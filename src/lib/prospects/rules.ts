@@ -104,7 +104,7 @@ export type Actor = { userId: string; role: MembershipRole };
 export const isManagerRole = (role: MembershipRole): boolean =>
   role === 'owner' || role === 'admin' || role === 'manager';
 
-type GuardRow = Pick<Prospect, 'claimedBy' | 'claimExpiresAt' | 'promotedDealId' | 'deletedAt' | 'stage'>;
+export type GuardRow = Pick<Prospect, 'claimedBy' | 'claimExpiresAt' | 'promotedDealId' | 'deletedAt' | 'stage'>;
 
 export function stageMoveBlock(
   p: GuardRow,
@@ -116,9 +116,43 @@ export function stageMoveBlock(
   if (p.deletedAt) return 'deleted';
   if (p.promotedDealId) return 'promoted';
   if (p.stage === to) return 'same_stage';
-  // An expired claim (claimExpiresAt <= now) counts as unclaimed.
-  const claimExpired = p.claimExpiresAt != null && new Date(p.claimExpiresAt).getTime() <= now.getTime();
-  if (p.claimedBy && !claimExpired && p.claimedBy !== actor.userId && !isManagerRole(actor.role)) return 'claimed_by_other';
+  if (isClaimActive(p, now) && p.claimedBy !== actor.userId && !isManagerRole(actor.role)) return 'claimed_by_other';
+  return null;
+}
+
+/** A claim is active while claimed and not yet expired (claimExpiresAt <= now counts as unclaimed). */
+export function isClaimActive(
+  p: { claimedBy: string | null; claimExpiresAt: Date | null },
+  now: Date = new Date(),
+): boolean {
+  if (!p.claimedBy) return false;
+  return !(p.claimExpiresAt != null && new Date(p.claimExpiresAt).getTime() <= now.getTime());
+}
+
+/** Claiming your own active claim is allowed (it extends the lock). */
+export function claimBlock(
+  p: GuardRow,
+  actor: Actor,
+  now: Date = new Date(),
+): null | 'no_permission' | 'deleted' | 'promoted' | 'claimed_by_other' {
+  if (!can(actor.role, 'manageProspects')) return 'no_permission';
+  if (p.deletedAt) return 'deleted';
+  if (p.promotedDealId) return 'promoted';
+  if (isClaimActive(p, now) && p.claimedBy !== actor.userId) return 'claimed_by_other';
+  return null;
+}
+
+/** A manager may release anyone's claim. */
+export function releaseBlock(
+  p: GuardRow,
+  actor: Actor,
+  now: Date = new Date(),
+): null | 'no_permission' | 'deleted' | 'promoted' | 'not_claimed' | 'claimed_by_other' {
+  if (!can(actor.role, 'manageProspects')) return 'no_permission';
+  if (p.deletedAt) return 'deleted';
+  if (p.promotedDealId) return 'promoted';
+  if (!isClaimActive(p, now)) return 'not_claimed';
+  if (p.claimedBy !== actor.userId && !isManagerRole(actor.role)) return 'claimed_by_other';
   return null;
 }
 

@@ -204,6 +204,99 @@ async function main() {
     check('list: truncated flag', tr.truncated === true && tr.cards.length === 3, { truncated: tr.truncated, n: tr.cards.length });
     const tr2 = await asA(() => q.listProspectsForBoard(A, memberU, { source: 'src-trunc' } as never, 4));
     check('list: not truncated at exact limit', tr2.truncated === false && tr2.cards.length === 4, { truncated: tr2.truncated, n: tr2.cards.length });
+
+    /* ---------------- claims (Stage 2 Task 2) ---------------- */
+    const cl = await import('../src/lib/prospects/claims');
+    const ownerU = `usr_owner_${stamp}`;
+    const ghostU = `usr_ghost_${stamp}`; // inactive member of A
+    const bOnlyU = `usr_bonly_${stamp}`; // member of B only
+    const owner = { userId: ownerU, role: 'owner' as const };
+    await inA((tx) =>
+      tx.insert(s.memberships).values([
+        { tenantId: A, userId: memberU, role: 'member' },
+        { tenantId: A, userId: otherU, role: 'member' },
+        { tenantId: A, userId: mgrU, role: 'manager' },
+        { tenantId: A, userId: ownerU, role: 'owner' },
+        { tenantId: A, userId: ghostU, role: 'member', status: 'suspended' as never },
+      ] as never),
+    );
+    await runWithSystemContext(B, () =>
+      tenantTransaction((tx) => tx.insert(s.memberships).values({ tenantId: B, userId: bOnlyU, role: 'member' }) as never),
+    );
+    await db.execute(sql`INSERT INTO users (id, email, first_name, last_name) VALUES (${ownerU}, ${`${ownerU}@example.test`}, 'Olive', 'Owner') ON CONFLICT DO NOTHING`);
+    const asU = <T,>(uid: string, fn: () => Promise<T>) => runWithTenantContext({ tenantId: A, userId: uid }, fn);
+    const row = async (id: string) => (await inA((tx) => tx.select().from(s.prospects).where(eq(s.prospects.id, id))))[0]!;
+    const DAY = 86_400_000;
+
+    const k1 = await mk('Claim Co');
+    const before = (await row(k1)).lastActivityAt;
+    await new Promise((r) => setTimeout(r, 15));
+    const t0 = new Date();
+    const k1r = await asU(memberU, () => cl.claimProspect(A, member, k1, t0));
+    const k1row = await row(k1);
+    check('claim: sets 14-day expiry', k1r.ok && k1row.claimedBy === memberU && Math.abs(k1row.claimExpiresAt!.getTime() - (t0.getTime() + 14 * DAY)) < 60_000, { k1r, exp: k1row.claimExpiresAt });
+    check('claim bumps last_activity_at', k1row.lastActivityAt.getTime() > before.getTime(), [before, k1row.lastActivityAt]);
+
+    await inA((tx) => tx.insert(s.organizationSettings).values({ tenantId: A, prospectClaimDays: 7 } as never));
+    const k2 = await mk('Claim Seven');
+    const k2r = await asU(memberU, () => cl.claimProspect(A, member, k2, t0));
+    const k2row = await row(k2);
+    check('claim: honours prospect_claim_days=7', k2r.ok && Math.abs(k2row.claimExpiresAt!.getTime() - (t0.getTime() + 7 * DAY)) < 60_000, k2row.claimExpiresAt);
+
+    const k3 = await mk('Claim Race');
+    const [ra, rb] = await Promise.all([
+      asU(memberU, () => cl.claimProspect(A, member, k3)),
+      asU(otherU, () => cl.claimProspect(A, other, k3)),
+    ]);
+    const k3row = await row(k3);
+    const winners = [ra, rb].filter((r) => r.ok).length;
+    const losers = [ra, rb].filter((r) => !r.ok && r.error === 'claimed_by_other').length;
+    const winnerU = ra.ok ? memberU : otherU;
+    check('claim: concurrent', winners === 1 && losers === 1 && k3row.claimedBy === winnerU, { ra, rb, by: k3row.claimedBy });
+
+    const deal3 = await inA(async (tx) => (await tx.insert(s.deals).values({ tenantId: A, name: 'Third' }).returning())[0]!.id);
+    const kp = await mk('Claim Promoted', { promotedDealId: deal3 });
+    const kd = await mk('Claim Deleted', { deletedAt: new Date() });
+    const rp = await asU(memberU, () => cl.claimProspect(A, member, kp));
+    const rd = await asU(memberU, () => cl.claimProspect(A, member, kd));
+    check('claim: promoted/deleted blocked', !rp.ok && rp.error === 'promoted' && !rd.ok && rd.error === 'deleted', { rp, rd });
+
+    const kx = await mk('Claim Tenant');
+    const rx = await runWithTenantContext({ tenantId: B, userId: bOnlyU }, () => cl.claimProspect(B, { userId: bOnlyU, role: 'member' }, kx));
+    check('claim: cross-tenant id -> not_found', !rx.ok && rx.error === 'not_found' && (await row(kx)).claimedBy === null, rx);
+
+    const rel = await asU(memberU, () => cl.releaseProspect(A, member, k1));
+    const relRow = await row(k1);
+    check('release: clears columns', rel.ok && relRow.claimedBy === null && relRow.claimedAt === null && relRow.claimExpiresAt === null, { rel, relRow });
+    const rel2 = await asU(memberU, () => cl.releaseProspect(A, member, k1));
+    check('release: unclaimed -> not_claimed', !rel2.ok && rel2.error === 'not_claimed', rel2);
+
+    const k4 = await mk('Reassign Co', { claimedBy: memberU, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
+    const rd1 = await asU(memberU, () => cl.reassignClaim(A, member, k4, otherU));
+    check('reassign: member denied', !rd1.ok && rd1.error === 'no_permission' && (await row(k4)).claimedBy === memberU, rd1);
+    const rn1 = await asU(ownerU, () => cl.reassignClaim(A, owner, k4, bOnlyU));
+    const rn2 = await asU(ownerU, () => cl.reassignClaim(A, owner, k4, ghostU));
+    check('reassign: to non-member/other-tenant user -> not_found', !rn1.ok && rn1.error === 'not_found' && !rn2.ok && rn2.error === 'not_found', { rn1, rn2 });
+    const ro = await asU(ownerU, () => cl.reassignClaim(A, owner, k4, otherU));
+    const k4row = await row(k4);
+    const notes = await asU(otherU, () =>
+      tenantTransaction((tx) =>
+        tx.select().from(s.notifications).where(eq(s.notifications.recipientUserId, otherU)),
+      ),
+    );
+    const nrow = notes.filter((n) => n.type === 'prospect_claim_assigned');
+    check('reassign: owner to member', ro.ok && k4row.claimedBy === otherU && nrow.length === 1 && nrow[0]!.entityId === k4 && nrow[0]!.title === 'Olive Owner assigned you Reassign Co', { ro, by: k4row.claimedBy, nrow });
+
+    // Manager scope: other reports to mgr, so member is outside the manager's team.
+    await inA((tx) => tx.update(s.memberships).set({ reportsToUserId: mgrU } as never).where(eq(s.memberships.userId, otherU)));
+    const ros = await asU(mgrU, () => cl.reassignClaim(A, mgr, k4, memberU));
+    const rin = await asU(mgrU, () => cl.reassignClaim(A, mgr, k4, otherU));
+    check('reassign: manager out of scope', !ros.ok && ros.error === 'out_of_scope' && rin.ok, { ros, rin });
+
+    const b1 = await mk('Bulk Rel Own', { claimedBy: memberU, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
+    const b2 = await mk('Bulk Rel Other', { claimedBy: otherU, claimedAt: new Date(), claimExpiresAt: new Date(Date.now() + DAY) });
+    const br = await asU(memberU, () => cl.bulkReleaseClaims(A, member, [b1, b2, 'abc']));
+    check('bulk release: mixed', br.released.length === 1 && br.released[0] === b1 && JSON.stringify(br.skipped.map((x) => [x.id, x.reason])) === JSON.stringify([[b2, 'claimed_by_other'], ['abc', 'not_found']]) && (await row(b2)).claimedBy === otherU, br);
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
