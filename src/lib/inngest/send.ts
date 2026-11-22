@@ -116,6 +116,9 @@ export type BatchSendOpts = {
   dispatch?: typeof dispatchLocally;
 };
 
+/** One workflow event of any type, payload checked against its name. */
+export type AnyWorkflowEvent = { [K in WorkflowEventName]: { name: K; data: WorkflowEvents[K] } }[WorkflowEventName];
+
 /**
  * Many events of one type: one `inngest.send([...])` per BATCH_SEND_CHUNK
  * events. Never throws (same error handling as sendWorkflowEvent). On the
@@ -128,30 +131,48 @@ export async function sendWorkflowEventsBatch<TName extends WorkflowEventName>(
   dataArray: Array<WorkflowEvents[TName]>,
   opts: BatchSendOpts = {},
 ): Promise<void> {
+  await sendWorkflowEvents(dataArray.map((data) => ({ name, data }) as AnyWorkflowEvent), opts);
+}
+
+/** Count per event name, for the per-name metrics. */
+function countByName(events: AnyWorkflowEvent[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const e of events) m.set(e.name, (m.get(e.name) ?? 0) + 1);
+  return m;
+}
+
+/**
+ * Mixed events (any names): one `inngest.send([...])` per BATCH_SEND_CHUNK
+ * events. Never throws. Same fallback as sendWorkflowEventsBatch: when Inngest
+ * is unavailable the local handlers are started but not awaited.
+ */
+export async function sendWorkflowEvents(events: AnyWorkflowEvent[], opts: BatchSendOpts = {}): Promise<void> {
   const send =
-    opts.send ?? ((events: Array<{ name: string; data: unknown }>) => inngest.send(events as unknown as Parameters<typeof inngest.send>[0]));
-  for (let i = 0; i < dataArray.length; i += BATCH_SEND_CHUNK) {
-    const chunk = dataArray.slice(i, i + BATCH_SEND_CHUNK);
+    opts.send ?? ((evs: Array<{ name: string; data: unknown }>) => inngest.send(evs as unknown as Parameters<typeof inngest.send>[0]));
+  for (let i = 0; i < events.length; i += BATCH_SEND_CHUNK) {
+    const chunk = events.slice(i, i + BATCH_SEND_CHUNK);
+    const counts = countByName(chunk);
     try {
-      await send(chunk.map((data) => ({ name, data })));
-      incr('inngest.send.success', chunk.length, { name });
+      await send(chunk.map((e) => ({ name: e.name, data: e.data })));
+      for (const [name, n] of counts) incr('inngest.send.success', n, { name });
       setGauge('inngest.unreachable', 0);
     } catch (err) {
-      incr('inngest.send.failure', chunk.length, { name });
+      for (const [name, n] of counts) incr('inngest.send.failure', n, { name });
       const message = err instanceof Error ? err.message : String(err);
+      const names = [...counts.keys()].join(',');
       if (!isDeliveryUnavailable(message)) {
-        logger.error(`inngest batch send failed: ${name}`, { error: message, events: chunk.length });
+        logger.error(`inngest batch send failed: ${names}`, { error: message, events: chunk.length });
         continue;
       }
-      markUnreachable(name);
+      markUnreachable(chunk[0]!.name);
       const dispatch = opts.dispatch ?? dispatchLocally;
       const ready = opts.dispatch ? Promise.resolve() : ensureHandlersRegistered();
-      for (const data of chunk) {
+      for (const e of chunk) {
         // Fire-and-forget: never awaited by the caller.
         void ready
-          .then(() => dispatch(name, data))
-          .then(() => incr('inngest.local.dispatched', 1, { name }))
-          .catch((dispatchErr) => captureError(dispatchErr, { category: 'inngest.local-dispatcher', severity: 'medium', retryable: false, fields: { event: name } }));
+          .then(() => dispatch(e.name, e.data as never))
+          .then(() => incr('inngest.local.dispatched', 1, { name: e.name }))
+          .catch((dispatchErr) => captureError(dispatchErr, { category: 'inngest.local-dispatcher', severity: 'medium', retryable: false, fields: { event: e.name } }));
       }
     }
   }

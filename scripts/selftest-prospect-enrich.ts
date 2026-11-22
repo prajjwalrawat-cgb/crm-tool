@@ -256,6 +256,35 @@ async function main() {
       threw = true;
     }
     check('batch: other send errors are logged, never thrown, not dispatched locally', !threw && dispatched === 0, { threw, dispatched });
+
+    // Mixed event names in one batch (promote's post-commit events).
+    const { sendWorkflowEvents } = await import('../src/lib/inngest/send');
+    const mixed = Array.from({ length: 150 }, (_, i) =>
+      i % 2 === 0
+        ? ({ name: 'crm/deal.health_recompute', data: { tenantId: 't', dealId: `d${i}`, reason: 'created' } } as const)
+        : ({ name: 'crm/prospect.created', data: { tenantId: 't', prospectId: `p${i}` } } as const),
+    );
+    const mixedSizes: number[] = [];
+    const mixedNames = new Set<string>();
+    await sendWorkflowEvents(mixed as never, { send: async (ev) => { mixedSizes.push(ev.length); ev.forEach((e) => mixedNames.add(e.name)); } });
+    check('mixed batch: 150 events of 2 names -> 2 calls (100/50), names kept', JSON.stringify(mixedSizes) === '[100,50]' && mixedNames.size === 2, { mixedSizes, mixedNames: [...mixedNames] });
+    const localNames: string[] = [];
+    let mixedThrew = false;
+    try {
+      await sendWorkflowEvents(mixed.slice(0, 4) as never, {
+        send: async () => {
+          throw new Error('Failed to send event: no event key');
+        },
+        dispatch: (async (name: string) => void localNames.push(name)) as never,
+      });
+    } catch {
+      mixedThrew = true;
+    }
+    await new Promise((r) => setTimeout(r, 20));
+    check('mixed batch: local fallback dispatches each event under its own name', !mixedThrew && JSON.stringify(localNames) === JSON.stringify(mixed.slice(0, 4).map((e) => e.name)), { mixedThrew, localNames });
+    let emptyCalls = 0;
+    await sendWorkflowEvents([], { send: async () => void emptyCalls++ });
+    check('mixed batch: no events -> no send', emptyCalls === 0, emptyCalls);
   }
 
   console.log(`\nprospect enrich selftest: ${passed} passed, ${failed} failed`);

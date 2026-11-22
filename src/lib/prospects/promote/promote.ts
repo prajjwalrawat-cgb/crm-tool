@@ -6,7 +6,7 @@ import { aiSuggestions, comments, companies, contacts, deals, leadAssignments, m
 import { recordActivity } from '@/lib/activity/recorder';
 import { tenantTransaction } from '@/lib/db-context';
 import { normalizeCompanyName, normalizeContactName } from '@/lib/dedup/normalize';
-import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { sendWorkflowEvent, sendWorkflowEvents, type AnyWorkflowEvent } from '@/lib/inngest/send';
 import { distributeLead, listLeadManagers, type DistributeOutcome } from '@/lib/lead-capture/distribute';
 import { notifyAssigned, reassignLead } from '@/lib/lead-capture/sla';
 import { recordNotificationsSafe } from '@/lib/notifications/recorder';
@@ -49,8 +49,22 @@ export type PromoteOutcome =
 export type PromoteDeps = {
   distribute?: typeof distributeLead;
   reassign?: typeof reassignLead;
+  /** Batch seam: receives all of one call's post-commit events at once (default sendWorkflowEvents). */
+  sendEvents?: (events: AnyWorkflowEvent[]) => Promise<void>;
+  /** Legacy per-event seam, used (one call per event) only when `sendEvents` is not given. */
   sendEvent?: typeof sendWorkflowEvent;
 };
+
+/** Post-commit events go out in one batch; never throws (the senders swallow their own failures). */
+async function flushEvents(events: AnyWorkflowEvent[], deps: PromoteDeps): Promise<void> {
+  if (events.length === 0) return;
+  if (deps.sendEvents) return deps.sendEvents(events);
+  if (deps.sendEvent) {
+    for (const e of events) await deps.sendEvent(e.name, e.data as never);
+    return;
+  }
+  await sendWorkflowEvents(events);
+}
 
 export const MAX_BULK_PROMOTE = 100;
 
@@ -159,7 +173,10 @@ export async function promoteProspect(
   now: Date = new Date(),
   deps: PromoteDeps = {},
 ): Promise<PromoteOutcome> {
-  return promoteOne(tenantId, actor, id, choice ?? {}, now, deps);
+  const events: AnyWorkflowEvent[] = [];
+  const out = await promoteOne(tenantId, actor, id, choice ?? {}, now, deps, events);
+  await flushEvents(events, deps);
+  return out;
 }
 
 async function promoteOne(
@@ -169,6 +186,8 @@ async function promoteOne(
   choice: PromoteChoice,
   now: Date,
   deps: PromoteDeps,
+  /** Post-commit events are appended here; the caller sends them. */
+  events: AnyWorkflowEvent[],
   scopeIn?: ReportScope | null,
 ): Promise<PromoteOutcome> {
   if (!UUID_RE.test(id)) return fail('not_found');
@@ -379,26 +398,31 @@ async function promoteOne(
 
   if (res.outcome.status !== 'promoted' || !res.committed) return res.outcome;
   const c = res.committed;
-  const send = deps.sendEvent ?? sendWorkflowEvent;
 
   if (c.linked) {
-    await send('crm/deal.health_recompute', { tenantId, dealId: c.dealId, reason: 'prospect_linked' });
+    events.push({ name: 'crm/deal.health_recompute', data: { tenantId, dealId: c.dealId, reason: 'prospect_linked' } });
     return res.outcome;
   }
 
-  const routing = await routeLead(tenantId, actor, c, deps);
+  const routing = await routeLead(tenantId, actor, c, deps, events);
 
-  // Post-commit, best-effort (sendWorkflowEvent swallows its own failures).
-  await send('crm/deal.created', { tenantId, dealId: c.dealId, actorUserId: actor.userId, name: c.dealName, stage: 'lead' });
-  await send('crm/deal.health_recompute', { tenantId, dealId: c.dealId, reason: 'created' });
-  await send('crm/ai.embed_entity', { tenantId, entityType: 'deal', entityId: c.dealId, actorUserId: actor.userId, reason: 'created' });
+  // Post-commit, best-effort: collected here, sent in one batch by the caller.
+  events.push(
+    { name: 'crm/deal.created', data: { tenantId, dealId: c.dealId, actorUserId: actor.userId, name: c.dealName, stage: 'lead' } },
+    { name: 'crm/deal.health_recompute', data: { tenantId, dealId: c.dealId, reason: 'created' } },
+    { name: 'crm/ai.embed_entity', data: { tenantId, entityType: 'deal', entityId: c.dealId, actorUserId: actor.userId, reason: 'created' } },
+  );
   if (c.company) {
-    await send('crm/company.created', { tenantId, companyId: c.company.id, actorUserId: actor.userId, name: c.company.name });
-    await send('crm/ai.embed_entity', { tenantId, entityType: 'company', entityId: c.company.id, actorUserId: actor.userId, reason: 'created' });
+    events.push(
+      { name: 'crm/company.created', data: { tenantId, companyId: c.company.id, actorUserId: actor.userId, name: c.company.name } },
+      { name: 'crm/ai.embed_entity', data: { tenantId, entityType: 'company', entityId: c.company.id, actorUserId: actor.userId, reason: 'created' } },
+    );
   }
   if (c.contact) {
-    await send('crm/contact.created', { tenantId, contactId: c.contact.id, actorUserId: actor.userId, displayName: c.contact.displayName });
-    await send('crm/ai.embed_entity', { tenantId, entityType: 'contact', entityId: c.contact.id, actorUserId: actor.userId, reason: 'created' });
+    events.push(
+      { name: 'crm/contact.created', data: { tenantId, contactId: c.contact.id, actorUserId: actor.userId, displayName: c.contact.displayName } },
+      { name: 'crm/ai.embed_entity', data: { tenantId, entityType: 'contact', entityId: c.contact.id, actorUserId: actor.userId, reason: 'created' } },
+    );
   }
   return { ...res.outcome, routing };
 }
@@ -409,10 +433,9 @@ async function promoteOne(
  * promoter); otherwise the distribution rules run. A throw leaves the lead
  * `routing_status = 'pending'` for the unassigned-retry job.
  */
-async function routeLead(tenantId: string, actor: Actor, c: Committed, deps: PromoteDeps): Promise<PromoteRouting> {
+async function routeLead(tenantId: string, actor: Actor, c: Committed, deps: PromoteDeps, events: AnyWorkflowEvent[]): Promise<PromoteRouting> {
   const distribute = deps.distribute ?? distributeLead;
   const reassign = deps.reassign ?? reassignLead;
-  const send = deps.sendEvent ?? sendWorkflowEvent;
   let outcome: DistributeOutcome;
   try {
     if (c.claimer) {
@@ -445,7 +468,7 @@ async function routeLead(tenantId: string, actor: Actor, c: Committed, deps: Pro
   try {
     if (outcome.status === 'assigned') {
       await notifyAssigned(tenantId, outcome, c.dealName, 'New lead assigned to you');
-      await send('crm/lead.assigned', { tenantId, dealId: c.dealId, userId: outcome.userId, ruleId: outcome.ruleId, slaDueAt: outcome.slaDueAt.toISOString() });
+      events.push({ name: 'crm/lead.assigned', data: { tenantId, dealId: c.dealId, userId: outcome.userId, ruleId: outcome.ruleId, slaDueAt: outcome.slaDueAt.toISOString() } });
     } else if (outcome.status === 'unassigned') {
       await recordNotificationsSafe(
         {
@@ -459,7 +482,7 @@ async function routeLead(tenantId: string, actor: Actor, c: Committed, deps: Pro
         },
         await listLeadManagers(tenantId),
       );
-      await send('crm/lead.unassigned', { tenantId, dealId: c.dealId, reason: outcome.reason });
+      events.push({ name: 'crm/lead.unassigned', data: { tenantId, dealId: c.dealId, reason: outcome.reason } });
     }
   } catch (err) {
     captureError(err, { category: 'prospects.promote.notify', retryable: false, fields: { tenantId, dealId: c.dealId } });
@@ -481,13 +504,16 @@ export async function bulkPromote(
   if (ids.length > MAX_BULK_PROMOTE) return { results: ids.map((id) => ({ id, outcome: fail('invalid', PROMOTE_MESSAGES.too_many) })) };
   const scope = actor.role === 'manager' ? await scopeUsers({ tenantId, userId: actor.userId, role: actor.role }) : null;
   const results: { id: string; outcome: PromoteOutcome }[] = [];
+  // Every promote's post-commit events, sent once at the end.
+  const events: AnyWorkflowEvent[] = [];
   for (const id of ids) {
     try {
-      results.push({ id, outcome: await promoteOne(tenantId, actor, id, { ignoreWarnings: opts.ignoreWarnings }, new Date(), deps, scope) });
+      results.push({ id, outcome: await promoteOne(tenantId, actor, id, { ignoreWarnings: opts.ignoreWarnings }, new Date(), deps, events, scope) });
     } catch (err) {
-      console.error('bulkPromote: promote failed', id, err);
+      captureError(err, { category: 'prospects.promote.bulk', retryable: false, fields: { tenantId, prospectId: id } });
       results.push({ id, outcome: fail('error') });
     }
   }
+  await flushEvents(events, deps);
   return { results };
 }

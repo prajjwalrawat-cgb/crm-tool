@@ -23,6 +23,11 @@ export const metadata = {
   title: 'Prospect board',
 };
 
+// Page-level maxDuration also sets the timeout of every Server Action used on this
+// page (Next docs: route-segment-config/maxDuration), which covers bulk promote of
+// up to 100 prospects.
+export const maxDuration = 300;
+
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function ProspectsPage({ searchParams }: { searchParams: SearchParams }) {

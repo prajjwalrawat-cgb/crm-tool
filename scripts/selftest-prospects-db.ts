@@ -930,6 +930,39 @@ async function main() {
       const oSugB = await promote(cMember, pSugB);
       const sug3 = (await sugFor(pSugB)).find((x) => x.field === 'industry');
       check('promote blocked: suggestions stay pending', oSugB.status === 'blocked' && sug3?.status === 'pending', { oSugB: oSugB.status, sug3: sug3?.status });
+
+      // a real distribution rule, so the promotes below also emit crm/lead.assigned
+      const srcBoard = (await inC((tx) => tx.select().from(s.leadSources).where(eq(s.leadSources.type, 'prospect_board'))))[0]!;
+      await inC((tx) =>
+        tx.insert(s.distributionRules).values({
+          tenantId: C, name: 'Board leads to Mona', priority: 1, strategy: 'round_robin',
+          conditions: [{ field: 'source_id', op: 'eq', value: srcBoard.id }], pool: { user_ids: [cMember.userId] },
+          respectAvailability: false, slaMinutes: 60,
+        } as never),
+      );
+      const batches: Array<Array<{ name: string; data: Record<string, unknown> }>> = [];
+      const sendEvents = (async (evs: Array<{ name: string; data: Record<string, unknown> }>) => void batches.push(evs)) as never;
+      const pDist = await mkC({ companyName: 'Routable Ropes', contactEmail: 'r@routable.in' });
+      const oDist = await promote(cOwner, pDist, undefined, { sendEvents });
+      // final review I4: a single promote sends its events in one batch (lead.assigned included)
+      const names1 = (batches[0] ?? []).map((e) => e.name);
+      check(
+        'promote: single promote → one batch send with all post-commit events',
+        batches.length === 1 && names1.includes('crm/deal.created') && names1.includes('crm/company.created') && names1.includes('crm/contact.created') && names1.includes('crm/lead.assigned') && names1.filter((n) => n === 'crm/ai.embed_entity').length === 3,
+        { batches: batches.length, names1 },
+      );
+
+      // final review I4: bulk promote of 3 → exactly one batch send containing every promote's events
+      batches.length = 0;
+      const b3 = [await mkC({ companyName: 'Quillon Fabrics', contactEmail: 'a@quillon.in' }), await mkC({ companyName: 'Verdant Biotech', contactEmail: 'b@verdant-bio.in' }), await mkC({ companyName: 'Xenon Lamps', contactEmail: 'c@xenonlamps.in' })];
+      const bk3 = await asC(cMember.userId, () => pr.bulkPromote(C, cMember, b3, {}, { sendEvents } as never));
+      const dealIds3 = bk3.results.map((r) => (r.outcome.status === 'promoted' ? r.outcome.dealId : null));
+      const created3 = (batches[0] ?? []).filter((e) => e.name === 'crm/deal.created').map((e) => e.data.dealId);
+      check(
+        'bulk: 3 promotes → one batch send containing all events',
+        batches.length === 1 && dealIds3.every((d) => d !== null && created3.includes(d)) && created3.length === 3 && (batches[0] ?? []).length === 24,
+        { batches: batches.map((b) => b.length), dealIds3, created3 },
+      );
     }
 
     /* ---------------- daily maintenance (Stage 3 Task 5) ---------------- */
