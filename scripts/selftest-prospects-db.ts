@@ -898,6 +898,38 @@ async function main() {
       check('bulk: mixed', JSON.stringify(st) === JSON.stringify(['promoted', 'blocked', 'error:parked', 'error:not_found']) && bk.results.map((r) => r.id).join() === [bClean, bBlock, bPark, 'abc'].join(), { st, bk });
       const bkMany = await asC(cMember.userId, () => pr.bulkPromote(C, cMember, Array.from({ length: 101 }, () => bClean), {}, deps as never));
       check('bulk: over 100 ids → all invalid', bkMany.results.length === 101 && bkMany.results.every((r) => r.outcome.status === 'error' && r.outcome.error === 'invalid'), bkMany.results.length);
+
+      // final review I3: promote supersedes the prospect's pending enrichment suggestions (create + link paths)
+      const sugFor = (pid: string) => inC((tx) => tx.select().from(s.aiSuggestions).where(eq(s.aiSuggestions.entityId, pid)));
+      const seedSug = (pid: string) =>
+        inC((tx) =>
+          tx.insert(s.aiSuggestions).values([
+            { tenantId: C, entityType: 'prospect', entityId: pid, field: 'industry', suggestedValue: 'Textiles', evidenceQuote: 'r', sourceType: 'enrichment', sourceId: pid, confidence: 0.8, model: 'stub' },
+            { tenantId: C, entityType: 'prospect', entityId: pid, field: 'icp_score', suggestedValue: 70, evidenceQuote: 'r', sourceType: 'enrichment', sourceId: pid, confidence: 0.8, model: 'stub', status: 'rejected', decidedAt: new Date(), decisionNote: 'no' },
+          ] as never),
+        );
+      const pSug = await mkC({ companyName: 'Suggestive Looms', contactEmail: 's@suggestive.in' });
+      await seedSug(pSug);
+      const oSug = await promote(cMember, pSug);
+      const sug1 = await sugFor(pSug);
+      const pend1 = sug1.find((x) => x.field === 'industry');
+      const rej1 = sug1.find((x) => x.field === 'icp_score');
+      check(
+        'promote (create): pending suggestions → superseded with note; decided ones untouched',
+        oSug.status === 'promoted' && pend1?.status === 'superseded' && pend1.decisionNote === 'Prospect promoted to a lead' && !!pend1.decidedAt && rej1?.status === 'rejected' && rej1.decisionNote === 'no',
+        { oSug, sug1: sug1.map((x) => [x.field, x.status, x.decisionNote]) },
+      );
+      const [openLead2] = await inC((tx) => tx.insert(s.deals).values({ tenantId: C, name: 'Suglink lead', stage: 'lead', companyNameText: 'Suglink Dyes' }).returning());
+      const pSugL = await mkC({ companyName: 'Suglink Dyes', contactEmail: 'l@suglink.in' });
+      await seedSug(pSugL);
+      const oSugL = await promote(cMember, pSugL, { leadId: openLead2!.id });
+      const sug2 = (await sugFor(pSugL)).find((x) => x.field === 'industry');
+      check('promote (link): pending suggestions → superseded', oSugL.status === 'promoted' && oSugL.linked && sug2?.status === 'superseded' && sug2.decisionNote === 'Prospect promoted to a lead', { oSugL, sug2 });
+      const pSugB = await mkC({ companyName: 'Blocker Industries', contactEmail: 'sb@blocker.in' });
+      await seedSug(pSugB);
+      const oSugB = await promote(cMember, pSugB);
+      const sug3 = (await sugFor(pSugB)).find((x) => x.field === 'industry');
+      check('promote blocked: suggestions stay pending', oSugB.status === 'blocked' && sug3?.status === 'pending', { oSugB: oSugB.status, sug3: sug3?.status });
     }
 
     /* ---------------- daily maintenance (Stage 3 Task 5) ---------------- */

@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 
-import { comments, companies, contacts, deals, leadAssignments, memberships, notes, offerings, prospects, users, type Prospect } from '@/db/schema';
+import { aiSuggestions, comments, companies, contacts, deals, leadAssignments, memberships, notes, offerings, prospects, users, type Prospect } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { tenantTransaction } from '@/lib/db-context';
 import { normalizeCompanyName, normalizeContactName } from '@/lib/dedup/normalize';
@@ -121,6 +121,11 @@ async function markPromoted(tx: Tx, tenantId: string, actor: Actor, id: string, 
     .update(prospects)
     .set({ promotedDealId: dealId, promotedAt: now, promotedBy: actor.userId, lastActivityAt: now, updatedAt: now })
     .where(and(eq(prospects.tenantId, tenantId), eq(prospects.id, id)));
+  // A promoted prospect is read-only, so its pending enrichment suggestions can never be applied.
+  await tx
+    .update(aiSuggestions)
+    .set({ status: 'superseded', decidedAt: now, decisionNote: 'Prospect promoted to a lead' })
+    .where(and(eq(aiSuggestions.tenantId, tenantId), eq(aiSuggestions.entityType, 'prospect'), eq(aiSuggestions.entityId, id), eq(aiSuggestions.status, 'pending')));
 }
 
 async function promotedActivity(tx: Tx, tenantId: string, actor: Actor, dealId: string, dealName: string, p: Prospect, linked: boolean) {
