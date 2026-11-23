@@ -1,8 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 
+import { deals } from '@/db/schema';
 import { checkPermission, withTenantSession } from '@/lib/auth-guard';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import {
@@ -11,11 +13,16 @@ import {
   listStageDealsPage,
 } from '@/lib/deals/queries';
 import { type DealFilters } from '@/lib/deals/filters';
-import { revertDealToLead } from '@/lib/deals/revert-to-lead';
-import { queueDealScoreRecompute } from '@/lib/deals/scoring/queue';
 import { DEAL_STAGES } from '@/lib/deals/schema';
+import { HOLD_REASONS } from '@/lib/deals/hold';
+import {
+  isRollbackTransition,
+  ROLLBACK_REASONS,
+} from '@/lib/deals/stage-governance';
 import { requireMembership } from '@/lib/membership';
 import { personaOf } from '@/lib/personas';
+
+import { updateDealStageAction } from '../actions';
 
 const cursorSchema = z.object({
   updatedAt: z.string().min(1),
@@ -82,42 +89,52 @@ export async function loadMoreStageDealsAction(
   }
 }
 
-/* -------- TEMPORARY: bulk revert Qualified → Lead -------- */
+/* -------- Bulk stage move -------- */
 
 /**
- * Cleanup affordance for the Lead close-date rollout. Introducing
- * `violatesLeadCloseDate` pushed every dated Lead deal into Qualified, and
- * this lets the team put the ones that were misclassified back — in bulk,
- * from the board, instead of one edit at a time.
+ * Move several deals to one target stage from the board's select mode.
  *
- * The rule still holds afterwards: a Lead can't carry a close date, so the
- * revert CLEARS `expected_close_date`. That's the trade the team accepts to
- * get the stage right; the date is re-entered when the deal re-qualifies.
+ * Every deal goes through `updateDealStageAction` — the same path a drag
+ * takes — so stage gates, the close-date rules (R1/R3), margin, Won order
+ * proof, Hold fields and rollback governance (R2) apply exactly as they do
+ * one-by-one. Whatever reasons the move needs (lost / hold / rollback) are
+ * collected once by the board and applied to the whole batch.
  *
- * Scoped deliberately narrow — Qualified is the only source stage, since
- * that's the only place the migration put deals. Remove once the backlog is
- * sorted.
+ * Deals move independently: a refused deal is reported and left where it is,
+ * it never sinks the rest of the batch.
  */
-const revertToLeadSchema = z.object({
+const bulkMoveSchema = z.object({
   dealIds: z.array(z.uuid()).min(1).max(200),
+  toStage: z.enum(DEAL_STAGES),
+  lostReason: z.string().max(1000).optional(),
+  holdReason: z.enum(HOLD_REASONS).optional(),
+  holdRevisitOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  holdNote: z.string().max(1000).optional(),
+  rollbackReason: z.enum(ROLLBACK_REASONS).optional(),
+  rollbackNote: z.string().max(1000).optional(),
 });
 
-export type RevertToLeadResult =
+export type BulkMoveInput = z.input<typeof bulkMoveSchema>;
+
+export type BulkMoveResult =
   | {
       ok: true;
-      /** Deals actually moved to Lead. */
+      /** Deals actually moved. */
       moved: number;
-      /** Deals left alone (already moved, out of scope, or not visible to you). */
+      /** Already in the target stage, gone, or not yours to move. */
       skipped: number;
-      /** Names of deals a stage gate refused to send back to Lead. */
-      blocked: string[];
+      /** Deals the server refused, with the reason it gave. */
+      failed: { name: string; message: string }[];
     }
   | { ok: false; message: string };
 
-export async function revertQualifiedDealsToLeadAction(
-  input: unknown,
-): Promise<RevertToLeadResult> {
-  const parsed = revertToLeadSchema.safeParse(input);
+export async function bulkMoveDealsAction(
+  input: BulkMoveInput,
+): Promise<BulkMoveResult> {
+  const parsed = bulkMoveSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, message: 'Select at least one deal (max 200).' };
   }
@@ -125,55 +142,74 @@ export async function revertQualifiedDealsToLeadAction(
   const gate = await checkPermission('manageDeals');
   if (!gate.ok) return { ok: false, message: gate.message };
   const { tenant, membership } = gate;
+  const { dealIds, toStage } = parsed.data;
 
-  return await runWithTenantContext(
+  // Re-read the deals rather than trusting the client's selection: names for
+  // the report, current stage to skip no-ops, owner for the sales scope.
+  const rows = await runWithTenantContext(
     { tenantId: tenant.id, userId: membership.userId },
-    async () => {
-      // A sales persona may only revert deals they own (or unowned ones) —
-      // same scope the board reads under.
-      const restrictToOwner =
-        personaOf(membership.role) === 'sales' ? membership.userId : null;
-
-      let moved = 0;
-      let skipped = 0;
-      const blocked: string[] = [];
-      const rescore: string[] = [];
-
-      // One transaction per deal: a gate block or a row that moved out from
-      // under us skips that deal instead of losing the whole batch.
-      for (const dealId of parsed.data.dealIds) {
-        const outcome = await tenantTransaction((tx) =>
-          revertDealToLead(tx, {
-            tenantId: tenant.id,
-            actorUserId: membership.userId,
-            dealId,
-            restrictToOwnerUserId: restrictToOwner,
-          }),
-        );
-
-        if (outcome === 'moved') {
-          moved += 1;
-          rescore.push(dealId);
-        } else if (outcome === 'skipped') {
-          skipped += 1;
-        } else {
-          blocked.push(outcome.blocked);
-        }
-      }
-
-      // Post-commit, best effort — a failed enqueue must not undo the moves.
-      for (const id of rescore) {
-        await queueDealScoreRecompute(tenant.id, id, 'stage_changed');
-      }
-
-      if (moved > 0) {
-        revalidatePath('/dashboard/deals');
-        revalidatePath('/dashboard/deals/board');
-        revalidatePath('/dashboard/activity');
-        revalidatePath('/dashboard');
-      }
-
-      return { ok: true as const, moved, skipped, blocked };
-    },
+    () =>
+      tenantTransaction((tx) =>
+        tx
+          .select({
+            id: deals.id,
+            name: deals.name,
+            stage: deals.stage,
+            ownerId: deals.ownerId,
+          })
+          .from(deals)
+          .where(
+            and(
+              eq(deals.tenantId, tenant.id),
+              inArray(deals.id, dealIds),
+              isNull(deals.deletedAt),
+            ),
+          ),
+      ),
   );
+
+  // A sales persona may only move deals they own (or unowned ones) — the
+  // same scope the board reads under.
+  const restrictToOwner =
+    personaOf(membership.role) === 'sales' ? membership.userId : null;
+
+  let moved = 0;
+  let skipped = dealIds.length - rows.length;
+  const failed: { name: string; message: string }[] = [];
+
+  for (const row of rows) {
+    if (row.stage === toStage) {
+      skipped += 1;
+      continue;
+    }
+    if (restrictToOwner && row.ownerId && row.ownerId !== restrictToOwner) {
+      skipped += 1;
+      continue;
+    }
+
+    const rollingBack = isRollbackTransition(row.stage, toStage);
+    const result = await updateDealStageAction({
+      id: row.id,
+      stage: toStage,
+      reason: toStage === 'lost' ? parsed.data.lostReason : undefined,
+      holdReason: toStage === 'hold' ? parsed.data.holdReason : undefined,
+      holdRevisitOn: toStage === 'hold' ? parsed.data.holdRevisitOn : undefined,
+      holdNote: toStage === 'hold' ? parsed.data.holdNote : undefined,
+      // The board warns that Lead drops the close date before confirming.
+      clearCloseDate: toStage === 'lead' ? true : undefined,
+      rollbackReason: rollingBack ? parsed.data.rollbackReason : undefined,
+      rollbackNote: rollingBack ? parsed.data.rollbackNote : undefined,
+    });
+
+    if (result.ok) {
+      if (result.changed) moved += 1;
+      else skipped += 1;
+    } else {
+      failed.push({ name: row.name, message: result.message });
+    }
+  }
+
+  if (moved > 0) revalidatePath('/dashboard');
+
+  return { ok: true as const, moved, skipped, failed };
 }

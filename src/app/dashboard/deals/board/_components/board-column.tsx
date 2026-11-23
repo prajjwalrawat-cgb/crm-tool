@@ -60,9 +60,8 @@ type Props = {
     cursor: { updatedAt: string; id: string },
   ) => void;
   /**
-   * Bulk-select controls for this column. Only the Qualified column gets
-   * these today — the temporary "send it back to Lead" cleanup after the
-   * Lead close-date rollout. Absent = no select affordance at all.
+   * Bulk-select controls for this column: pick cards, choose a target stage,
+   * move them all at once. Absent = no select affordance (read-only roles).
    */
   selection?: ColumnSelection;
 };
@@ -73,6 +72,11 @@ export type ColumnSelection = {
   selectedIds: Set<string>;
   /** The bulk action is in flight. */
   pending: boolean;
+  /** Stages the selected deals can be sent to (every stage but this one). */
+  targetStages: readonly DealStage[];
+  /** The stage picked in the "Move to" dropdown, or null before a pick. */
+  targetStage: DealStage | null;
+  onTargetChange: (stage: DealStage | null) => void;
   onStart: () => void;
   onCancel: () => void;
   onToggle: (dealId: string) => void;
@@ -80,6 +84,20 @@ export type ColumnSelection = {
   onToggleAll: (ids: string[]) => void;
   onConfirm: () => void;
 };
+
+/** One line of context under the bulk bar for moves that carry a side effect. */
+function bulkMoveHint(target: DealStage | null): string | null {
+  switch (target) {
+    case 'lead':
+      return "Their expected close date will be cleared — a Lead can't hold one.";
+    case 'lost':
+      return "You'll be asked for one lost reason, applied to every selected deal.";
+    case 'hold':
+      return "You'll be asked for one hold reason and revisit date for all of them.";
+    default:
+      return null;
+  }
+}
 
 /**
  * Memoized: only rerenders when its `cards` array reference changes. The
@@ -262,17 +280,38 @@ export const BoardColumn = memo(function BoardColumn({
                   ? 'Clear'
                   : `All (${cards.length})`}
               </button>
+              <select
+                aria-label="Move selected deals to stage"
+                value={selection.targetStage ?? ''}
+                onChange={(e) =>
+                  selection.onTargetChange(
+                    (e.target.value || null) as DealStage | null,
+                  )
+                }
+                disabled={selection.pending}
+                className="rounded border border-slate-300 bg-white px-1 py-0.5 text-slate-700 disabled:opacity-50"
+              >
+                <option value="">Move to…</option>
+                {selection.targetStages.map((s) => (
+                  <option key={s} value={s}>
+                    {DEAL_STAGE_LABELS[s]}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={selection.onConfirm}
-                disabled={selection.pending || selection.selectedIds.size === 0}
-                title="Moves the selected deals back to Lead and clears their expected close date"
+                disabled={
+                  selection.pending ||
+                  selection.selectedIds.size === 0 ||
+                  !selection.targetStage
+                }
                 className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-0.5 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
               >
                 {selection.pending ? (
                   <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
                 ) : null}
-                Move to Lead
+                Move
               </button>
               <button
                 type="button"
@@ -284,10 +323,9 @@ export const BoardColumn = memo(function BoardColumn({
               </button>
             </>
           )}
-          {selection.active ? (
+          {selection.active && bulkMoveHint(selection.targetStage) ? (
             <p className="w-full text-[10px] leading-tight text-amber-700">
-              Their expected close date will be cleared — a Lead can&apos;t
-              hold one.
+              {bulkMoveHint(selection.targetStage)}
             </p>
           ) : null}
         </div>

@@ -29,7 +29,11 @@ import { useRealtimeEvents } from '@/hooks/use-realtime-events';
 import type { CompanyOption } from '@/lib/companies/queries';
 import type { DealFilters } from '@/lib/deals/filters';
 import type { DealBoard, StageSlipRollup } from '@/lib/deals/queries';
-import { type DealStage, DEAL_STAGES } from '@/lib/deals/schema';
+import {
+  type DealStage,
+  DEAL_STAGE_LABELS,
+  DEAL_STAGES,
+} from '@/lib/deals/schema';
 import { canManageDeals } from '@/lib/rbac';
 import { deserializeDeal } from '@/lib/realtime/events';
 import type { Teammate } from '@/lib/teammates/queries';
@@ -39,15 +43,16 @@ import { DealFilterBar } from '../../_components/deal-filter-bar';
 import { FilterChips, type FilterChip } from '../../../_components/filter-chips';
 import { updateDealStageAction } from '../../actions';
 import {
+  type BulkMoveInput,
+  bulkMoveDealsAction,
   loadMoreStageDealsAction,
-  revertQualifiedDealsToLeadAction,
 } from '../actions';
 import { LostReasonModal } from '../../_components/lost-reason-modal';
 import { RollbackReasonModal } from '../../_components/rollback-reason-modal';
 import { HoldReasonModal } from '../../_components/hold-reason-modal';
 import { ClearCloseDateModal } from '../../_components/clear-close-date-modal';
 import { type BoardCard, DealCard } from './deal-card';
-import { BoardColumn } from './board-column';
+import { BoardColumn, type ColumnSelection } from './board-column';
 import { GateBlockPanel } from './gate-block-panel';
 import { CollapsedHoldColumn } from './collapsed-hold-column';
 import { SlippedOnlyToggle } from './slipped-only-toggle';
@@ -55,6 +60,9 @@ import type { GateFailure } from '@/lib/stage-gates/types';
 import { isRollbackTransition } from '@/lib/deals/stage-governance';
 
 type LocalBoard = Record<DealStage, BoardCard[]>;
+
+/** Shared, never-mutated selection for columns not in select mode. */
+const EMPTY_IDS: Set<string> = new Set();
 
 /** Which stages still have un-loaded deals past what's on the board. */
 function computeInitialMore(
@@ -336,12 +344,17 @@ export function BoardView({
     0,
   );
 
-  // TEMPORARY (Lead close-date rollout): bulk-select in the Qualified column
-  // to send deals the migration moved out of Lead back where they belong.
-  // The revert clears their close date — see revertQualifiedDealsToLeadAction.
-  const [selectMode, setSelectMode] = useState(false);
+  // Bulk move: one column at a time can be in select mode. The rep ticks
+  // cards, picks a target stage, and the whole batch goes through the same
+  // server path as a drag (see bulkMoveDealsAction).
+  const [selectStage, setSelectStage] = useState<DealStage | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [reverting, setReverting] = useState(false);
+  const [targetStage, setTargetStage] = useState<DealStage | null>(null);
+  const [bulkMoving, setBulkMoving] = useState(false);
+  // The batch needs a reason first — which modal to show.
+  const [bulkPrompt, setBulkPrompt] = useState<
+    'lost' | 'hold' | 'rollback' | null
+  >(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Track the most recent server-acknowledged board so a *late* error from a
@@ -699,84 +712,120 @@ export function BoardView({
   }, []);
 
   const exitSelectMode = useCallback(() => {
-    setSelectMode(false);
+    setSelectStage(null);
     setSelectedIds(new Set());
+    setTargetStage(null);
+    setBulkPrompt(null);
   }, []);
 
-  const confirmRevertToLead = useCallback(() => {
-    const ids = [...selectedIds];
-    if (ids.length === 0) return;
+  // Send the batch. No optimistic shuffle: some deals may be refused (gates,
+  // missing close date, margin…), and the revalidated board that follows a
+  // successful move is the truth. Cards keep their place until it lands.
+  const runBulkMove = useCallback(
+    (extra: Omit<BulkMoveInput, 'dealIds' | 'toStage'> = {}) => {
+      const ids = [...selectedIds];
+      if (ids.length === 0 || !targetStage) return;
+      const toStage = targetStage;
+      setBulkPrompt(null);
+      setError(null);
+      setNotice(null);
+      setBulkMoving(true);
 
-    // Optimistic: drop the cards into Lead with their date stripped, exactly
-    // as the server will leave them.
-    const snapshot = lastKnownGoodRef.current;
-    setBoard((curr) => {
-      const moving = curr.qualified.filter((c) => ids.includes(c.id));
-      if (moving.length === 0) return curr;
-      return {
-        ...curr,
-        qualified: curr.qualified.filter((c) => !ids.includes(c.id)),
-        lead: [
-          ...moving.map((c) => ({
-            ...c,
-            stage: 'lead' as DealStage,
-            expectedCloseDate: null,
-            __pending: true,
-          })),
-          ...curr.lead,
-        ],
-      };
-    });
-    setError(null);
-    setNotice(null);
-    setReverting(true);
-
-    startTransition(async () => {
-      const result = await revertQualifiedDealsToLeadAction({ dealIds: ids });
-      setReverting(false);
-      if (!result.ok) {
-        setBoard(snapshot);
-        lastKnownGoodRef.current = snapshot;
-        setError(result.message);
-        return;
-      }
-      // Anything the server refused stays where it is — the revalidated board
-      // arriving next render is the source of truth, so just report it.
-      const parts = [`${result.moved} moved back to Lead`];
-      if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
-      if (result.blocked.length > 0) {
-        parts.push(`blocked by a stage gate: ${result.blocked.join(', ')}`);
-      }
-      setNotice(`${parts.join(' · ')}. Close dates were cleared.`);
-      exitSelectMode();
-    });
-  }, [selectedIds, exitSelectMode, startTransition]);
-
-  const qualifiedSelection = useMemo(
-    () =>
-      canMove
-        ? {
-            active: selectMode,
-            selectedIds,
-            pending: reverting,
-            onStart: () => setSelectMode(true),
-            onCancel: exitSelectMode,
-            onToggle: toggleSelected,
-            onToggleAll: toggleAllSelected,
-            onConfirm: confirmRevertToLead,
-          }
-        : undefined,
-    [
-      canMove,
-      selectMode,
-      selectedIds,
-      reverting,
-      exitSelectMode,
-      toggleSelected,
-      toggleAllSelected,
-      confirmRevertToLead,
-    ],
+      startTransition(async () => {
+        const result = await bulkMoveDealsAction({
+          dealIds: ids,
+          toStage,
+          ...extra,
+        });
+        setBulkMoving(false);
+        if (!result.ok) {
+          setError(result.message);
+          return;
+        }
+        const label = DEAL_STAGE_LABELS[toStage];
+        const parts = [`${result.moved} moved to ${label}`];
+        if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
+        if (result.moved > 0 || result.skipped > 0) {
+          setNotice(
+            `${parts.join(' · ')}.${
+              toStage === 'lead' && result.moved > 0
+                ? ' Close dates were cleared.'
+                : ''
+            }`,
+          );
+        }
+        if (result.failed.length > 0) {
+          // Name each refused deal with the server's reason so the rep knows
+          // what to fix — usually a missing close date, margin or gate item.
+          setError(
+            `${result.failed.length} not moved — ${result.failed
+              .map((f) => `${f.name}: ${f.message}`)
+              .join(' · ')}`,
+          );
+        }
+        exitSelectMode();
+      });
+    },
+    [selectedIds, targetStage, exitSelectMode, startTransition],
   );
+
+  // Confirm from the bulk bar: collect whatever reason the move needs once,
+  // for the whole batch, then send it.
+  const confirmBulkMove = useCallback(() => {
+    if (!selectStage || !targetStage || selectedIds.size === 0) return;
+    if (targetStage === 'lost') return setBulkPrompt('lost');
+    if (targetStage === 'hold') return setBulkPrompt('hold');
+    if (isRollbackTransition(selectStage, targetStage)) {
+      return setBulkPrompt('rollback');
+    }
+    runBulkMove();
+  }, [selectStage, targetStage, selectedIds, runBulkMove]);
+
+  // One selection object per column. Only the active column's depends on the
+  // picked ids, so the rest keep their identity and stay memoized.
+  const selectionByStage = useMemo(() => {
+    const out = {} as Record<DealStage, ColumnSelection | undefined>;
+    for (const stage of DEAL_STAGES) {
+      if (!canMove) {
+        out[stage] = undefined;
+        continue;
+      }
+      const active = selectStage === stage;
+      out[stage] = {
+        active,
+        selectedIds: active ? selectedIds : EMPTY_IDS,
+        pending: active && bulkMoving,
+        targetStages: DEAL_STAGES.filter((s) => s !== stage),
+        targetStage: active ? targetStage : null,
+        onTargetChange: setTargetStage,
+        onStart: () => {
+          // Switching columns starts a fresh selection.
+          setSelectStage(stage);
+          setSelectedIds(new Set());
+          setTargetStage(null);
+        },
+        onCancel: exitSelectMode,
+        onToggle: toggleSelected,
+        onToggleAll: toggleAllSelected,
+        onConfirm: confirmBulkMove,
+      };
+    }
+    return out;
+  }, [
+    canMove,
+    selectStage,
+    selectedIds,
+    bulkMoving,
+    targetStage,
+    exitSelectMode,
+    toggleSelected,
+    toggleAllSelected,
+    confirmBulkMove,
+  ]);
+
+  const bulkDealLabel = `${selectedIds.size} selected ${
+    selectedIds.size === 1 ? 'deal' : 'deals'
+  }`;
 
   const columns = useMemo(
     () =>
@@ -806,7 +855,7 @@ export function BoardView({
             hasMore={moreByStage[stage] ?? false}
             loadingMore={loadingStages.has(stage)}
             onLoadMore={handleLoadMore}
-            selection={stage === 'qualified' ? qualifiedSelection : undefined}
+            selection={selectionByStage[stage]}
           />
         ),
       ),
@@ -815,7 +864,7 @@ export function BoardView({
       canMove,
       activeCard,
       holdExpanded,
-      qualifiedSelection,
+      selectionByStage,
       stageCounts,
       stageAmounts,
       stageSlipped,
@@ -1045,6 +1094,40 @@ export function BoardView({
             );
             setClearDatePrompt(null);
           }}
+        />
+      ) : null}
+
+      {bulkPrompt === 'lost' ? (
+        <LostReasonModal
+          dealName={bulkDealLabel}
+          pending={bulkMoving}
+          onCancel={() => setBulkPrompt(null)}
+          onConfirm={(reason) => runBulkMove({ lostReason: reason })}
+        />
+      ) : null}
+
+      {bulkPrompt === 'hold' ? (
+        <HoldReasonModal
+          dealName={bulkDealLabel}
+          pending={bulkMoving}
+          onCancel={() => setBulkPrompt(null)}
+          onConfirm={(holdReason, holdRevisitOn, holdNote) => {
+            runBulkMove({ holdReason, holdRevisitOn, holdNote });
+            setHoldExpanded(true);
+          }}
+        />
+      ) : null}
+
+      {bulkPrompt === 'rollback' && selectStage && targetStage ? (
+        <RollbackReasonModal
+          dealName={bulkDealLabel}
+          fromStage={selectStage}
+          toStage={targetStage}
+          pending={bulkMoving}
+          onCancel={() => setBulkPrompt(null)}
+          onConfirm={(rollbackReason, rollbackNote) =>
+            runBulkMove({ rollbackReason, rollbackNote })
+          }
         />
       ) : null}
 
