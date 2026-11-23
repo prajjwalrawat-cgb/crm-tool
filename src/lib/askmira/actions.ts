@@ -6,7 +6,9 @@ import 'server-only';
 //                Lead, follow-up task, note), or changes to one (a new title, a
 //                new number). A company or contact already here makes it stop
 //                and ask (409 needs_choice; docs/askmira/lead-save-choices.md)
-//   deal.stage   move a deal, with what the move needs (margin, close date,
+//   prospect.save  a new company on the Prospect Board (stage Dump), as its
+//                "New prospect" form adds one; it becomes a lead only when promoted
+//   deal.stage  move a deal, with what the move needs (margin, close date,
 //                Hold's reason and revisit date, why it was lost, why it goes back)
 //   deal.decide  a manager approves or rejects a Won that waits on them
 //   deal.note    a note on a deal
@@ -41,15 +43,18 @@ import {
   updateDealFieldAction,
 } from '@/app/dashboard/deals/[id]/actions';
 import { createNoteAction } from '@/app/dashboard/notes/actions';
+import { createProspectAction } from '@/app/dashboard/prospects/actions';
 import { createTaskAction } from '@/app/dashboard/tasks/actions';
-import { companies, contacts, deals } from '@/db/schema';
+import { companies, contacts, deals, prospects, type ProspectStage } from '@/db/schema';
 import { runAsPerson } from '@/lib/auth/acting-as';
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
+import { normalizeCompanyName } from '@/lib/dedup/normalize';
 import { findCompanyMatches, findContactByEmail, findContactNameMatches } from '@/lib/dedup/queries';
 import { HOLD_REASON_LABELS, isHoldReason } from '@/lib/deals/hold';
 import { DEAL_STAGE_LABELS, DEAL_STAGES, type DealStage } from '@/lib/deals/schema';
 import { isRollbackReason, ROLLBACK_REASON_LABELS } from '@/lib/deals/stage-governance';
 import { isOfferingsEnabled, listOfferingOptions } from '@/lib/offerings/queries';
+import { MAX_NOTES, SIZE_BANDS } from '@/lib/prospects/rules';
 import { can } from '@/lib/rbac';
 
 import { clean, httpError, type Linked, type Person } from './core';
@@ -496,6 +501,139 @@ async function saveLead({ me, params }: ActArgs) {
   });
 }
 
+/* ── prospect.save ─────────────────────────────────────────── */
+
+/** The board's column names (prospect-column.tsx is a client component). */
+const PROSPECT_STAGE_LABELS: Record<ProspectStage, string> = {
+  dump: 'Dump',
+  researching: 'Researching',
+  qualified: 'Qualified',
+  ready: 'Ready',
+  parked: 'Parked',
+};
+
+/**
+ * A new company on the Prospect Board (stage Dump), as its "New prospect" form
+ * adds one (createProspectAction): company, contact, industry, place, size,
+ * product fit, source and notes. It becomes a lead only when someone promotes
+ * it there, with the board's own duplicate checks. A company already on the
+ * board and not yet promoted is refused, so the same message sent twice never
+ * adds it twice. A follow-up date adds a task on the person's own list (tasks
+ * can't hang off a prospect); a refused task comes back as `task_error` and
+ * the prospect stays.
+ */
+async function saveProspect({ me, params }: ActArgs) {
+  if (!can(me.role, 'manageProspects')) {
+    throw httpError(
+      403,
+      `You have view-only access in Saleinx (${me.role}), so you can't add to the Prospect Board.`,
+    );
+  }
+  const companyName = clean(params.company, 200);
+  if (!companyName) throw httpError(422, 'A prospect needs the company name.');
+  const contact = obj(params.contact);
+  const followUp = obj(params.follow_up);
+  const sizeBand = clean(params.size_band, 20);
+  if (sizeBand && !(SIZE_BANDS as readonly string[]).includes(sizeBand)) {
+    throw httpError(422, `The company size must be one of ${SIZE_BANDS.join(', ')}.`);
+  }
+  const dueDate = day(followUp.due_date, 'The follow-up date');
+  const taskTitle = clean(followUp.title, 280);
+  const notes = clean(params.notes, MAX_NOTES);
+
+  // Product fit is one offering on a prospect: the first of those named that
+  // this workspace sells. None named, or none known, leaves it empty.
+  const wanted = (Array.isArray(params.offerings) ? params.offerings : [params.offerings])
+    .map((w) => String(w ?? '').trim().toLowerCase())
+    .filter(Boolean);
+  const fit = wanted.length
+    ? (await inScope(me, () => listOfferingOptions(me.tenantId))).find(
+        (o) => wanted.includes(o.id.toLowerCase()) || wanted.includes(o.name.toLowerCase()),
+      )
+    : undefined;
+
+  const norm = normalizeCompanyName(companyName);
+  const [already] = await inScope(me, () =>
+    tenantTransaction((tx) =>
+      tx
+        .select({ id: prospects.id, name: prospects.companyName, stage: prospects.stage })
+        .from(prospects)
+        .where(
+          and(
+            eq(prospects.tenantId, me.tenantId),
+            eq(prospects.normalizedName, norm),
+            isNull(prospects.deletedAt),
+            isNull(prospects.promotedDealId),
+          ),
+        )
+        .limit(1),
+    ),
+  );
+  if (already) {
+    throw httpError(
+      409,
+      `${already.name} is already on the Prospect Board (${PROSPECT_STAGE_LABELS[already.stage]}), so it wasn't added twice.`,
+    );
+  }
+
+  return await asPerson(me, async () => {
+    const made = await createProspectAction({
+      companyName,
+      domain: clean(params.domain, 200),
+      contactName: clean(contact.name, 200),
+      contactDesignation: clean(contact.title, 200),
+      contactEmail: clean(contact.email, 320)?.toLowerCase() ?? null,
+      contactPhone: clean(contact.phone, 40),
+      industry: clean(params.industry, 120),
+      sizeBand,
+      city: clean(params.city, 120),
+      state: clean(params.state, 120),
+      productFitOfferingId: fit?.id ?? null,
+      sourceTag: clean(params.source, 80) ?? 'Ask Miraa',
+      notes,
+    });
+    if (!made.ok || !made.data) refuse(made, 'The prospect could not be added');
+    const id = made.data.id;
+    const done = ['added to the Prospect Board at Dump'];
+
+    let taskId: string | null = null;
+    let taskError: string | null = null;
+    if (taskTitle || dueDate) {
+      const task = await createTaskAction(
+        form({
+          title: taskTitle ?? `Follow up with ${companyName}`,
+          description: notes,
+          status: 'todo',
+          priority: 'medium',
+          type: ['call', 'email', 'meeting', 'internal', 'followup'].includes(String(followUp.type))
+            ? String(followUp.type)
+            : 'followup',
+          dueDate,
+          assignedUserId: me.userId,
+        }),
+      );
+      if (task.ok) {
+        taskId = task.task.id;
+        done.push(`follow-up task${dueDate ? ` due ${dueDate}` : ''} added to your Tasks`);
+      } else {
+        taskError = task.message ?? 'Saleinx refused it.';
+      }
+    }
+    return {
+      prospect: {
+        id,
+        company: companyName,
+        stage: 'dump',
+        stage_label: PROSPECT_STAGE_LABELS.dump,
+        product_fit: fit?.name ?? null,
+      },
+      done,
+      task_id: taskId,
+      task_error: taskError,
+    };
+  });
+}
+
 /* ── deal.stage ────────────────────────────────────────────── */
 
 async function moveDeal({ me, params }: ActArgs) {
@@ -679,6 +817,7 @@ async function noteDeal({ me, params }: ActArgs) {
 
 export const ACTIONS: Record<string, (args: ActArgs) => Promise<Record<string, unknown>>> = {
   'lead.save': saveLead,
+  'prospect.save': saveProspect,
   'deal.stage': moveDeal,
   'deal.decide': decideDeal,
   'deal.note': noteDeal,
