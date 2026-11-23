@@ -107,6 +107,18 @@ async function main() {
     const other = await runWithSystemContext(tenantId, () => findCompanyMatches(tenantId, `${fooWord} Consultancy Services`));
     check('different first word does not match', !other.some((m) => m.id === extraCompanyIds[3]), `matches=${other.map((m) => m.label).join(' | ')}`);
 
+    // 1d. A shared trailing word is not a match when the first words differ:
+    //     "RBL Bank" is not "EXIM Bank" (word_similarity 0.56 from "bank" alone).
+    const [rblWord, eximWord] = [word(3), word(4)];
+    const bankId = await txAs(tenantId, async (tx) => {
+      const n = `${eximWord} Bank`;
+      const [c] = await tx.insert(companies).values({ tenantId, name: n, normalizedName: normalizeCompanyName(n) }).returning({ id: companies.id });
+      return c!.id;
+    });
+    extraCompanyIds.push(bankId);
+    const rbl = await runWithSystemContext(tenantId, () => findCompanyMatches(tenantId, `${rblWord} Bank`));
+    check('shared trailing word alone does not match', !rbl.some((m) => m.id === bankId), `matches=${rbl.map((m) => m.label).join(' | ')}`);
+
     // 2. Email exact block (case-insensitive).
     const email = `dedup-${Date.now()}@sync-selftest.example`;
     contactId = await txAs(tenantId, async (tx) => {

@@ -25,6 +25,8 @@ function withExec<T>(exec: DbExecutor | undefined, fn: (tx: DbExecutor) => Promi
 
 /** Similarity threshold for a "possible duplicate" (spec: ≥ 0.55). */
 const SIM_THRESHOLD = 0.55;
+/** How alike the two names' first distinctive words must be for a trigram match. */
+const FIRST_WORD_THRESHOLD = 0.3;
 
 export type DedupMatch = {
   id: string;
@@ -67,6 +69,11 @@ export async function findCompanyMatches(
   const firstWord = core.split(' ')[0] ?? '';
   const sameFirst =
     fuzzy && firstWord.length >= 2 ? sql`split_part(${stored}, ' ', 1) = ${firstWord}` : sql`false`;
+  // A trigram match also needs the first distinctive words to look alike. A short
+  // name is otherwise carried by a shared trailing word: "RBL Bank" vs "EXIM Bank"
+  // scores 5/9 = 0.56 on word_similarity from "bank" alone, though "rbl" ≠ "exim".
+  // Spelling variants still pass ("godavari" vs "godawari" ≈ 0.5).
+  const firstAlike = sql`similarity(split_part(${stored}, ' ', 1), ${firstWord}) >= ${FIRST_WORD_THRESHOLD}`;
 
   const rows = (await withExec(exec, (tx) =>
     tx.execute(sql`
@@ -87,8 +94,9 @@ export async function findCompanyMatches(
           OR ${sameFirst}
           ${
             fuzzy
-              ? sql`OR similarity(${stored}, ${core}) >= ${SIM_THRESHOLD}
-                    OR word_similarity(${core}, ${stored}) >= ${SIM_THRESHOLD}`
+              ? sql`OR (${firstAlike} AND (
+                      similarity(${stored}, ${core}) >= ${SIM_THRESHOLD}
+                      OR word_similarity(${core}, ${stored}) >= ${SIM_THRESHOLD}))`
               : sql``
           }
         )
