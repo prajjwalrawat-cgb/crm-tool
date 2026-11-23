@@ -113,6 +113,32 @@ export function DumpInput({
     };
   }, [thumb]);
 
+  // Ctrl+V / Cmd+V an image (e.g. a copied screenshot) anywhere on the page.
+  useEffect(() => {
+    if (busy) return;
+    function onPaste(e: ClipboardEvent) {
+      const data = e.clipboardData;
+      if (!data) return;
+      const item = Array.from(data.items).find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+      const blob = item?.getAsFile();
+      if (!blob) return;
+      // Pasting into a text box when the clipboard also carries text: leave it as a normal text paste.
+      const t = e.target as HTMLElement | null;
+      const editable = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (editable && data.types.includes('text/plain')) return;
+      e.preventDefault();
+      const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      const pasted = new File([blob], blob.name && blob.name !== 'image.png' ? blob.name : `pasted-${Date.now()}.${ext}`, {
+        type: blob.type,
+      });
+      setKind('image');
+      setFile(pasted);
+      setError(null);
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [busy]);
+
   const ready = sourceTag.trim() && (kind === 'text' ? text.trim() : file);
 
   async function submit() {
@@ -231,6 +257,27 @@ export function DumpInput({
           />
         ) : (
           <div className="space-y-2">
+            {kind === 'image' ? (
+              <div
+                tabIndex={0}
+                role="button"
+                aria-label="Paste an image here with Ctrl+V"
+                className="flex min-h-40 flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-slate-300 p-4 text-center text-[13px] text-slate-500 outline-none focus:border-indigo-500 dark:border-[#333]"
+              >
+                {thumb ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={thumb} alt="Selected image" className="max-h-64 rounded-md border border-slate-200" />
+                    <span>Press Ctrl+V again to replace it.</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">Press Ctrl+V to paste a screenshot</span>
+                    <span>Copy an image or screenshot, then paste it anywhere on this page.</span>
+                  </>
+                )}
+              </div>
+            ) : null}
             <input
               key={kind}
               type="file"
@@ -240,10 +287,6 @@ export function DumpInput({
               disabled={busy}
               className="block text-[13px]"
             />
-            {kind === 'image' && thumb ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={thumb} alt="Selected upload" className="max-h-48 rounded-md border border-slate-200" />
-            ) : null}
           </div>
         )}
 
