@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { DumpRow } from '@/lib/prospects/import/csv-map';
 import type { DedupHint } from '@/lib/prospects/import/dedup-hints';
@@ -85,6 +85,28 @@ function precheck(kind: Kind, text: string, file: File | null): string | null {
   return (DUMP_IMAGE_TYPES as readonly string[]).includes(file.type.toLowerCase()) ? null : IMPORT_MESSAGES.imageType;
 }
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function UploadIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-9 w-9 text-indigo-600">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-9 w-9 text-indigo-600">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M9 13h6M9 17h6" />
+    </svg>
+  );
+}
+
 const TABS: { kind: Kind; label: string }[] = [
   { kind: 'text', label: 'Paste text' },
   { kind: 'csv', label: 'CSV file' },
@@ -105,6 +127,22 @@ export function DumpInput({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parsed, setParsed] = useState<Parsed | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /** Takes a chosen/dropped file, switching to the tab that matches its type. */
+  function pickFile(f: File | null) {
+    if (!f) return;
+    setError(null);
+    const isCsv = /\.csv$/i.test(f.name) || f.type === 'text/csv';
+    if (f.type.startsWith('image/')) setKind('image');
+    else if (isCsv) setKind('csv');
+    else {
+      setError(kind === 'csv' ? 'Please choose a .csv file.' : IMPORT_MESSAGES.imageType);
+      return;
+    }
+    setFile(f);
+  }
 
   const thumb = useMemo(() => (file && kind === 'image' ? URL.createObjectURL(file) : null), [file, kind]);
   useEffect(() => {
@@ -256,37 +294,84 @@ export function DumpInput({
             disabled={busy}
           />
         ) : (
-          <div className="space-y-2">
-            {kind === 'image' ? (
-              <div
-                tabIndex={0}
-                role="button"
-                aria-label="Paste an image here with Ctrl+V"
-                className="flex min-h-40 flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-slate-300 p-4 text-center text-[13px] text-slate-500 outline-none focus:border-indigo-500 dark:border-[#333]"
-              >
-                {thumb ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={thumb} alt="Selected image" className="max-h-64 rounded-md border border-slate-200" />
-                    <span>Press Ctrl+V again to replace it.</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">Press Ctrl+V to paste a screenshot</span>
-                    <span>Copy an image or screenshot, then paste it anywhere on this page.</span>
-                  </>
-                )}
-              </div>
-            ) : null}
+          <div
+            role="button"
+            tabIndex={busy ? -1 : 0}
+            aria-label={kind === 'csv' ? 'Choose or drop a CSV file' : 'Choose, drop or paste an image'}
+            aria-disabled={busy}
+            onClick={() => !busy && fileRef.current?.click()}
+            onKeyDown={(e) => {
+              if (!busy && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                fileRef.current?.click();
+              }
+            }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              if (!busy) setDragging(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              if (!busy) pickFile(e.dataTransfer.files?.[0] ?? null);
+            }}
+            className={cn(
+              'flex min-h-44 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center text-[13px] text-slate-500 outline-none transition-colors',
+              'focus-visible:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-200',
+              dragging
+                ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/20'
+                : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50 dark:border-[#333] dark:hover:bg-[#1a1a1a]',
+              busy && 'pointer-events-none opacity-60',
+            )}
+          >
             <input
+              ref={fileRef}
               key={kind}
               type="file"
-              aria-label={kind === 'csv' ? 'CSV file' : 'Image'}
+              className="sr-only"
+              tabIndex={-1}
               accept={kind === 'csv' ? '.csv,text/csv' : 'image/png,image/jpeg,image/webp,image/gif'}
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                pickFile(e.target.files?.[0] ?? null);
+                e.target.value = '';
+              }}
               disabled={busy}
-              className="block text-[13px]"
             />
+            {kind === 'image' && thumb ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={thumb} alt="Selected image" className="max-h-64 rounded-md border border-slate-200" />
+                <span className="font-medium text-slate-700 dark:text-slate-300">{file?.name}</span>
+                <span>Click, drop or press Ctrl+V to replace it.</span>
+              </>
+            ) : kind === 'csv' && file ? (
+              <>
+                <FileIcon />
+                <span className="font-medium text-slate-700 dark:text-slate-300">{file.name}</span>
+                <span>{formatSize(file.size)} · Click or drop another file to replace it.</span>
+              </>
+            ) : (
+              <>
+                <UploadIcon />
+                <span className="text-[14px] font-medium text-slate-700 dark:text-slate-300">
+                  {dragging ? 'Drop it here' : kind === 'csv' ? 'Drag & drop a CSV file here' : 'Drag & drop an image here'}
+                </span>
+                <span>
+                  or <span className="font-medium text-indigo-700 underline underline-offset-2">browse your files</span>
+                  {kind === 'image' ? ', or press Ctrl+V to paste a screenshot' : ''}
+                </span>
+                <span className="text-[12px] text-slate-400">
+                  {kind === 'csv' ? '.csv files only' : 'PNG, JPG, WEBP or GIF'}
+                </span>
+              </>
+            )}
           </div>
         )}
 
