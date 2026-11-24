@@ -43,8 +43,9 @@ export type QuoteListItem = {
   quoteNumber: string;
   revision: number;
   status: QuoteStatus;
-  dealId: string;
-  dealName: string;
+  /** Null for a quote not linked to a deal. */
+  dealId: string | null;
+  dealName: string | null;
   companyName: string | null;
   totalMinor: number;
   createdBy: string | null;

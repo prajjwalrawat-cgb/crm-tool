@@ -212,8 +212,8 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
   `)) as unknown as Array<{ id: string }>;
   const dealId = deal!.id;
 
-  // createQuoteFromDeal
-  const created = await asA(() => q.createQuoteFromDeal(tidA, USER, { dealId }));
+  // createQuote
+  const created = await asA(() => q.createQuote(tidA, USER, { dealId }));
   const [org] = (await db.execute(sql`
     SELECT fiscal_year_start_month AS m FROM organization_settings WHERE tenant_id = ${tidA}
   `)) as unknown as Array<{ m: number }>;
@@ -222,7 +222,7 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
   const quote = await asA(() => q.getQuote(tidA, created.id));
   const templates = await asA(() => q.listQuoteTemplates(tidA));
   check(
-    "createQuoteFromDeal: draft, first number, revision 1, buyer = company, default starter template",
+    "createQuote: draft, first number, revision 1, buyer = company, default starter template",
     created.quoteNumber === expectedNumber &&
       quote?.quoteNumber === expectedNumber &&
       quote.status === "draft" &&
@@ -239,14 +239,14 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
 
   await db.execute(sql`DELETE FROM quote_templates WHERE tenant_id = ${tidB}`);
   const crossTenantThrows = await throwsAs(
-    () => asB(() => q.createQuoteFromDeal(tidB, USER, { dealId })),
+    () => asB(() => q.createQuote(tidB, USER, { dealId })),
     q.QuoteNotFoundError,
   );
   const [bTemplates] = (await db.execute(sql`
     SELECT count(*)::int AS n FROM quote_templates WHERE tenant_id = ${tidB}
   `)) as unknown as Array<{ n: number }>;
   check(
-    "createQuoteFromDeal: tenant A's deal under tenant B throws QuoteNotFoundError, no starter left in B",
+    "createQuote: tenant A's deal under tenant B throws QuoteNotFoundError, no starter left in B",
     crossTenantThrows && bTemplates?.n === 0,
     JSON.stringify(bTemplates),
   );
@@ -453,7 +453,7 @@ async function sendChecks(tidA: string): Promise<void> {
     const dealId = deal!.id;
 
     const newDraft = async (withItems: boolean) => {
-      const { id } = await asA(() => q.createQuoteFromDeal(tidA, creatorId, { dealId }));
+      const { id } = await asA(() => q.createQuote(tidA, creatorId, { dealId }));
       if (withItems) {
         const cur = (await asA(() => q.getQuote(tidA, id)))!;
         await asA(() =>
@@ -568,7 +568,7 @@ async function sendChecks(tidA: string): Promise<void> {
 
     // protectedDocumentReason
     const reason = await asA(() =>
-      tenantTransaction((tx) => protectedDocumentReason(tx, tidA, sent.documentId)),
+      tenantTransaction((tx) => protectedDocumentReason(tx, tidA, sent.documentId!)),
     );
     const [plain] = (await db.execute(sql`
       INSERT INTO deal_documents (tenant_id, deal_id, uploaded_by, file_name, file_url)
@@ -582,6 +582,203 @@ async function sendChecks(tidA: string): Promise<void> {
       reason === "quote" && plainReason === null,
       JSON.stringify({ reason, plainReason }),
     );
+
+    // Quotes not linked to a deal (0080).
+    {
+      const { id: soloId } = await asA(() => q.createQuote(tidA, creatorId, { dealId: null }));
+      const solo = (await asA(() => q.getQuote(tidA, soloId)))!;
+      check(
+        "createQuote with dealId null: draft, deal_id null, empty buyer",
+        solo.dealId === null && solo.status === "draft" && solo.buyer.name === "",
+        JSON.stringify({ dealId: solo.dealId, buyer: solo.buyer }),
+      );
+      await asA(() =>
+        q.updateQuoteDraft(tidA, creatorId, soloId, {
+          quoteDate: solo.quoteDate,
+          validUntil: solo.validUntil,
+          sellerProfileId: null,
+          buyer: { name: "Walk-in Client Pvt Ltd" },
+          consignee: null,
+          items: [{ description: "Widget", quantity: 2, rateMinor: 5_000, discountBps: 0, taxRateBps: 0 }],
+          overallDiscount: { type: "none" as const },
+          content: solo.content,
+        }),
+      );
+      const { rows } = await asA(() => q.listQuotes(tidA, { limit: 200 }));
+      const listed = rows.find((r) => r.id === soloId);
+      check(
+        "listQuotes includes a no-deal quote: dealId/dealName null, client = buyer name",
+        listed?.dealId === null && listed.dealName === null && listed.companyName === "Walk-in Client Pvt Ltd",
+        JSON.stringify(listed),
+      );
+      const soloInput = await asA(() => buildQuoteRenderInput(tidA, soloId));
+      check(
+        "buildQuoteRenderInput for a no-deal quote: deal.name null, no deal custom fields",
+        soloInput !== null && soloInput.placeholderValues["deal.name"] === null && Object.keys(soloInput.dealCustomFields).length === 0,
+        JSON.stringify(soloInput?.placeholderValues),
+      );
+      const soloDeps = fakeDeps();
+      const soloSent = await asA(() => markQuoteSent(tidA, creatorId, soloId, soloDeps.deps));
+      const soloAfter = await asA(() => q.getQuote(tidA, soloId));
+      check(
+        "markQuoteSent on a no-deal quote: locked as sent, nothing rendered or uploaded, no document",
+        soloSent.documentId === null &&
+          soloAfter?.status === "sent" &&
+          soloAfter.sentBy === creatorId &&
+          soloAfter.pdfDocumentId === null &&
+          soloDeps.calls.upload.length === 0,
+        JSON.stringify({ soloSent, status: soloAfter?.status, calls: soloDeps.calls }),
+      );
+      const { id: soloRev } = await asA(() => q.createQuoteRevision(tidA, creatorId, soloId));
+      const rev = await asA(() => q.getQuote(tidA, soloRev));
+      const revs = await asA(() => q.listQuoteRevisions(tidA, solo.quoteNumber));
+      check(
+        "createQuoteRevision of a no-deal quote keeps deal_id null; listQuoteRevisions returns both",
+        rev?.dealId === null && rev.revision === 2 && revs.length === 2 && revs[0]!.revision === 2,
+        JSON.stringify({ dealId: rev?.dealId, revs }),
+      );
+      const valueErr = await asA(() => q.setDealAmountFromQuote(tidA, creatorId, soloId)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      check(
+        "setDealAmountFromQuote on a no-deal quote throws QuoteRuleError",
+        valueErr instanceof q.QuoteRuleError,
+        String(valueErr),
+      );
+      const found = await asA(() => q.searchDealsForQuote(tidA, "send FLOW"));
+      const byCompany = await asA(() => q.searchDealsForQuote(tidA, "globex"));
+      const none = await asA(() => q.searchDealsForQuote(tidA, "no-such-deal-%_"));
+      check(
+        "searchDealsForQuote: matches deal name or company case-insensitively; % and _ are literal",
+        found.some((d) => d.id === dealId) &&
+          byCompany.some((d) => d.id === dealId && d.companyName === "Globex Ltd") &&
+          none.length === 0,
+        JSON.stringify({ found, byCompany, none }),
+      );
+
+      // Linking a draft to a deal from the editor.
+      const { id: linkId } = await asA(() => q.createQuote(tidA, creatorId, { dealId: null }));
+      await asA(() => q.setQuoteDeal(tidA, creatorId, linkId, dealId));
+      const linked = await asA(() => q.getQuote(tidA, linkId));
+      await asA(() => q.setQuoteDeal(tidA, creatorId, linkId, null));
+      const unlinked = await asA(() => q.getQuote(tidA, linkId));
+      check(
+        "setQuoteDeal: linking an empty-client draft fills the client from the deal; unlinking keeps it",
+        linked?.dealId === dealId &&
+          linked.buyer.name === "Globex Ltd" &&
+          unlinked?.dealId === null &&
+          unlinked.buyer.name === "Globex Ltd",
+        JSON.stringify({ linked: [linked?.dealId, linked?.buyer], unlinked: [unlinked?.dealId, unlinked?.buyer] }),
+      );
+      const { id: namedId } = await asA(() => q.createQuote(tidA, creatorId, { dealId: null }));
+      const named = (await asA(() => q.getQuote(tidA, namedId)))!;
+      await asA(() =>
+        q.updateQuoteDraft(tidA, creatorId, namedId, {
+          quoteDate: named.quoteDate,
+          validUntil: named.validUntil,
+          sellerProfileId: null,
+          buyer: { name: "Typed-in Client" },
+          consignee: null,
+          items: [{ description: "Widget", quantity: 1, rateMinor: 100, discountBps: 0, taxRateBps: 0 }],
+          overallDiscount: { type: "none" as const },
+          content: named.content,
+        }),
+      );
+      await asA(() => q.setQuoteDeal(tidA, creatorId, namedId, dealId));
+      const namedAfter = await asA(() => q.getQuote(tidA, namedId));
+      check(
+        "setQuoteDeal keeps a client already typed in",
+        namedAfter?.dealId === dealId && namedAfter.buyer.name === "Typed-in Client",
+        JSON.stringify(namedAfter?.buyer),
+      );
+      const frozenLink = await asA(() => q.setQuoteDeal(tidA, creatorId, soloId, dealId)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      check("setQuoteDeal on a sent quote throws QuoteFrozenError", frozenLink instanceof q.QuoteFrozenError, String(frozenLink));
+
+      // Rep scope: own + unassigned deals only (the Deals page rule).
+      const [other] = (await db.execute(sql`
+        INSERT INTO deals (tenant_id, name, company_name, owner_id)
+        VALUES (${tidA}, 'Someone else send flow deal', 'Globex Ltd', 'selftest-other-rep') RETURNING id
+      `)) as unknown as Array<{ id: string }>;
+      const rep = { ownerOrUnassigned: creatorId };
+      const repSees = await asA(() => q.searchDealsForQuote(tidA, "send flow", rep));
+      const allSees = await asA(() => q.searchDealsForQuote(tidA, "send flow"));
+      const repCreate = await asA(() => q.createQuote(tidA, creatorId, { dealId: other!.id }, rep)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      const { id: repDraft } = await asA(() => q.createQuote(tidA, creatorId, { dealId: null }, rep));
+      const repLink = await asA(() => q.setQuoteDeal(tidA, creatorId, repDraft, other!.id, rep)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      check(
+        "rep scope: search hides another rep's deal (unassigned shown); create/link to it throws QuoteNotFoundError",
+        repSees.some((d) => d.id === dealId) &&
+          !repSees.some((d) => d.id === other!.id) &&
+          allSees.some((d) => d.id === other!.id) &&
+          repCreate instanceof q.QuoteNotFoundError &&
+          repLink instanceof q.QuoteNotFoundError,
+        JSON.stringify({ repSees: repSees.map((d) => d.name), all: allSees.length, repCreate: String(repCreate), repLink: String(repLink) }),
+      );
+      await db.execute(sql`DELETE FROM deals WHERE id = ${other!.id}`);
+
+      // Rep quote visibility: own revisions chain, or a deal they own.
+      const OTHER = "selftest-other-rep";
+      const MGR = "selftest-manager";
+      const mine = { ownOnly: creatorId };
+      const { id: othersQuote } = await asA(() => q.createQuote(tidA, OTHER, { dealId: null }));
+      const [myDeal] = (await db.execute(sql`
+        INSERT INTO deals (tenant_id, name, owner_id) VALUES (${tidA}, 'My owned deal', ${creatorId}) RETURNING id
+      `)) as unknown as Array<{ id: string }>;
+      const { id: othersOnMyDeal } = await asA(() => q.createQuote(tidA, OTHER, { dealId: myDeal!.id }));
+      // My quote, sent, then revised by a manager: the new revision stays mine to see.
+      const { id: chainId } = await asA(() => q.createQuote(tidA, creatorId, { dealId: null }));
+      const chain = (await asA(() => q.getQuote(tidA, chainId)))!;
+      await asA(() =>
+        q.updateQuoteDraft(tidA, creatorId, chainId, {
+          quoteDate: chain.quoteDate,
+          validUntil: chain.validUntil,
+          sellerProfileId: null,
+          buyer: { name: "Chain Client" },
+          consignee: null,
+          items: [{ description: "Widget", quantity: 1, rateMinor: 100, discountBps: 0, taxRateBps: 0 }],
+          overallDiscount: { type: "none" as const },
+          content: chain.content,
+        }),
+      );
+      await asA(() => markQuoteSent(tidA, creatorId, chainId, fakeDeps().deps));
+      const { id: mgrRev } = await asA(() => q.createQuoteRevision(tidA, MGR, chainId));
+
+      const inMine = (id: string) => asA(() => q.quoteInScope(tidA, id, mine));
+      const [seesOwn, seesOthers, seesOnMyDeal, seesMgrRev, allSeeOthers] = await Promise.all([
+        inMine(chainId),
+        inMine(othersQuote),
+        inMine(othersOnMyDeal),
+        inMine(mgrRev),
+        asA(() => q.quoteInScope(tidA, othersQuote, {})),
+      ]);
+      const { rows: myRows } = await asA(() => q.listQuotes(tidA, { limit: 200 }, mine));
+      const myIds = new Set(myRows.map((r) => r.id));
+      const dealRows = await asA(() => q.listQuotesForDeal(tidA, myDeal!.id, mine));
+      check(
+        "rep quote scope: own quotes, quotes on own deals and a manager's revision of own quote are in; another rep's quote is out (list + single)",
+        seesOwn &&
+          !seesOthers &&
+          seesOnMyDeal &&
+          seesMgrRev &&
+          allSeeOthers &&
+          myIds.has(chainId) &&
+          myIds.has(mgrRev) &&
+          myIds.has(othersOnMyDeal) &&
+          !myIds.has(othersQuote) &&
+          dealRows.some((r) => r.id === othersOnMyDeal),
+        JSON.stringify({ seesOwn, seesOthers, seesOnMyDeal, seesMgrRev, allSeeOthers, dealRows: dealRows.length }),
+      );
+    }
 
     // No items: rejected before upload.
     const emptyId = await newDraft(false);
@@ -712,7 +909,7 @@ async function fixWaveChecks(tidA: string): Promise<void> {
   const { id: lockedTplId } = await asA(() =>
     q.saveQuoteTemplate(tidA, USER, { name: "Locked terms", body: lockedBody }),
   );
-  const { id: quoteId } = await asA(() => q.createQuoteFromDeal(tidA, USER, { dealId, templateId: lockedTplId }));
+  const { id: quoteId } = await asA(() => q.createQuote(tidA, USER, { dealId, templateId: lockedTplId }));
   const fresh = (await asA(() => q.getQuote(tidA, quoteId)))!;
 
   // (a) Forged content for the locked section is ignored on save.
@@ -793,7 +990,7 @@ async function fixWaveChecks(tidA: string): Promise<void> {
   );
 
   // Milestones: updateQuoteDraft rejects a schedule that doesn't sum to 100%.
-  const { id: msId } = await asA(() => q.createQuoteFromDeal(tidA, USER, { dealId }));
+  const { id: msId } = await asA(() => q.createQuote(tidA, USER, { dealId }));
   const msQuote = (await asA(() => q.getQuote(tidA, msId)))!;
   const psId = msQuote.templateSnapshot.sections.find((s) => s.type === "payment_schedule")!.id;
   const badMs = await errorOf(() =>
@@ -853,15 +1050,15 @@ async function fixWaveChecks(tidA: string): Promise<void> {
   await takeNumber(numberAt(1));
   await takeNumber(numberAt(2));
   const skipped = await errorOf(async () => {
-    const r = await asA(() => q.createQuoteFromDeal(tidA, USER, { dealId }));
+    const r = await asA(() => q.createQuote(tidA, USER, { dealId }));
     if (r.quoteNumber !== numberAt(3)) throw new Error(`got ${r.quoteNumber}, want ${numberAt(3)}`);
   });
-  check("createQuoteFromDeal: skips two pre-taken numbers and gets the following one", skipped === null, String(skipped));
+  check("createQuote: skips two pre-taken numbers and gets the following one", skipped === null, String(skipped));
 
   for (let k = 4; k < 24; k++) await takeNumber(numberAt(k));
-  const exhausted = await errorOf(() => asA(() => q.createQuoteFromDeal(tidA, USER, { dealId })));
+  const exhausted = await errorOf(() => asA(() => q.createQuote(tidA, USER, { dealId })));
   check(
-    "createQuoteFromDeal: 20 taken numbers in a row ends in a QuoteRuleError",
+    "createQuote: 20 taken numbers in a row ends in a QuoteRuleError",
     exhausted instanceof q.QuoteRuleError,
     String(exhausted),
   );

@@ -6,9 +6,10 @@ import { getDealById } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { isOfferingsEnabled, listOfferingOptions } from '@/lib/offerings/queries';
 import { templateBodiesEqual } from '@/lib/quotes/editor-form';
-import { getQuoteTemplate, listQuoteTemplates, listQuotesForDeal } from '@/lib/quotes/queries';
+import { getQuoteTemplate, listQuoteRevisions, listQuoteTemplates, quoteInScope } from '@/lib/quotes/queries';
 import { buildQuoteRenderInput } from '@/lib/quotes/render-input';
 import type { QuoteDetail } from '@/lib/quotes/types';
+import { personaOf } from '@/lib/personas';
 import { can } from '@/lib/rbac';
 
 import { QuoteEditor } from './_components/quote-editor';
@@ -29,19 +30,23 @@ async function templateChangedSince(tenantId: string, quote: QuoteDetail): Promi
 
 export default async function QuotePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return await withTenantSession(async ({ tenant }) => {
+  return await withTenantSession(async ({ tenant, userId }) => {
     const [membership, renderInput] = await Promise.all([requireMembership(), buildQuoteRenderInput(tenant.id, id)]);
     if (!renderInput) notFound();
+    // Reps open only their own quotes; anything else is a 404, like a missing quote.
+    const ownOnly = personaOf(membership.role) === 'sales';
+    if (ownOnly && !(await quoteInScope(tenant.id, id, { ownOnly: userId }))) notFound();
     const quote = renderInput.quote;
 
     const canManage = can(membership.role, 'manageQuotes');
     const canSetDealValue = canManage && can(membership.role, 'manageDeals');
     const isDraft = quote.status === 'draft';
 
+    const dealId = quote.dealId;
     const [deal, siblings, documents, templateChanged, offeringsEnabled, offerings] = await Promise.all([
-      getDealById(tenant.id, quote.dealId),
-      quote.status === 'superseded' ? listQuotesForDeal(tenant.id, quote.dealId) : Promise.resolve([]),
-      quote.pdfDocumentId ? listDealDocuments(tenant.id, quote.dealId) : Promise.resolve([]),
+      dealId ? getDealById(tenant.id, dealId) : Promise.resolve(null),
+      quote.status === 'superseded' ? listQuoteRevisions(tenant.id, quote.quoteNumber) : Promise.resolve([]),
+      quote.pdfDocumentId && dealId ? listDealDocuments(tenant.id, dealId) : Promise.resolve([]),
       isDraft && canManage ? templateChangedSince(tenant.id, quote) : Promise.resolve(false),
       isOfferingsEnabled(tenant.id),
       // Retired offerings included so rows that carry one still show it.
@@ -65,6 +70,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         fileUrl={fileUrl}
         deal={deal ? { id: deal.id, name: deal.name, amountMinor: deal.amountMinor, currency: deal.currency } : null}
         newerRevision={newer ? { id: newer.id, revision: newer.revision } : null}
+        limitedToOwnDeals={personaOf(membership.role) === 'sales'}
         offerings={
           offeringsEnabled ? offerings.map((o) => ({ id: o.id, name: o.name, active: o.active })) : []
         }

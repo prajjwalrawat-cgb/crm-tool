@@ -32,6 +32,7 @@ export function QuoteActionsBar({
   templateChanged,
   fileUrl,
   deal,
+  linkedToDeal,
   dealValueMinor,
 }: {
   quoteId: string;
@@ -49,6 +50,8 @@ export function QuoteActionsBar({
   /** The PDF filed on send. */
   fileUrl: string | null;
   deal: ActionsBarDeal | null;
+  /** False for a quote not linked to any deal: sending only locks it. */
+  linkedToDeal: boolean;
   /** The value "Set deal value" writes: the saved quote's taxable value (subtotal − discount). */
   dealValueMinor: number;
 }) {
@@ -70,8 +73,12 @@ export function QuoteActionsBar({
   }
 
   function markSent() {
-    if (!window.confirm(`This locks Rev ${revision} and files the PDF on the deal.`)) return;
-    run(() => markQuoteSentAction(quoteId), 'Quote marked as sent. The PDF is filed on the deal.');
+    const filed = linkedToDeal ? ' and files the PDF on the deal' : '';
+    if (!window.confirm(`This locks Rev ${revision}${filed}.`)) return;
+    run(
+      () => markQuoteSentAction(quoteId),
+      linkedToDeal ? 'Quote marked as sent. The PDF is filed on the deal.' : 'Quote marked as sent.',
+    );
   }
 
   function reapply() {

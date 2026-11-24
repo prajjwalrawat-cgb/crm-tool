@@ -13,6 +13,7 @@ import {
   quoteSettings,
   quoteTemplates,
   quotes,
+  users,
 } from '@/db/schema';
 import { tenantTransaction, type DbExecutor } from '@/lib/db-context';
 import { applyDealPatch } from '@/lib/deals/patch';
@@ -458,43 +459,76 @@ function isQuoteNumberTaken(err: unknown): boolean {
   return false;
 }
 
-export async function createQuoteFromDeal(
+/**
+ * Which deals a user may link a quote to. `ownerOrUnassigned` set = sales
+ * persona (member / viewer): only deals they own or nobody owns, the same
+ * rule the Deals page applies. Unset = every deal in the workspace.
+ */
+export type QuoteDealScope = { ownerOrUnassigned?: string };
+
+function dealScopeCondition(scope: QuoteDealScope): SQL | undefined {
+  const me = scope.ownerOrUnassigned;
+  return me ? sql`(${deals.ownerId} = ${me} OR ${deals.ownerId} IS NULL)` : undefined;
+}
+
+/**
+ * The buyer a quote linked to `dealId` starts with (the deal's company and
+ * contact). Throws QuoteNotFoundError('Deal') when the deal is missing,
+ * deleted or outside `scope`.
+ */
+async function buyerFromDeal(
+  tx: DbExecutor,
+  tenantId: string,
+  dealId: string,
+  scope: QuoteDealScope,
+): Promise<QuoteParty> {
+  if (!isUuid(dealId)) throw new QuoteNotFoundError('Deal');
+  const [d] = await tx
+    .select({
+      companyName: companies.name,
+      companyNameText: deals.companyNameText,
+      contactFirst: contacts.firstName,
+      contactLast: contacts.lastName,
+      contactEmail: contacts.email,
+      contactNameText: deals.contactNameText,
+      contactEmailText: deals.contactEmailText,
+    })
+    .from(deals)
+    .leftJoin(companies, and(eq(companies.id, deals.companyId), isNull(companies.deletedAt)))
+    .leftJoin(contacts, and(eq(contacts.id, deals.contactId), isNull(contacts.deletedAt)))
+    .where(and(eq(deals.tenantId, tenantId), eq(deals.id, dealId), isNull(deals.deletedAt), dealScopeCondition(scope)))
+    .limit(1);
+  if (!d) throw new QuoteNotFoundError('Deal');
+  const contactName =
+    [d.contactFirst, d.contactLast].filter((s) => s && s.trim()).join(' ').trim() || d.contactNameText || undefined;
+  return compact<QuoteParty>({
+    name: d.companyName ?? d.companyNameText ?? contactName ?? '',
+    contactName,
+    contactEmail: d.contactEmail ?? d.contactEmailText ?? undefined,
+  });
+}
+
+/**
+ * New draft quote. With a `dealId` the buyer is prefilled from the deal's
+ * company and contact; with `dealId: null` the quote stands alone and the
+ * buyer starts empty (filled in the editor).
+ */
+export async function createQuote(
   tenantId: string,
   userId: string,
-  input: { dealId: string; templateId?: string },
+  input: { dealId: string | null; templateId?: string },
+  scope: QuoteDealScope = {},
 ): Promise<{ id: string; quoteNumber: string }> {
-  if (!isUuid(input.dealId)) throw new QuoteNotFoundError('Deal');
+  if (input.dealId !== null && !isUuid(input.dealId)) throw new QuoteNotFoundError('Deal');
+  const dealId = input.dealId;
 
   return tenantTransaction(async (tx) => {
-    const [d] = await tx
-      .select({
-        companyName: companies.name,
-        companyNameText: deals.companyNameText,
-        contactFirst: contacts.firstName,
-        contactLast: contacts.lastName,
-        contactEmail: contacts.email,
-        contactNameText: deals.contactNameText,
-        contactEmailText: deals.contactEmailText,
-      })
-      .from(deals)
-      .leftJoin(companies, and(eq(companies.id, deals.companyId), isNull(companies.deletedAt)))
-      .leftJoin(contacts, and(eq(contacts.id, deals.contactId), isNull(contacts.deletedAt)))
-      .where(and(eq(deals.tenantId, tenantId), eq(deals.id, input.dealId), isNull(deals.deletedAt)))
-      .limit(1);
-    if (!d) throw new QuoteNotFoundError('Deal');
+    const buyer: QuoteParty = dealId !== null ? await buyerFromDeal(tx, tenantId, dealId, scope) : { name: '' };
 
     // Only after the deal is confirmed, so a bad id leaves no starter behind.
     await insertStarterIfNone(tx, tenantId, userId);
     const template = await loadActiveTemplate(tx, tenantId, input.templateId);
     const settings = await loadSettings(tx, tenantId);
-
-    const contactName =
-      [d.contactFirst, d.contactLast].filter((s) => s && s.trim()).join(' ').trim() || d.contactNameText || undefined;
-    const buyer = compact<QuoteParty>({
-      name: d.companyName ?? d.companyNameText ?? contactName ?? '',
-      contactName,
-      contactEmail: d.contactEmail ?? d.contactEmailText ?? undefined,
-    });
 
     const profile = await sellerFromProfile(tx, tenantId);
     const seller = profile?.seller ?? (await sellerFromOrgSettings(tx, tenantId));
@@ -502,7 +536,7 @@ export async function createQuoteFromDeal(
     const quoteDate = todayIst();
     const values = {
       tenantId,
-      dealId: input.dealId,
+      dealId,
       templateId: template.id,
       templateSnapshot: template.body,
       content: defaultContentFor(template.body),
@@ -545,6 +579,32 @@ async function lockDraft(tx: DbExecutor, tenantId: string, id: string) {
   if (!cur) throw new QuoteNotFoundError();
   if (cur.status !== 'draft') throw new QuoteFrozenError();
   return cur;
+}
+
+/**
+ * Link a draft to a deal, move it to another deal, or unlink it
+ * (`dealId: null`). A draft with no client name yet takes the new deal's
+ * company and contact; a client already typed in is kept. Sent quotes are
+ * locked: link a new revision instead.
+ */
+export async function setQuoteDeal(
+  tenantId: string,
+  userId: string,
+  id: string,
+  dealId: string | null,
+  scope: QuoteDealScope = {},
+): Promise<{ previousDealId: string | null }> {
+  if (!isUuid(id)) throw new QuoteNotFoundError();
+  return tenantTransaction(async (tx) => {
+    const cur = await lockDraft(tx, tenantId, id);
+    const set: Partial<typeof quotes.$inferInsert> = { dealId, updatedBy: userId, updatedAt: new Date() };
+    if (dealId !== null) {
+      const dealBuyer = await buyerFromDeal(tx, tenantId, dealId, scope);
+      if (!(cur.buyer as QuoteParty | null)?.name?.trim()) set.buyer = dealBuyer;
+    }
+    await tx.update(quotes).set(set).where(and(eq(quotes.tenantId, tenantId), eq(quotes.id, id)));
+    return { previousDealId: cur.dealId };
+  });
 }
 
 /**
@@ -764,14 +824,52 @@ const listColumns = {
   status: quotes.status,
   dealId: quotes.dealId,
   dealName: deals.name,
-  companyName: sql<string | null>`coalesce(${companies.name}, ${deals.companyNameText})`,
+  // A quote without a deal shows its buyer as the client.
+  companyName: sql<string | null>`coalesce(${companies.name}, ${deals.companyNameText}, nullif(${quotes.buyer}->>'name', ''))`,
   totalMinor: quotes.totalMinor,
   createdBy: quotes.createdBy,
   createdAt: quotes.createdAt,
   sentAt: quotes.sentAt,
 };
 
-export async function listQuotesForDeal(tenantId: string, dealId: string): Promise<QuoteListItem[]> {
+/**
+ * Which quotes a user may see and act on. `ownOnly` set = sales persona
+ * (member / viewer): quotes where they created any revision of the same
+ * quote number, or that are linked to a deal they own. Unset = all quotes.
+ * Callers must join `deals` on `quotes.deal_id` (left join is fine).
+ */
+export type QuoteAccessScope = { ownOnly?: string };
+
+function quoteAccessCondition(scope: QuoteAccessScope): SQL | undefined {
+  const me = scope.ownOnly;
+  if (!me) return undefined;
+  return sql`(${deals.ownerId} = ${me} OR EXISTS (
+    SELECT 1 FROM quotes own
+    WHERE own.tenant_id = ${quotes.tenantId}
+      AND own.quote_number = ${quotes.quoteNumber}
+      AND own.created_by = ${me}
+  ))`;
+}
+
+/** Whether the quote exists in this tenant and is within `scope`. */
+export async function quoteInScope(tenantId: string, id: string, scope: QuoteAccessScope): Promise<boolean> {
+  if (!isUuid(id)) return false;
+  const [row] = await tenantTransaction((tx) =>
+    tx
+      .select({ id: quotes.id })
+      .from(quotes)
+      .leftJoin(deals, eq(deals.id, quotes.dealId))
+      .where(and(eq(quotes.tenantId, tenantId), eq(quotes.id, id), quoteAccessCondition(scope)))
+      .limit(1),
+  );
+  return row !== undefined;
+}
+
+export async function listQuotesForDeal(
+  tenantId: string,
+  dealId: string,
+  scope: QuoteAccessScope = {},
+): Promise<QuoteListItem[]> {
   if (!isUuid(dealId)) return [];
   return tenantTransaction((tx) =>
     tx
@@ -779,8 +877,68 @@ export async function listQuotesForDeal(tenantId: string, dealId: string): Promi
       .from(quotes)
       .innerJoin(deals, eq(deals.id, quotes.dealId))
       .leftJoin(companies, eq(companies.id, deals.companyId))
-      .where(and(eq(quotes.tenantId, tenantId), eq(quotes.dealId, dealId)))
+      .where(and(eq(quotes.tenantId, tenantId), eq(quotes.dealId, dealId), quoteAccessCondition(scope)))
       .orderBy(desc(quotes.createdAt), desc(quotes.revision)),
+  );
+}
+
+/** Every revision of one quote number (works for quotes with or without a deal). */
+export async function listQuoteRevisions(
+  tenantId: string,
+  quoteNumber: string,
+): Promise<Array<{ id: string; quoteNumber: string; revision: number }>> {
+  return tenantTransaction((tx) =>
+    tx
+      .select({ id: quotes.id, quoteNumber: quotes.quoteNumber, revision: quotes.revision })
+      .from(quotes)
+      .where(and(eq(quotes.tenantId, tenantId), eq(quotes.quoteNumber, quoteNumber)))
+      .orderBy(desc(quotes.revision)),
+  );
+}
+
+export type QuoteDealOption = {
+  id: string;
+  name: string;
+  companyName: string | null;
+  stage: string;
+  amountMinor: number;
+  currency: string;
+  ownerName: string | null;
+};
+
+/**
+ * Deals a quote can be linked to: live deals within `scope` whose name or
+ * company matches `term`, most recently updated first.
+ */
+export async function searchDealsForQuote(
+  tenantId: string,
+  term: string,
+  scope: QuoteDealScope = {},
+  limit = 20,
+): Promise<QuoteDealOption[]> {
+  const q = term.trim().slice(0, 100);
+  const where: (SQL | undefined)[] = [eq(deals.tenantId, tenantId), isNull(deals.deletedAt), dealScopeCondition(scope)];
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push(sql`(${deals.name} ILIKE ${like} OR ${companies.name} ILIKE ${like} OR ${deals.companyNameText} ILIKE ${like})`);
+  }
+  return tenantTransaction((tx) =>
+    tx
+      .select({
+        id: deals.id,
+        name: deals.name,
+        companyName: sql<string | null>`coalesce(${companies.name}, ${deals.companyNameText})`,
+        stage: sql<string>`${deals.stage}::text`,
+        amountMinor: deals.amountMinor,
+        currency: deals.currency,
+        ownerName: sql<string | null>`nullif(trim(concat_ws(' ', ${users.firstName}, ${users.lastName})), '')`,
+      })
+      .from(deals)
+      .leftJoin(companies, and(eq(companies.id, deals.companyId), isNull(companies.deletedAt)))
+      .leftJoin(users, eq(users.id, deals.ownerId))
+      .where(and(...where))
+      .orderBy(desc(deals.updatedAt))
+      .limit(Math.min(Math.max(limit, 1), 50)),
   );
 }
 
@@ -807,9 +965,10 @@ const isoDateSchema = z.iso.date();
 export async function listQuotes(
   tenantId: string,
   f: { status?: QuoteStatus; createdBy?: string; from?: string; to?: string; cursor?: string; limit?: number },
+  scope: QuoteAccessScope = {},
 ): Promise<{ rows: QuoteListItem[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(Math.trunc(f.limit ?? 50), 1), 200);
-  const where: (SQL | undefined)[] = [eq(quotes.tenantId, tenantId)];
+  const where: (SQL | undefined)[] = [eq(quotes.tenantId, tenantId), quoteAccessCondition(scope)];
   if (f.status) where.push(eq(quotes.status, f.status));
   if (f.createdBy) where.push(eq(quotes.createdBy, f.createdBy));
   if (f.from) where.push(gte(quotes.quoteDate, isoDateSchema.parse(f.from)));
@@ -824,7 +983,7 @@ export async function listQuotes(
     tx
       .select({ ...listColumns, cursorTs: sql<string>`${quotes.createdAt}::text` })
       .from(quotes)
-      .innerJoin(deals, eq(deals.id, quotes.dealId))
+      .leftJoin(deals, eq(deals.id, quotes.dealId))
       .leftJoin(companies, eq(companies.id, deals.companyId))
       .where(and(...where))
       .orderBy(desc(quotes.createdAt), desc(quotes.id))
@@ -866,11 +1025,12 @@ export async function setDealAmountFromQuote(tenantId: string, userId: string, q
         dealCurrency: deals.currency,
       })
       .from(quotes)
-      .innerJoin(deals, eq(deals.id, quotes.dealId))
+      .leftJoin(deals, eq(deals.id, quotes.dealId))
       .where(and(eq(quotes.tenantId, tenantId), eq(quotes.id, quoteId)))
       .limit(1),
   );
   if (!q) throw new QuoteNotFoundError();
+  if (!q.dealId) throw new QuoteRuleError('This quote is not linked to a deal.');
   const taxableMinor = q.subtotalMinor - q.discountMinor;
   const result = await applyDealPatch(tenantId, userId, {
     id: q.dealId,

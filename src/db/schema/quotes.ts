@@ -107,9 +107,8 @@ export const quotes = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
-    dealId: uuid('deal_id')
-      .notNull()
-      .references(() => deals.id, { onDelete: 'cascade' }),
+    /** Null for a quote not linked to any deal (0080). */
+    dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'cascade' }),
     quoteNumber: text('quote_number').notNull(),
     revision: integer('revision').notNull().default(1),
     parentQuoteId: uuid('parent_quote_id').references(
