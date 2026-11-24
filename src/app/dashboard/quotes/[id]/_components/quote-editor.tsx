@@ -18,6 +18,7 @@ import {
   type QuoteEditorForm,
 } from '@/lib/quotes/editor-form';
 import type { QuoteRenderInput } from '@/lib/quotes/pdf/context';
+import type { QuoteSellerChoice } from '@/lib/quotes/queries';
 import type { QuoteSection } from '@/lib/quotes/template-schema';
 import { cn } from '@/lib/utils';
 
@@ -75,6 +76,7 @@ export function QuoteEditor({
   newerRevision,
   offerings,
   limitedToOwnDeals,
+  sellerChoices,
 }: {
   /** Server-built PDF input (buildQuoteRenderInput) for the saved quote. */
   renderInput: QuoteRenderInput;
@@ -87,6 +89,8 @@ export function QuoteEditor({
   offerings: OfferingChoice[];
   /** Reps: the deal picker lists only their own and unassigned deals. */
   limitedToOwnDeals: boolean;
+  /** Seller profiles (Invoice settings) this draft can be issued from; [] when not editable. */
+  sellerChoices: QuoteSellerChoice[];
 }) {
   const router = useRouter();
   const quote = renderInput.quote;
@@ -106,13 +110,15 @@ export function QuoteEditor({
   useUnsavedChangesWarning(dirty, 'You have unsaved changes to this quote. Leave without saving?');
 
   const totals = useMemo(() => formTotals(form), [form]);
+  const sellers = useMemo(() => Object.fromEntries(sellerChoices.map((c) => [c.id, c.seller])), [sellerChoices]);
   // Draft: the server input with only `quote` replaced by the form's edits.
   // Otherwise: exactly what the server renders.
   const previewInput = useMemo(() => {
     if (!editable) return renderInput;
-    const q = previewQuote(quote, form);
-    return q ? { ...renderInput, quote: q } : null;
-  }, [editable, renderInput, quote, form]);
+    const q = previewQuote(quote, form, sellers);
+    if (!q) return null;
+    return { ...renderInput, quote: q, placeholderValues: { ...renderInput.placeholderValues, 'seller.name': q.seller.name } };
+  }, [editable, renderInput, quote, form, sellers]);
 
   function save() {
     const sent = form;
@@ -246,6 +252,15 @@ export function QuoteEditor({
               <DateField label="Quote date" value={form.quoteDate} onChange={(quoteDate) => setForm((f) => ({ ...f, quoteDate }))} errors={errors.quoteDate} readOnly={readOnly} />
               <DateField label="Valid until" value={form.validUntil} onChange={(validUntil) => setForm((f) => ({ ...f, validUntil }))} errors={errors.validUntil} readOnly={readOnly} />
             </div>
+            {editable && sellerChoices.length > 1 ? (
+              <SellerField
+                choices={sellerChoices}
+                value={form.sellerProfileId}
+                onChange={(sellerProfileId) => setForm((f) => ({ ...f, sellerProfileId }))}
+                errors={errors.sellerProfileId}
+                readOnly={readOnly}
+              />
+            ) : null}
           </SectionCard>
           {body.sections.filter((s) => s.enabled).map(renderSection)}
         </div>
@@ -297,6 +312,45 @@ function DateField({
     <label className="block space-y-1">
       <span className="block text-[12px] font-medium text-slate-700 dark:text-[#D4D4D8]">{label}</span>
       <input type="date" className={cn(inputCls, 'py-1.5', errorCls(errors))} value={value} readOnly={readOnly} onChange={(e) => onChange(e.target.value)} />
+      <FieldErrors messages={errors} />
+    </label>
+  );
+}
+
+/** Which seller profile (state GSTIN, address, bank) the quote is issued from. */
+function SellerField({
+  choices,
+  value,
+  onChange,
+  errors,
+  readOnly,
+}: {
+  choices: QuoteSellerChoice[];
+  value: string | null;
+  onChange: (v: string | null) => void;
+  errors?: string[];
+  readOnly: boolean;
+}) {
+  const known = value !== null && choices.some((c) => c.id === value);
+  return (
+    <label className="mt-2 block space-y-1">
+      <span className="block text-[12px] font-medium text-slate-700 dark:text-[#D4D4D8]">Seller</span>
+      <select
+        className={cn(inputCls, 'py-1.5', errorCls(errors))}
+        value={known ? value! : ''}
+        disabled={readOnly}
+        onChange={(e) => onChange(e.target.value || null)}
+      >
+        {!known ? <option value="">Choose a seller…</option> : null}
+        {choices.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.seller.name} · {c.label}
+          </option>
+        ))}
+      </select>
+      <span className="block text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
+        GSTIN, address and bank details printed on the quote. Edit them in Invoice settings.
+      </span>
       <FieldErrors messages={errors} />
     </label>
   );

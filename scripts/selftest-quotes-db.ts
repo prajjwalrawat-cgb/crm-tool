@@ -296,6 +296,29 @@ async function dataLayerChecks(tidA: string, tidB: string): Promise<void> {
   }
   check("updateQuoteDraft: an oversized overall discount is a field error on overallDiscount", discountFieldError);
 
+  // Seller select: listQuoteSellerChoices + saving a draft with a picked profile.
+  await db.execute(sql`
+    INSERT INTO invoice_seller_profiles (tenant_id, state_code, seller_name, gstin, bank_account)
+    VALUES (${tidA}, '29', 'Seller KA', '29AAAAA0000A1Z5', 'KA-111'),
+           (${tidA}, '07', 'Seller DL', '07AAAAA0000A1Z5', 'DL-222')
+  `);
+  const choices = await asA(() => q.listQuoteSellerChoices(tidA));
+  check(
+    "listQuoteSellerChoices: lowest state code first, labelled with state and GSTIN",
+    choices.length === 2 && choices[0]!.label === "Delhi · 07AAAAA0000A1Z5" && choices[1]!.seller.bankAccount === "KA-111",
+    JSON.stringify(choices.map((c) => c.label)),
+  );
+  const ka = choices.find((c) => c.seller.stateCode === "29")!;
+  await asA(() => q.updateQuoteDraft(tidA, USER, created.id, { ...draftInput, sellerProfileId: ka.id }));
+  const withKa = await asA(() => q.getQuote(tidA, created.id));
+  check(
+    "updateQuoteDraft: a picked seller profile is stored with its GSTIN and bank details",
+    withKa?.sellerProfileId === ka.id && withKa.seller.gstin === "29AAAAA0000A1Z5" && withKa.seller.bankAccount === "KA-111",
+    JSON.stringify(withKa?.seller),
+  );
+  await db.execute(sql`DELETE FROM invoice_seller_profiles WHERE tenant_id = ${tidA}`);
+  await asA(() => q.updateQuoteDraft(tidA, USER, created.id, draftInput));
+
   // Snapshot independence from later template edits / archiving.
   const tplId = templates[0]!.id;
   const edited = defaultTemplateBody();
