@@ -10,13 +10,16 @@ import QuotePdfPreview from '@/components/quotes/quote-pdf-preview';
 import { sampleRenderInput } from '@/lib/quotes/pdf/sample-data';
 import { quoteTemplateBodySchema } from '@/lib/quotes/template-schema';
 
-function toInput(body: unknown) {
+function toInput(body: unknown, logoUrl: string | null) {
   const parsed = quoteTemplateBodySchema.safeParse(body);
-  return parsed.success ? sampleRenderInput(parsed.data) : null;
+  if (!parsed.success) return null;
+  const input = sampleRenderInput(parsed.data);
+  return { ...input, logoUrl: parsed.data.theme.logoSource === 'none' ? null : logoUrl };
 }
 
-export default function PdfPreview({ body }: { body: unknown }) {
-  const input = useMemo(() => toInput(body), [body]);
+/** `logoUrl`: the workspace logo as a data URL (null when none is uploaded). */
+export default function PdfPreview({ body, logoUrl }: { body: unknown; logoUrl: string | null }) {
+  const input = useMemo(() => toInput(body, logoUrl), [body, logoUrl]);
   return (
     <QuotePdfPreview
       input={input}

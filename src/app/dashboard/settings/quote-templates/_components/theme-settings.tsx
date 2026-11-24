@@ -27,6 +27,25 @@ export function ThemeSettings({ theme, onChange }: { theme: QuoteTheme; onChange
   const set = <K extends keyof QuoteTheme>(key: K, value: QuoteTheme[K]) => onChange({ ...theme, [key]: value });
   return (
     <div className="space-y-3">
+      <Field
+        label="Layout"
+        htmlFor="th-layout"
+        hint={
+          theme.layout === 'classic'
+            ? 'Boxed GST proforma grid. Sections fill fixed boxes: payment schedule and terms sit in the top-right grid, text blocks in the bottom-left box, so section order is ignored.'
+            : 'Sections stack top to bottom in the order on the left.'
+        }
+      >
+        <select
+          id="th-layout"
+          className={selectCls}
+          value={theme.layout ?? 'modern'}
+          onChange={(e) => set('layout', e.target.value as NonNullable<QuoteTheme['layout']>)}
+        >
+          <option value="modern">Modern</option>
+          <option value="classic">Classic (boxed proforma)</option>
+        </select>
+      </Field>
       <div className="grid gap-3 sm:grid-cols-2">
         <ColorField id="th-primary" label="Primary colour" value={theme.primaryColor} onChange={(v) => set('primaryColor', v)} />
         <ColorField id="th-accent" label="Accent colour" value={theme.accentColor} onChange={(v) => set('accentColor', v)} />
@@ -63,16 +82,17 @@ export function ThemeSettings({ theme, onChange }: { theme: QuoteTheme; onChange
           <select
             id="th-logo"
             className={selectCls}
-            value={theme.logoSource}
+            value={theme.logoSource === 'none' ? 'none' : 'org'}
             onChange={(e) => set('logoSource', e.target.value as QuoteTheme['logoSource'])}
           >
             <option value="org">Organisation logo</option>
-            <option value="invoice">Invoice logo</option>
             <option value="none">No logo</option>
           </select>
         </Field>
       </div>
-      <p className="text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">The preview uses sample data and no logo.</p>
+      <p className="text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
+        The logo is uploaded in Settings → Organization. The preview uses sample data with this workspace&apos;s logo.
+      </p>
     </div>
   );
 }

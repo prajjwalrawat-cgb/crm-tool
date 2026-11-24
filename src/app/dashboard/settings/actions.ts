@@ -14,6 +14,10 @@ import {
 } from '@/db/schema';
 import { withTenantSession } from '@/lib/auth-guard';
 import { tenantTransaction } from '@/lib/db-context';
+import { getOrgSettings } from '@/lib/org-settings/queries';
+import { getCurrentMembership } from '@/lib/membership';
+import { personaOf } from '@/lib/personas';
+import { isStorageConfigured, uploadInvoiceImage } from '@/lib/storage/supabase';
 import { DEAL_STAGES } from '@/lib/deals/schema';
 
 /**
@@ -155,6 +159,61 @@ export async function updateOrganizationSettingsAction(input: unknown) {
     ...(p.locale !== undefined && { locale: p.locale }),
     ...(p.timezone !== undefined && { timezone: p.timezone }),
   }));
+}
+
+/* ----- Organization logo (printed on invoices and quotes) ----- */
+const LOGO_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
+const LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+
+export type OrganizationLogoResult = { ok: true; url: string | null } | { ok: false; error: string };
+
+/** Same people as the Organization page (managers and admins). */
+async function canEditOrganization(): Promise<boolean> {
+  const persona = personaOf((await getCurrentMembership())?.role ?? null);
+  return persona === 'manager' || persona === 'admin';
+}
+
+/** Set (url) or clear (null) the workspace logo. Clearing also drops the older invoice logo it falls back to. */
+async function setOrganizationLogo(tenantId: string, userId: string, url: string | null): Promise<void> {
+  await tenantTransaction(async (tx) =>
+    tx
+      .update(organizationSettings)
+      .set({ logoUrl: url, ...(url === null ? { invoiceLogoUrl: null } : {}), updatedBy: userId })
+      .where(eq(organizationSettings.tenantId, tenantId)),
+  );
+  revalidatePath('/dashboard/settings', 'layout');
+  revalidatePath('/dashboard/invoice-settings');
+  revalidatePath('/dashboard/invoices');
+}
+
+export async function uploadOrganizationLogoAction(formData: FormData): Promise<OrganizationLogoResult> {
+  if (!isStorageConfigured()) return { ok: false, error: 'Image storage is not configured.' };
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: 'No file received.' };
+  if (file.size > LOGO_MAX_BYTES) return { ok: false, error: 'Logo must be 2 MB or smaller.' };
+  const ext = LOGO_TYPES[file.type];
+  if (!ext) return { ok: false, error: 'Use a PNG, JPG or WebP image.' };
+
+  return withTenantSession(async ({ tenant, userId }) => {
+    if (!(await canEditOrganization())) return { ok: false, error: 'Only managers and admins can change the logo.' };
+    try {
+      const url = await uploadInvoiceImage({ tenantId: tenant.id, bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type, ext });
+      await getOrgSettings(tenant.id); // creates the settings row if missing
+      await setOrganizationLogo(tenant.id, userId, url);
+      return { ok: true, url };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Upload failed.' };
+    }
+  });
+}
+
+export async function removeOrganizationLogoAction(): Promise<OrganizationLogoResult> {
+  return withTenantSession(async ({ tenant, userId }) => {
+    if (!(await canEditOrganization())) return { ok: false, error: 'Only managers and admins can change the logo.' };
+    await getOrgSettings(tenant.id);
+    await setOrganizationLogo(tenant.id, userId, null);
+    return { ok: true, url: null };
+  });
 }
 
 /* ----- AI ----- */
