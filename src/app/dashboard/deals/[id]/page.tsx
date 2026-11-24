@@ -30,7 +30,7 @@ import {
   listOfferingOptions,
 } from '@/lib/offerings/queries';
 import { listDealValueSplit } from '@/lib/deals/value-split-queries';
-import { listQuoteTemplateOptions, listQuotesForDeal } from '@/lib/quotes/queries';
+import { listQuotesForDeal } from '@/lib/quotes/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { getPathBarGates } from '@/lib/stage-gates/evaluate';
 import { PATH_STAGES } from '@/lib/stage-gates/types';
@@ -149,7 +149,6 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       orderProofRows,
       proofCheckContext,
       quoteRows,
-      quoteTemplateRows,
     ] = await Promise.all([
       membershipPromise,
       getCachedSummary(tenant.id, 'deal', deal.id),
@@ -199,10 +198,9 @@ export default async function DealDetailPage({ params }: { params: Params }) {
       listDealOrderProofs(tenant.id, deal.id),
       // …and what those POs are checked against beyond the amount.
       loadProofCheckContext(tenant.id, deal.id),
-      // Quotes card (0078): the deal's quotes + revisions, and the templates
-      // "New quote" can start from.
-      listQuotesForDeal(tenant.id, deal.id),
-      listQuoteTemplateOptions(tenant.id),
+      // Quotes card (0078): the deal's quotes + revisions. Quotes are
+      // created from the Quotes module.
+      pickerScopePromise.then((me) => listQuotesForDeal(tenant.id, deal.id, me ? { ownOnly: me } : {})),
     ]);
 
     // Primary stakeholder's email is what the top "Email" button defaults to.
@@ -844,7 +842,6 @@ export default async function DealDetailPage({ params }: { params: Params }) {
             />
 
             <DealQuotesCard
-              dealId={deal.id}
               quotes={quoteRows.map((q) => ({
                 id: q.id,
                 quoteNumber: q.quoteNumber,
@@ -853,8 +850,6 @@ export default async function DealDetailPage({ params }: { params: Params }) {
                 totalMinor: q.totalMinor,
                 createdAt: q.createdAt.toISOString(),
               }))}
-              templates={quoteTemplateRows}
-              canCreate={can(membership.role, 'manageQuotes')}
             />
 
             <DealDocumentsCard

@@ -2,11 +2,15 @@ import Link from 'next/link';
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { formatInr } from '@/lib/quotes/editor-form';
-import { listQuotes } from '@/lib/quotes/queries';
+import { requireMembership } from '@/lib/membership';
+import { listQuoteTemplateOptions, listQuotes } from '@/lib/quotes/queries';
 import type { QuoteStatus } from '@/lib/quotes/types';
+import { personaOf } from '@/lib/personas';
+import { can } from '@/lib/rbac';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import { inputCls } from '../settings/lead-capture/_components/ui';
+import { NewQuoteButton } from './_components/new-quote-dialog';
 import { QUOTE_STATUS_LABEL, QuoteStatusBadge, formatQuoteListDate } from './_components/quote-ui';
 
 export const metadata = { title: 'Quotes' };
@@ -29,16 +33,25 @@ export default async function QuotesPage({ searchParams }: { searchParams: Searc
   const to = validDate(one(sp.to));
   const cursor = one(sp.cursor);
 
-  return await withTenantSession(async ({ tenant }) => {
-    const [{ rows, nextCursor }, teammates] = await Promise.all([
-      listQuotes(tenant.id, { status, createdBy: rep, from, to, cursor, limit: PAGE_SIZE }),
+  return await withTenantSession(async ({ tenant, userId }) => {
+    const membership = await requireMembership();
+    // Reps see only their own quotes (QuoteAccessScope); the Rep filter is for managers and above.
+    const ownOnly = personaOf(membership.role) === 'sales';
+    const [{ rows, nextCursor }, teammates, templates] = await Promise.all([
+      listQuotes(
+        tenant.id,
+        { status, createdBy: ownOnly ? undefined : rep, from, to, cursor, limit: PAGE_SIZE },
+        ownOnly ? { ownOnly: userId } : {},
+      ),
       listTeammates(tenant.id, tenant.name),
+      listQuoteTemplateOptions(tenant.id),
     ]);
+    const canCreate = can(membership.role, 'manageQuotes');
     const repName = new Map(teammates.map((t) => [t.id, t.displayName]));
 
     const filters = new URLSearchParams();
     if (status) filters.set('status', status);
-    if (rep) filters.set('rep', rep);
+    if (rep && !ownOnly) filters.set('rep', rep);
     if (from) filters.set('from', from);
     if (to) filters.set('to', to);
     const pageHref = (c?: string) => {
@@ -52,11 +65,17 @@ export default async function QuotesPage({ searchParams }: { searchParams: Searc
 
     return (
       <main className="mx-auto w-full max-w-[88rem] space-y-4 px-4 py-6 sm:px-5 lg:px-6">
-        <header>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">Quotes</h1>
-          <p className="mt-0.5 text-[12px] text-slate-500 dark:text-[#A1A1AA]">
-            Every quote and revision in {tenant.name}. Create a quote from its deal.
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">Quotes</h1>
+            <p className="mt-0.5 text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+              {ownOnly ? 'Your quotes: ones you created and ones on your deals.' : `Every quote and revision in ${tenant.name}.`} Link a new
+              quote to a deal, or create it without one.
+            </p>
+          </div>
+          {canCreate ? (
+            <NewQuoteButton templates={templates} limitedToOwnDeals={personaOf(membership.role) === 'sales'} />
+          ) : null}
         </header>
 
         <form method="get" className="flex flex-wrap items-end gap-2">
@@ -71,17 +90,19 @@ export default async function QuotesPage({ searchParams }: { searchParams: Searc
               ))}
             </select>
           </label>
-          <label className="space-y-1">
-            <span className="block text-[11px] font-medium text-slate-600 dark:text-[#A1A1AA]">Rep</span>
-            <select name="rep" defaultValue={rep ?? ''} className={selectCls}>
-              <option value="">All reps</option>
-              {teammates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
+          {ownOnly ? null : (
+            <label className="space-y-1">
+              <span className="block text-[11px] font-medium text-slate-600 dark:text-[#A1A1AA]">Rep</span>
+              <select name="rep" defaultValue={rep ?? ''} className={selectCls}>
+                <option value="">All reps</option>
+                {teammates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="space-y-1">
             <span className="block text-[11px] font-medium text-slate-600 dark:text-[#A1A1AA]">Quote date from</span>
             <input type="date" name="from" defaultValue={from ?? ''} className={selectCls} />
@@ -120,7 +141,7 @@ export default async function QuotesPage({ searchParams }: { searchParams: Searc
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-3 py-8 text-center text-slate-500 dark:text-[#A1A1AA]">
-                    {filtered || cursor ? 'No quotes match these filters.' : 'No quotes yet. Open a deal and choose New quote.'}
+                    {filtered || cursor ? 'No quotes match these filters.' : canCreate ? 'No quotes yet. Choose New quote to create one.' : 'No quotes yet.'}
                   </td>
                 </tr>
               ) : (
@@ -133,9 +154,13 @@ export default async function QuotesPage({ searchParams }: { searchParams: Searc
                       <span className="ml-1.5 text-slate-500 dark:text-[#A1A1AA]">Rev {r.revision}</span>
                     </td>
                     <td className="px-3 py-2">
-                      <Link href={`/dashboard/deals/${r.dealId}`} className="text-slate-800 hover:underline dark:text-[#E4E4E7]">
-                        {r.dealName}
-                      </Link>
+                      {r.dealId ? (
+                        <Link href={`/dashboard/deals/${r.dealId}`} className="text-slate-800 hover:underline dark:text-[#E4E4E7]">
+                          {r.dealName}
+                        </Link>
+                      ) : (
+                        <span className="text-slate-400 dark:text-[#71717A]">No deal</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-slate-600 dark:text-[#A1A1AA]">{r.companyName ?? '—'}</td>
                     <td className="px-3 py-2">

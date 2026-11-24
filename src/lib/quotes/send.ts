@@ -21,13 +21,16 @@ export type SendDeps = {
  * Mark a draft quote as sent: render its PDF, file it as a `proposal` deal
  * document and lock the quote. The upload happens outside the transaction;
  * if the transaction fails the uploaded object is removed again.
+ *
+ * A quote not linked to a deal has nowhere to file the PDF: it is only
+ * locked (`documentId: null`), and its PDF is rendered on download.
  */
 export async function markQuoteSent(
   tenantId: string,
   userId: string,
   id: string,
   deps: SendDeps,
-): Promise<{ documentId: string }> {
+): Promise<{ documentId: string | null }> {
   const quote = await getQuote(tenantId, id);
   if (!quote) throw new QuoteNotFoundError();
   if (quote.status !== 'draft') throw new QuoteFrozenError();
@@ -40,11 +43,32 @@ export async function markQuoteSent(
     }
   }
 
+  const dealId = quote.dealId;
+  if (dealId === null) {
+    await tenantTransaction(async (tx) => {
+      const [cur] = await tx
+        .select({ status: quotes.status, updatedAt: quotes.updatedAt })
+        .from(quotes)
+        .where(and(eq(quotes.tenantId, tenantId), eq(quotes.id, id)))
+        .for('update');
+      if (!cur) throw new QuoteNotFoundError();
+      if (cur.status !== 'draft') throw new QuoteFrozenError();
+      if (cur.updatedAt.getTime() !== quote.updatedAt.getTime()) {
+        throw new QuoteRuleError('The quote changed while it was being sent. Try again.');
+      }
+      await tx
+        .update(quotes)
+        .set({ status: 'sent', sentAt: sql`now()`, sentBy: userId, updatedAt: sql`now()`, updatedBy: userId })
+        .where(and(eq(quotes.tenantId, tenantId), eq(quotes.id, id)));
+    });
+    return { documentId: null };
+  }
+
   const bytes = await deps.render(quote);
   const fileName = `${quote.quoteNumber} Rev ${quote.revision}.pdf`;
   const uploaded = await deps.upload({
     tenantId,
-    dealId: quote.dealId,
+    dealId,
     bytes,
     contentType: 'application/pdf',
     fileName,
@@ -68,7 +92,7 @@ export async function markQuoteSent(
         .insert(dealDocuments)
         .values({
           tenantId,
-          dealId: quote.dealId,
+          dealId,
           uploadedBy: userId,
           fileName,
           fileUrl: uploaded.url,

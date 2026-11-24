@@ -7,6 +7,8 @@ import { auth } from '@/lib/auth/server';
 import { runWithTenantContext } from '@/lib/db-context';
 import { requireMembership } from '@/lib/membership';
 import { logger } from '@/lib/observability/logger';
+import { personaOf } from '@/lib/personas';
+import type { MembershipRole } from '@/db/schema';
 import { can, type Permission } from '@/lib/rbac';
 import { deleteDealDocument, isStorageConfigured, uploadDealDocument } from '@/lib/storage/supabase';
 import { requireTenant } from '@/lib/tenant';
@@ -16,13 +18,19 @@ import {
   QuoteNotFoundError,
   QuoteRuleError,
   archiveQuoteTemplate,
-  createQuoteFromDeal,
+  createQuote,
   createQuoteRevision,
   duplicateQuoteTemplate,
   getQuote,
+  quoteInScope,
   reapplyTemplate,
   saveQuoteSettings,
   saveQuoteTemplate,
+  searchDealsForQuote,
+  setQuoteDeal,
+  type QuoteDealOption,
+  type QuoteAccessScope,
+  type QuoteDealScope,
   setDealAmountFromQuote,
   setDefaultQuoteTemplate,
   updateQuoteDraft,
@@ -46,6 +54,10 @@ export type QuoteActionResult<T extends object = Record<never, never>> =
 const QUOTES_PATH = '/dashboard/quotes';
 const TEMPLATES_PATH = '/dashboard/settings/quote-templates';
 const dealPath = (dealId: string) => `/dashboard/deals/${dealId}`;
+/** Revalidate the deal page when the quote is linked to one. */
+function revalidateDeal(dealId: string | null | undefined): void {
+  if (dealId) revalidatePath(dealPath(dealId));
+}
 
 const idSchema = z.uuid();
 
@@ -87,7 +99,7 @@ function toFailure(err: unknown): QuoteActionFailure {
  */
 async function gated<T extends object>(
   perms: Permission[],
-  fn: (ctx: { tenantId: string; userId: string }) => Promise<QuoteActionResult<T>>,
+  fn: (ctx: { tenantId: string; userId: string; role: MembershipRole }) => Promise<QuoteActionResult<T>>,
 ): Promise<QuoteActionResult<T>> {
   const { userId } = await auth();
   if (!userId) return { ok: false, error: 'No active session.' };
@@ -112,11 +124,27 @@ async function gated<T extends object>(
       }
     }
     try {
-      return await fn({ tenantId, userId });
+      return await fn({ tenantId, userId, role });
     } catch (err) {
       return toFailure(err);
     }
   });
+}
+
+/** Reps (sales persona) may link only deals they own or unassigned ones, as on the Deals page. */
+function dealScopeFor(role: MembershipRole, userId: string): QuoteDealScope {
+  return personaOf(role) === 'sales' ? { ownerOrUnassigned: userId } : {};
+}
+
+/** Reps (sales persona) see and act on only their own quotes; see QuoteAccessScope. */
+function quoteScopeFor(role: MembershipRole, userId: string): QuoteAccessScope {
+  return personaOf(role) === 'sales' ? { ownOnly: userId } : {};
+}
+
+/** Out-of-scope quotes look exactly like missing ones. */
+async function requireQuoteAccess(tenantId: string, id: string, role: MembershipRole, userId: string): Promise<void> {
+  const scope = quoteScopeFor(role, userId);
+  if (scope.ownOnly && !(await quoteInScope(tenantId, id, scope))) throw new QuoteNotFoundError();
 }
 
 const invalidId = (what: string): QuoteActionFailure => ({ ok: false, error: `Invalid ${what}.` });
@@ -172,19 +200,46 @@ export async function saveQuoteSettingsAction(raw: unknown): Promise<QuoteAction
 
 /* ------------------------------- quotes -------------------------------- */
 
+/** New quote from the Quotes module; `dealId: null` = not linked to any deal. */
 export async function createQuoteAction(raw: {
-  dealId: string;
+  dealId: string | null;
   templateId?: string;
 }): Promise<QuoteActionResult<{ id: string }>> {
   const parsed = z
-    .object({ dealId: z.uuid(), templateId: z.uuid().optional() })
+    .object({ dealId: z.uuid().nullable(), templateId: z.uuid().optional() })
     .safeParse(raw);
   if (!parsed.success) return zodFailure(parsed.error);
-  return gated(['manageQuotes'], async ({ tenantId, userId }) => {
-    const { id } = await createQuoteFromDeal(tenantId, userId, parsed.data);
+  return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
+    const { id } = await createQuote(tenantId, userId, parsed.data, dealScopeFor(role, userId));
     revalidatePath(QUOTES_PATH);
-    revalidatePath(dealPath(parsed.data.dealId));
+    revalidateDeal(parsed.data.dealId);
     return { ok: true, id };
+  });
+}
+
+/** Deals the deal picker can link to, matched on deal or company name, within the user's deal scope. */
+export async function searchDealsForQuoteAction(
+  term: string,
+): Promise<QuoteActionResult<{ deals: QuoteDealOption[] }>> {
+  if (typeof term !== 'string') return { ok: false, error: 'Invalid search.' };
+  return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
+    const deals = await searchDealsForQuote(tenantId, term, dealScopeFor(role, userId));
+    return { ok: true, deals };
+  });
+}
+
+/** Link a draft to a deal, change its deal, or unlink it (`dealId: null`). */
+export async function setQuoteDealAction(id: string, dealId: string | null): Promise<QuoteActionResult> {
+  if (!idSchema.safeParse(id).success) return invalidId('quote');
+  if (dealId !== null && !idSchema.safeParse(dealId).success) return invalidId('deal');
+  return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
+    await requireQuoteAccess(tenantId, id, role, userId);
+    const { previousDealId } = await setQuoteDeal(tenantId, userId, id, dealId, dealScopeFor(role, userId));
+    revalidatePath(QUOTES_PATH);
+    revalidatePath(`${QUOTES_PATH}/${id}`);
+    revalidateDeal(previousDealId);
+    revalidateDeal(dealId);
+    return { ok: true };
   });
 }
 
@@ -195,10 +250,11 @@ export async function updateQuoteDraftAction(
   if (!idSchema.safeParse(id).success) return invalidId('quote');
   const parsed = quoteDraftInputSchema.safeParse(raw);
   if (!parsed.success) return zodFailure(parsed.error);
-  return gated(['manageQuotes'], async ({ tenantId, userId }) => {
+  return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
+    await requireQuoteAccess(tenantId, id, role, userId);
     const quote = await updateQuoteDraft(tenantId, userId, id, parsed.data);
     revalidatePath(QUOTES_PATH);
-    revalidatePath(dealPath(quote.dealId));
+    revalidateDeal(quote.dealId);
     return { ok: true, quote };
   });
 }
@@ -206,7 +262,8 @@ export async function updateQuoteDraftAction(
 export async function reapplyTemplateAction(id: string, templateId?: string): Promise<QuoteActionResult> {
   if (!idSchema.safeParse(id).success) return invalidId('quote');
   if (templateId !== undefined && !idSchema.safeParse(templateId).success) return invalidId('template');
-  return gated(['manageQuotes'], async ({ tenantId, userId }) => {
+  return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
+    await requireQuoteAccess(tenantId, id, role, userId);
     await reapplyTemplate(tenantId, userId, id, templateId);
     revalidatePath(QUOTES_PATH);
     return { ok: true };
@@ -215,11 +272,12 @@ export async function reapplyTemplateAction(id: string, templateId?: string): Pr
 
 export async function createQuoteRevisionAction(id: string): Promise<QuoteActionResult<{ id: string }>> {
   if (!idSchema.safeParse(id).success) return invalidId('quote');
-  return gated(['manageQuotes'], async ({ tenantId, userId }) => {
+  return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
+    await requireQuoteAccess(tenantId, id, role, userId);
     const created = await createQuoteRevision(tenantId, userId, id);
     revalidatePath(QUOTES_PATH);
     const src = await getQuote(tenantId, id);
-    if (src) revalidatePath(dealPath(src.dealId));
+    revalidateDeal(src?.dealId);
     return { ok: true, id: created.id };
   });
 }
@@ -230,11 +288,12 @@ export async function createQuoteRevisionAction(id: string): Promise<QuoteAction
  */
 export async function setDealAmountFromQuoteAction(id: string): Promise<QuoteActionResult> {
   if (!idSchema.safeParse(id).success) return invalidId('quote');
-  return gated(['manageQuotes', 'manageDeals'], async ({ tenantId, userId }) => {
+  return gated(['manageQuotes', 'manageDeals'], async ({ tenantId, userId, role }) => {
+    await requireQuoteAccess(tenantId, id, role, userId);
     await setDealAmountFromQuote(tenantId, userId, id);
     revalidatePath(QUOTES_PATH);
     const q = await getQuote(tenantId, id);
-    if (q) revalidatePath(dealPath(q.dealId));
+    revalidateDeal(q?.dealId);
     return { ok: true };
   });
 }
@@ -242,7 +301,8 @@ export async function setDealAmountFromQuoteAction(id: string): Promise<QuoteAct
 /** Readable by any member (viewers included): the data the PDF is rendered from. */
 export async function getQuoteForPdfAction(id: string): Promise<QuoteActionResult<{ input: QuoteRenderInput }>> {
   if (!idSchema.safeParse(id).success) return invalidId('quote');
-  return gated([], async ({ tenantId }) => {
+  return gated([], async ({ tenantId, userId, role }) => {
+    await requireQuoteAccess(tenantId, id, role, userId);
     const input = await buildQuoteRenderInput(tenantId, id);
     if (!input) throw new QuoteNotFoundError();
     return { ok: true, input };
@@ -263,13 +323,16 @@ function serverSendDeps(tenantId: string): SendDeps {
 }
 
 /** Render the PDF, file it on the deal as a proposal and lock the quote. */
-export async function markQuoteSentAction(id: string): Promise<QuoteActionResult<{ documentId: string }>> {
+export async function markQuoteSentAction(id: string): Promise<QuoteActionResult<{ documentId: string | null }>> {
   if (!idSchema.safeParse(id).success) return invalidId('quote');
-  return gated<{ documentId: string }>(['manageQuotes'], async ({ tenantId, userId }) => {
-    if (!isStorageConfigured()) {
+  return gated<{ documentId: string | null }>(['manageQuotes'], async ({ tenantId, userId, role }) => {
+    await requireQuoteAccess(tenantId, id, role, userId);
+    // Only a quote linked to a deal files its PDF in storage.
+    const pre = await getQuote(tenantId, id);
+    if (pre?.dealId && !isStorageConfigured()) {
       return { ok: false, error: 'Document storage is not configured. Add SUPABASE_SERVICE_ROLE_KEY.' };
     }
-    let documentId: string;
+    let documentId: string | null;
     try {
       ({ documentId } = await markQuoteSent(tenantId, userId, id, serverSendDeps(tenantId)));
     } catch (err) {
@@ -284,7 +347,7 @@ export async function markQuoteSentAction(id: string): Promise<QuoteActionResult
     }
     revalidatePath(QUOTES_PATH);
     const q = await getQuote(tenantId, id);
-    if (q) revalidatePath(dealPath(q.dealId));
+    revalidateDeal(q?.dealId);
     return { ok: true, documentId };
   });
 }

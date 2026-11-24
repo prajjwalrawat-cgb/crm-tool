@@ -19,12 +19,15 @@ export async function buildQuoteRenderInput(tenantId: string, quoteId: string): 
   const quote = await getQuote(tenantId, quoteId);
   if (!quote) return null;
 
+  const dealId = quote.dealId;
   const { deal, creator } = await tenantTransaction(async (tx) => {
-    const [d] = await tx
-      .select({ name: deals.name, customFields: deals.customFields })
-      .from(deals)
-      .where(and(eq(deals.tenantId, tenantId), eq(deals.id, quote.dealId)))
-      .limit(1);
+    const [d] = dealId
+      ? await tx
+          .select({ name: deals.name, customFields: deals.customFields })
+          .from(deals)
+          .where(and(eq(deals.tenantId, tenantId), eq(deals.id, dealId)))
+          .limit(1)
+      : [];
     const [u] = quote.createdBy
       ? await tx
           .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })

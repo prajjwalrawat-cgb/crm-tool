@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -25,6 +25,7 @@ import { inputCls } from '../../../settings/lead-capture/_components/ui';
 import { QuoteStatusBadge } from '../../_components/quote-ui';
 import { LineItemsTable, type OfferingChoice } from './line-items-table';
 import { QuoteActionsBar, type ActionsBarDeal } from './quote-actions-bar';
+import { QuoteDealLink } from './quote-deal-link';
 import { ClientDetailsEditor, FieldErrors, SectionContentEditor, errorCls } from './section-content-editor';
 
 const QuotePdfPreview = dynamic(() => import('@/components/quotes/quote-pdf-preview'), {
@@ -73,6 +74,7 @@ export function QuoteEditor({
   deal,
   newerRevision,
   offerings,
+  limitedToOwnDeals,
 }: {
   /** Server-built PDF input (buildQuoteRenderInput) for the saved quote. */
   renderInput: QuoteRenderInput;
@@ -83,6 +85,8 @@ export function QuoteEditor({
   deal: EditorDeal | null;
   newerRevision: { id: string; revision: number } | null;
   offerings: OfferingChoice[];
+  /** Reps: the deal picker lists only their own and unassigned deals. */
+  limitedToOwnDeals: boolean;
 }) {
   const router = useRouter();
   const quote = renderInput.quote;
@@ -190,14 +194,13 @@ export function QuoteEditor({
   return (
     <main className="mx-auto w-full max-w-[88rem] space-y-4 px-4 py-6 sm:px-5 lg:px-6">
       <header className="space-y-3">
-        {deal ? (
-          <Link
-            href={`/dashboard/deals/${deal.id}`}
-            className="inline-flex items-center gap-1 text-[12px] text-slate-500 hover:text-slate-800 dark:text-[#A1A1AA] dark:hover:text-[#FAFAFA]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> {deal.name}
-          </Link>
-        ) : null}
+        <QuoteDealLink
+          quoteId={quote.id}
+          deal={deal ? { id: deal.id, name: deal.name } : null}
+          canChange={editable}
+          dirty={dirty}
+          limitedToOwnDeals={limitedToOwnDeals}
+        />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <h1 className="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">{ref}</h1>
@@ -218,10 +221,17 @@ export function QuoteEditor({
             templateChanged={templateChanged}
             fileUrl={fileUrl}
             deal={deal}
+            linkedToDeal={quote.dealId !== null}
             dealValueMinor={quote.totals.taxableMinor}
           />
         </div>
-        <StatusNotice status={quote.status} revision={quote.revision} canManage={canManage} newerRevision={newerRevision} />
+        <StatusNotice
+          status={quote.status}
+          revision={quote.revision}
+          canManage={canManage}
+          newerRevision={newerRevision}
+          linkedToDeal={quote.dealId !== null}
+        />
         {formError ? (
           <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
             {formError}
@@ -297,11 +307,13 @@ function StatusNotice({
   revision,
   canManage,
   newerRevision,
+  linkedToDeal,
 }: {
   status: QuoteEditorStatus;
   revision: number;
   canManage: boolean;
   newerRevision: { id: string; revision: number } | null;
+  linkedToDeal: boolean;
 }) {
   const cls = 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600 dark:border-[#262626] dark:bg-[#111111] dark:text-[#A1A1AA]';
   if (status === 'superseded') {
@@ -319,7 +331,7 @@ function StatusNotice({
   if (status === 'sent') {
     return (
       <p className={cls}>
-        Rev {revision} was sent and is locked; its PDF is filed on the deal.
+        Rev {revision} was sent and is locked{linkedToDeal ? '; its PDF is filed on the deal' : ''}.
         {canManage ? ' To change it, create a new revision.' : ''}
       </p>
     );
