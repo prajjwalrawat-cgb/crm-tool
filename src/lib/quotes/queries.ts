@@ -108,6 +108,25 @@ function fieldError(path: (string | number)[], message: string): z.ZodError {
 
 /* ---------------------------------------------------------------- seller */
 
+type SellerProfileRow = typeof invoiceSellerProfiles.$inferSelect;
+
+/** The seller block a quote prints, from one seller profile row. */
+function sellerOfProfile(r: SellerProfileRow): PdfSeller {
+  return compact<PdfSeller>({
+    name: r.sellerName,
+    address: r.address ?? undefined,
+    gstin: r.gstin ?? undefined,
+    pan: r.pan ?? undefined,
+    cin: r.cin ?? undefined,
+    bankName: r.bankName ?? undefined,
+    bankAccount: r.bankAccount ?? undefined,
+    bankIfsc: r.bankIfsc ?? undefined,
+    bankBranch: r.bankBranch ?? undefined,
+    stateCode: r.stateCode,
+    state: stateNameFromCode(r.stateCode),
+  });
+}
+
 async function sellerFromProfile(
   tx: DbExecutor,
   tenantId: string,
@@ -124,22 +143,27 @@ async function sellerFromProfile(
     .orderBy(asc(invoiceSellerProfiles.stateCode))
     .limit(1);
   if (!r) return null;
-  return {
-    id: r.id,
-    seller: compact<PdfSeller>({
-      name: r.sellerName,
-      address: r.address ?? undefined,
-      gstin: r.gstin ?? undefined,
-      pan: r.pan ?? undefined,
-      cin: r.cin ?? undefined,
-      bankName: r.bankName ?? undefined,
-      bankAccount: r.bankAccount ?? undefined,
-      bankIfsc: r.bankIfsc ?? undefined,
-      bankBranch: r.bankBranch ?? undefined,
-      stateCode: r.stateCode,
-      state: stateNameFromCode(r.stateCode),
-    }),
-  };
+  return { id: r.id, seller: sellerOfProfile(r) };
+}
+
+export type QuoteSellerChoice = { id: string; label: string; seller: PdfSeller };
+
+/**
+ * The seller profiles (Invoice settings → Seller details by state) a quote
+ * can be issued from, lowest state code first: the editor's Seller select.
+ */
+export async function listQuoteSellerChoices(tenantId: string): Promise<QuoteSellerChoice[]> {
+  const rows = await tenantTransaction((tx) =>
+    tx
+      .select()
+      .from(invoiceSellerProfiles)
+      .where(eq(invoiceSellerProfiles.tenantId, tenantId))
+      .orderBy(asc(invoiceSellerProfiles.stateCode)),
+  );
+  return rows.map((r) => {
+    const state = stateNameFromCode(r.stateCode) || r.stateCode;
+    return { id: r.id, label: r.gstin ? `${state} · ${r.gstin}` : state, seller: sellerOfProfile(r) };
+  });
 }
 
 /** Fallback when the tenant has no seller profiles: the invoice seller fields in organization_settings. */

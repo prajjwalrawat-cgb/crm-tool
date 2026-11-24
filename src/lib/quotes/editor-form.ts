@@ -7,6 +7,8 @@
  * points only in `formToDraftInput`; unparseable text becomes NaN and the
  * draft schema (client preview or server save) reports it.
  */
+import type { PdfSeller } from '@/lib/invoices/types';
+
 import type { QuoteDraftInput } from './schema';
 import type { QuoteContent, QuoteTemplateBody } from './template-schema';
 import { computeQuoteTotals, type OverallDiscount, type QuoteTotals } from './totals';
@@ -212,9 +214,11 @@ export function formTotals(f: QuoteEditorForm): QuoteTotals | null {
 /**
  * The server quote with the form's edits applied and totals recomputed on
  * the client: what the live preview renders. null when the totals can't be
- * computed (the preview keeps its last render).
+ * computed (the preview keeps its last render). `sellers` (profile id →
+ * seller block) lets a Seller change show before it is saved; a choice
+ * missing from it keeps the saved seller.
  */
-export function previewQuote(base: QuoteDetail, f: QuoteEditorForm): QuoteDetail | null {
+export function previewQuote(base: QuoteDetail, f: QuoteEditorForm, sellers: Record<string, PdfSeller> = {}): QuoteDetail | null {
   const d = formToDraftInput(f);
   let totals: QuoteTotals;
   try {
@@ -227,6 +231,8 @@ export function previewQuote(base: QuoteDetail, f: QuoteEditorForm): QuoteDetail
     ...base,
     quoteDate: d.quoteDate,
     validUntil: d.validUntil,
+    sellerProfileId: f.sellerProfileId,
+    seller: (f.sellerProfileId && sellers[f.sellerProfileId]) || base.seller,
     buyer: d.buyer,
     consignee: d.consignee,
     content: f.content,

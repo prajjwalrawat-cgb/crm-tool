@@ -6,7 +6,7 @@ import { getDealById } from '@/lib/deals/queries';
 import { requireMembership } from '@/lib/membership';
 import { isOfferingsEnabled, listOfferingOptions } from '@/lib/offerings/queries';
 import { templateBodiesEqual } from '@/lib/quotes/editor-form';
-import { getQuoteTemplate, listQuoteRevisions, listQuoteTemplates, quoteInScope } from '@/lib/quotes/queries';
+import { getQuoteTemplate, listQuoteRevisions, listQuoteSellerChoices, listQuoteTemplates, quoteInScope } from '@/lib/quotes/queries';
 import { buildQuoteRenderInput } from '@/lib/quotes/render-input';
 import type { QuoteDetail } from '@/lib/quotes/types';
 import { personaOf } from '@/lib/personas';
@@ -43,7 +43,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
     const isDraft = quote.status === 'draft';
 
     const dealId = quote.dealId;
-    const [deal, siblings, documents, templateChanged, offeringsEnabled, offerings] = await Promise.all([
+    const [deal, siblings, documents, templateChanged, offeringsEnabled, offerings, sellerChoices] = await Promise.all([
       dealId ? getDealById(tenant.id, dealId) : Promise.resolve(null),
       quote.status === 'superseded' ? listQuoteRevisions(tenant.id, quote.quoteNumber) : Promise.resolve([]),
       quote.pdfDocumentId && dealId ? listDealDocuments(tenant.id, dealId) : Promise.resolve([]),
@@ -51,6 +51,8 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
       isOfferingsEnabled(tenant.id),
       // Retired offerings included so rows that carry one still show it.
       listOfferingOptions(tenant.id, { activeOnly: false }),
+      // Only a draft the user can edit offers the Seller select.
+      isDraft && canManage ? listQuoteSellerChoices(tenant.id) : Promise.resolve([]),
     ]);
 
     // The revision that replaced this one: the latest of the same number.
@@ -74,6 +76,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         offerings={
           offeringsEnabled ? offerings.map((o) => ({ id: o.id, name: o.name, active: o.active })) : []
         }
+        sellerChoices={sellerChoices}
       />
     );
   });

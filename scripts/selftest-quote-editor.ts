@@ -158,6 +158,15 @@ check('preview: an unparseable rate gives null (keep the last render)', previewQ
 check('preview: discount above the subtotal gives null', previewQuote(quote, { ...ab, overallDiscount: { type: 'amount', value: '999999' } }) === null);
 check('preview: no items is still a valid preview', previewQuote(quote, { ...ab, items: [], overallDiscount: { type: 'none', value: '' } })?.totals.totalMinor === 0);
 
+// Seller select: the preview follows the picked seller profile before it is saved.
+const delhi = { name: 'Seller Pvt Ltd', gstin: '07ABCDE1234F1Z5', stateCode: '07', state: 'Delhi', bankAccount: '111' };
+const sellers = { 'prof-delhi': delhi };
+check('seller: no choice keeps the saved seller', previewQuote(quote, ab, sellers)?.seller === quote.seller);
+const picked = previewQuote(quote, { ...ab, sellerProfileId: 'prof-delhi' }, sellers);
+check('seller: a picked profile replaces the seller block', picked?.seller === delhi && picked.sellerProfileId === 'prof-delhi');
+check('seller: an unknown profile id keeps the saved seller', previewQuote(quote, { ...ab, sellerProfileId: 'gone' }, sellers)?.seller === quote.seller);
+check('seller: the choice goes into the save payload', formToDraftInput({ ...ab, sellerProfileId: 'prof-delhi' }).sellerProfileId === 'prof-delhi');
+
 const nanDraft = formToDraftInput({ ...ab, items: [{ ...ab.items[0]!, rate: '' }] });
 const nanParse = quoteDraftInputSchema.safeParse(nanDraft);
 const rateIssue = nanParse.success ? undefined : nanParse.error.issues.find((i) => i.path.join('.') === 'items.0.rateMinor');
