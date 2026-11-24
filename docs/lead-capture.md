@@ -74,7 +74,7 @@ await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application
 
 1. **Dedupe.** If a contact with the same phone number or email already exists, no new lead is created. The existing lead gets a "Re-enquiry via \<source\>" entry on its timeline and its owner is notified. A lead that was closed as lost more than 30 days ago is reopened.
 2. **Create.** Otherwise a contact and a deal at stage **Lead** are created. The deal records the source, the UTM tags, the consent flag and the city, state and product.
-3. **Distribute.** Distribution rules are checked in priority order and the first match wins. If none match, the source's default rule applies, then the workspace default rule. Only reps who are active, marked available, inside their working hours and under the rule's capacity cap can receive a lead. The strategies are round robin, weighted, least loaded, skill match, region match and fixed owner. If nobody is eligible, the lead goes to the unassigned queue, managers are notified, and it is retried every 10 minutes for up to 6 hours. If the only reason is that everyone is off shift, it waits for the next shift.
+3. **Distribute.** Distribution rules are checked in priority order and the first match wins. If none match, the source's default rule applies, then the workspace default rule. Only reps who are active, marked available, inside their working hours and under the rule's capacity cap can receive a lead. The strategies are round robin, weighted, least loaded, skill match, region match and fixed owner. If nobody is eligible, the lead goes to the unassigned queue, managers are notified, and it is retried every 15 minutes for up to 6 hours. If the only reason is that everyone is off shift, it waits for the next shift.
 4. **SLA.** Each assignment has a first-response deadline in the rep's working time. A 30-minute SLA on a lead assigned at 18:15, to a rep whose day ends at 18:30, is due at 09:45 the next working day. A logged call or meeting, a sent email or a note by the owner counts as the first response. Every 5 minutes, untouched leads past their deadline are reassigned to someone who has not had them yet. After the rule's maximum number of reassignments, managers are notified instead. A lead the owner has already worked on is never reassigned.
 
 ## Hosted and embedded forms
@@ -156,3 +156,21 @@ This creates:
 - A webhook source and a published `enquiry` form.
 
 It prints the endpoint, the secret and the form URL.
+
+## Recovering after an Inngest outage
+
+Processing a captured lead, running a CSV import and distributing leads all run as Inngest functions. If Inngest stops starting runs (for example, when the plan's execution limit is hit), it still accepts the events but never runs them, and they aren't queued for later. The endpoint still returns 202 and the payload is saved, but no lead gets created.
+
+`pnpm leads:recover-stuck` finds and finishes that work in-process, without going through Inngest:
+
+- CSV import jobs still `queued` or `running`
+- inbound events still `received` (payload saved, no lead)
+- leads at routing `pending` that were never distributed. The retry cron only looks back 6 hours.
+
+```bash
+pnpm leads:recover-stuck                       # dry run: report per workspace
+pnpm leads:recover-stuck --apply               # create, import and assign
+pnpm leads:recover-stuck --tenant <uuid> --older-than-minutes 30 --limit 200
+```
+
+Rows newer than `--older-than-minutes` (default 15) are treated as in flight and left alone. Every step is idempotent, so re-running is safe. The script prints the database host first. It reads `.env.local`, then `.env`, and never overrides a variable that is already set, so set `DATABASE_URL` explicitly to target production. Telephony webhooks can't be recovered this way, because their payloads aren't stored.

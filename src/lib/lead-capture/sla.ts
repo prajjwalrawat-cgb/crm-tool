@@ -150,6 +150,10 @@ export async function runSlaWatchdog(tenantId: string, now = new Date()): Promis
 
 /** Retry leads sitting in the unassigned queue (queued < 6h ago). */
 export async function retryUnassignedLeads(tenantId: string, now = new Date()): Promise<{ tried: number; assigned: number }> {
+  // ISO string, not the Date: the postgres driver rejects a raw Date bound
+  // inside a sql`` fragment ("argument must be of type string… Received Date"),
+  // which made every run of the retry cron fail.
+  const nowIso = now.toISOString();
   const queued = await tenantTransaction((tx) =>
     tx
       .select({ id: deals.id, name: deals.name })
@@ -158,9 +162,9 @@ export async function retryUnassignedLeads(tenantId: string, now = new Date()): 
         and(
           eq(deals.tenantId, tenantId),
           inArray(deals.routingStatus, ['unassigned', 'pending']),
-          gt(deals.routingQueuedAt, sql`${now}::timestamptz - make_interval(hours => ${UNASSIGNED_RETRY_HOURS})`),
+          gt(deals.routingQueuedAt, sql`${nowIso}::timestamptz - make_interval(hours => ${UNASSIGNED_RETRY_HOURS})`),
           // 'pending' rows younger than 2 minutes are still in flight.
-          lt(deals.routingQueuedAt, sql`${now}::timestamptz - interval '2 minutes'`),
+          lt(deals.routingQueuedAt, sql`${nowIso}::timestamptz - interval '2 minutes'`),
           eq(deals.stage, 'lead'),
           isNull(deals.deletedAt),
         ),

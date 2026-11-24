@@ -13,6 +13,7 @@ import { inngest, reportBackfillRequestedEvent } from '../client';
 import type { WorkflowEvents } from '../events';
 import type { LocalStepAPI } from '../local-step';
 import { sendWorkflowEvent } from '../send';
+import { eachTenant } from './each-tenant';
 
 /**
  * Reporting workflows (build prompt 3):
@@ -35,13 +36,17 @@ async function allTenants(): Promise<Array<{ id: string; name: string }>> {
 
 export const reportRollupRecent = inngest.createFunction(
   { id: 'report-rollup-recent', name: 'Reports — rollup today + yesterday', retries: 2, concurrency: { limit: 1 }, triggers: [cron('*/15 * * * *')] },
-  async ({ step }) => {
-    const list = await step.run('list-tenants', allTenants);
-    for (const t of list) {
-      await step.run(`recent-${t.id}`, () => runWithSystemContext(t.id, () => refreshRecent(t.id)));
-    }
-    return { tenants: list.length };
-  },
+  // One step for all tenants: Inngest bills per step, and this runs 96x a day.
+  async ({ step }) =>
+    step.run('recent-all', async () => {
+      const list = await allTenants();
+      const r = await eachTenant(
+        list.map((t) => t.id),
+        'reports.rollup-recent',
+        (tenantId) => runWithSystemContext(tenantId, () => refreshRecent(tenantId)),
+      );
+      return { tenants: list.length, failed: r.failed };
+    }),
 );
 
 export const reportRollupNightly = inngest.createFunction(

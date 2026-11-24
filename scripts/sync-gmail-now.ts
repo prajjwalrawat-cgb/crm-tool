@@ -7,7 +7,7 @@ config();
 /**
  * Run the Gmail sync ONCE, on demand, for every connected mailbox — so you can
  * connect on the Email Sync settings page and immediately see captured emails
- * land on deals, without waiting for the 10-minute Inngest cron or running
+ * land on deals, without waiting for the 15-minute Inngest cron or running
  * `pnpm inngest:dev`.
  *
  *   pnpm gmail:sync-now                 # all connected mailboxes, all tenants

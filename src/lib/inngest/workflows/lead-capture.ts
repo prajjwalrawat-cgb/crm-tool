@@ -9,7 +9,7 @@ import { IMPORT_CHUNK, processImportChunk } from '@/lib/lead-capture/import';
 import { processIngestEvent } from '@/lib/lead-capture/ingest';
 import { notifyAssigned, retryUnassignedLeads, runSlaWatchdog } from '@/lib/lead-capture/sla';
 import { recordNotificationsSafe } from '@/lib/notifications/recorder';
-import { captureError, incr, runWithTrace } from '@/lib/observability';
+import { incr, runWithTrace } from '@/lib/observability';
 
 import {
   inngest,
@@ -21,13 +21,14 @@ import {
 import type { WorkflowEvents } from '../events';
 import type { LocalStepAPI } from '../local-step';
 import { sendWorkflowEvent } from '../send';
+import { eachTenant } from './each-tenant';
 
 /**
  * Lead capture workflows (build prompt 1):
  *   lead-ingest-process  crm/lead.ingest_received → map, dedupe, create → crm/lead.created
  *   lead-distribute      crm/lead.created | crm/lead.reassign_requested → assign / queue
- *   lead-sla-watchdog    every 5 min: reassign untouched leads past SLA, escalate
- *   lead-unassigned-retry every 10 min: retry the unassigned queue (up to 6h)
+ *   lead-sla-watchdog    every 10 min: reassign untouched leads past SLA, escalate
+ *   lead-unassigned-retry every 15 min: retry the unassigned queue (up to 6h)
  *
  * Every body is idempotent: processing a processed event is a no-op, and
  * distributing an assigned lead is skipped, so Inngest retries are safe.
@@ -193,27 +194,19 @@ export const leadSlaWatchdog = inngest.createFunction(
     name: 'Lead capture — SLA watchdog',
     retries: 2,
     concurrency: { limit: 1 },
-    triggers: [cron('*/5 * * * *')],
+    // Every 10 min, one step for all tenants (Inngest bills per step). SLAs
+    // default to 30 min, so a breach is acted on within 10 min of falling due.
+    triggers: [cron('*/10 * * * *')],
   },
-  async ({ step }) => {
-    const ids = await step.run('list-tenants', tenantsWithRules);
-    const results: Record<string, unknown> = {};
-    for (const tenantId of ids) {
-      results[tenantId] = await step.run(`watchdog-${tenantId}`, async () => {
-        try {
-          return await runWithSystemContext(tenantId, () => runSlaWatchdog(tenantId));
-        } catch (err) {
-          captureError(err, { category: 'lead-sla-watchdog', fields: { tenantId } });
-          throw err;
-        }
-      });
-    }
-    // Housekeeping: rate-limit windows older than an hour are dead weight.
-    await step.run('prune-rate-limits', () =>
-      db.execute(sql`delete from rate_limit_hits where window_start < now() - interval '1 hour'`),
-    );
-    return results;
-  },
+  async ({ step }) =>
+    step.run('watchdog-all', async () => {
+      const r = await eachTenant(await tenantsWithRules(), 'lead-sla-watchdog', (tenantId) =>
+        runWithSystemContext(tenantId, () => runSlaWatchdog(tenantId)),
+      );
+      // Housekeeping: rate-limit windows older than an hour are dead weight.
+      await db.execute(sql`delete from rate_limit_hits where window_start < now() - interval '1 hour'`);
+      return r;
+    }),
 );
 
 export const leadUnassignedRetry = inngest.createFunction(
@@ -222,18 +215,15 @@ export const leadUnassignedRetry = inngest.createFunction(
     name: 'Lead capture — retry unassigned queue',
     retries: 2,
     concurrency: { limit: 1 },
-    triggers: [cron('*/10 * * * *')],
+    // Every 15 min, one step for all tenants (Inngest bills per step).
+    triggers: [cron('*/15 * * * *')],
   },
-  async ({ step }) => {
-    const ids = await step.run('list-tenants', tenantsWithRules);
-    const results: Record<string, unknown> = {};
-    for (const tenantId of ids) {
-      results[tenantId] = await step.run(`retry-${tenantId}`, () =>
+  async ({ step }) =>
+    step.run('retry-all', async () =>
+      eachTenant(await tenantsWithRules(), 'lead-unassigned-retry', (tenantId) =>
         runWithSystemContext(tenantId, () => retryUnassignedLeads(tenantId)),
-      );
-    }
-    return results;
-  },
+      ),
+    ),
 );
 
 /**
