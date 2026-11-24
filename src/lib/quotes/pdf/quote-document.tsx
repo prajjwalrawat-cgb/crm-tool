@@ -9,6 +9,7 @@ import { Document, Page, Text, View } from '@react-pdf/renderer';
 
 import type { Placeholder, QuoteSection } from '../template-schema';
 import type { QuoteDetail } from '../types';
+import { ClassicQuoteDocument } from './classic-document';
 import { formatDate, makeStyles, type QuoteRenderInput, type RenderContext } from './context';
 import { ClientSectionPdf } from './sections/client';
 import { CustomFieldsSectionPdf } from './sections/custom-fields';
@@ -49,6 +50,7 @@ function SectionPdf({ section, ctx }: { section: QuoteSection; ctx: RenderContex
 }
 
 export function QuoteDocument(props: QuoteRenderInput): JSX.Element {
+  if (props.body.theme.layout === 'classic') return ClassicQuoteDocument(props);
   const { body, quote } = props;
   const ctx: RenderContext = { ...props, styles: makeStyles(body.theme) };
   const ref = quote.revision > 1 ? `${quote.quoteNumber} Rev ${quote.revision}` : quote.quoteNumber;

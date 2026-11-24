@@ -5,15 +5,17 @@
 import { renderToBuffer } from '@react-pdf/renderer';
 import { extractText } from 'unpdf';
 
+import { classicProformaTemplateBody } from '../src/lib/quotes/classic-template';
 import { defaultTemplateBody } from '../src/lib/quotes/default-template';
+import { hsnSummary, milestonesLine } from '../src/lib/quotes/pdf/classic-document';
 import { amountInWords } from '../src/lib/quotes/pdf/amount-in-words';
-import { formatBps, formatMoney } from '../src/lib/quotes/pdf/context';
+import { formatBps, formatMoney, grandTotalForDisplay } from '../src/lib/quotes/pdf/context';
 import { registerQuoteFonts } from '../src/lib/quotes/pdf/fonts';
 import { QuoteDocument, type QuoteRenderInput } from '../src/lib/quotes/pdf/quote-document';
 import { renderQuotePdfServer } from '../src/lib/quotes/pdf/render-server';
 import { sampleRenderInput } from '../src/lib/quotes/pdf/sample-data';
 import { richTextFromPlain } from '../src/lib/quotes/rich-text';
-import type { QuoteTemplateBody } from '../src/lib/quotes/template-schema';
+import { quoteTemplateBodySchema, type QuoteTemplateBody } from '../src/lib/quotes/template-schema';
 import { computeQuoteTotals } from '../src/lib/quotes/totals';
 
 let exitCode = 0;
@@ -222,6 +224,53 @@ async function main(): Promise<void> {
   const openIn = sampleRenderInput(defaultTemplateBody());
   openIn.quote.content = { ...openIn.quote.content, terms: { terms: richTextFromPlain('Rep terms') } };
   check('editable terms print the quote content', (await render(openIn)).text.includes('Rep terms'));
+
+  // ---- Classic (boxed proforma) layout ----
+  check('templates without layout still parse', quoteTemplateBodySchema.safeParse(defaultTemplateBody()).success && defaultTemplateBody().theme.layout === undefined);
+  const classicBody = quoteTemplateBodySchema.parse(classicProformaTemplateBody());
+  check('classic preset is a valid template body', classicBody.theme.layout === 'classic');
+  check('milestonesLine joins share + label', milestonesLine([{ label: 'advance', percentBps: 7000 }, { label: 'on dispatch', percentBps: 3000 }]) === '70% advance, 30% on dispatch');
+
+  const cIntra = sampleRenderInput(classicBody);
+  cIntra.quote.seller = { ...cIntra.quote.seller, cin: 'U92100KA2022PTC159717', bankName: 'Axis Bank', bankAccount: '921020031278487', bankBranch: 'BANGALORE', bankIfsc: 'UTIB0000009' };
+  const ci = await render(cIntra);
+  check('classic: %PDF', ci.buf.subarray(0, 4).toString('latin1') === '%PDF');
+  check('classic: title and number label', ci.text.includes('Proforma Invoice') && ci.text.includes('Proforma Invoice No.') && ci.text.includes(cIntra.quote.quoteNumber));
+  check('classic: consignee and buyer boxes', ci.text.includes('Consignee (Ship to)') && ci.text.includes('Buyer (Bill to)'));
+  check('classic: seller CIN and PAN', ci.text.includes('CIN : U92100KA2022PTC159717') && ci.text.includes(`Company's PAN : ${cIntra.quote.seller.pan}`));
+  check('classic: payment terms line', ci.text.includes('Mode/Terms of Payment 70% advance, 30% on dispatch'));
+  check('classic: delivery terms', ci.text.includes('Terms of Delivery') && ci.text.includes('7-10 working days'));
+  check('classic: per column header', ci.text.includes('Rate per Amount'));
+  check('classic: CGST/SGST output rows intra-state', ci.text.includes('Output CGST @ 9%') && ci.text.includes('Output SGST @ 9%') && !ci.text.includes('IGST'));
+  const cGrand = grandTotalForDisplay(cIntra).payableMinor;
+  check('classic: grand total', ci.text.includes(`Grand Total`) && ci.text.includes(formatMoney(cGrand)));
+  check('classic: amount and tax in words', ci.text.includes(amountInWords(cGrand, 'INR')) && ci.text.includes(`Tax Amount (in words): ${amountInWords(cIntra.quote.totals.taxMinor, 'INR')}`));
+  check('classic: HSN summary split into central + state tax', ci.text.includes('Central Tax') && ci.text.includes('State Tax'));
+  const hs = hsnSummary(cIntra.quote.items);
+  check(
+    'classic: HSN summary sums back to the quote totals',
+    hs.reduce((a, r) => a + r.taxMinor, 0) === cIntra.quote.totals.taxMinor && hs.reduce((a, r) => a + r.taxableMinor, 0) === cIntra.quote.totals.taxableMinor,
+  );
+  check('classic: bank details', ci.text.includes("Company's Bank Details") && ci.text.includes('921020031278487') && ci.text.includes('BANGALORE & UTIB0000009'));
+  check('classic: declaration and signatory', ci.text.includes('Declaration') && ci.text.includes('E-Invoicing requirement') && ci.text.includes(`For ${cIntra.quote.seller.name}`) && ci.text.includes('Authorised Signatory'));
+
+  const ce = await render(sampleRenderInput(classicBody, { interState: true }));
+  check('classic: inter-state uses IGST only', ce.text.includes('Output IGST @ 18%') && ce.text.includes('Integrated Tax') && !ce.text.includes('CGST'));
+
+  const cfBody = quoteTemplateBodySchema.parse(classicProformaTemplateBody());
+  cfBody.sections.push({ id: 'po', type: 'custom_fields', enabled: true, title: 'Order', settings: { fields: [{ key: 'po', label: "Buyer's Order No." }] } });
+  const cfIn = sampleRenderInput(cfBody);
+  cfIn.dealCustomFields = { po: 'PO-55' };
+  check('classic: custom fields become grid cells', (await render(cfIn)).text.includes("Buyer's Order No. PO-55"));
+
+  const offBody = quoteTemplateBodySchema.parse(classicProformaTemplateBody());
+  offBody.sections = offBody.sections.map((s) => (s.type === 'line_items' || s.type === 'totals' ? s : { ...s, enabled: false }));
+  const off = await render(sampleRenderInput(offBody));
+  check('classic: disabled sections leave their slots out', !off.text.includes('Consignee') && !off.text.includes('Declaration') && !off.text.includes('Authorised Signatory') && !off.text.includes('Mode/Terms'));
+
+  const long = await render(sampleRenderInput(classicBody, { itemCount: 60 }));
+  check('classic: long quote wraps onto more pages', long.pages >= 2 && long.text.includes('Sample item 60') && long.pageTexts.at(-1)!.includes('Authorised Signatory'), String(long.pages));
+  check('classic: item header repeats on every page', long.pageTexts.every((p) => p.includes('Description of Goods/Services')));
 }
 
 main()

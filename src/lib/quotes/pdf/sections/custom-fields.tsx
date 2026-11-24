@@ -5,7 +5,7 @@ import type { RenderContext } from '../context';
 
 type CustomFieldsSection = Extract<QuoteSection, { type: 'custom_fields' }>;
 
-function display(v: unknown): string {
+export function display(v: unknown): string {
   if (v === null || v === undefined) return '—';
   if (typeof v === 'string') return v.trim() || '—';
   if (typeof v === 'number' || typeof v === 'bigint') return String(v);

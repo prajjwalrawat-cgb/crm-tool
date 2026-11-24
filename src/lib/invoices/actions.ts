@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { auth } from '@/lib/auth/server';
 import { runWithTenantContext } from '@/lib/db-context';
 import { requireMembership } from '@/lib/membership';
+import { fetchLogoDataUrl } from '@/lib/org-settings/logo';
 import { isStorageConfigured, uploadInvoiceImage } from '@/lib/storage/supabase';
 import { requireTenant } from '@/lib/tenant';
 
@@ -172,24 +173,6 @@ export async function deleteInvoiceAction(
 }
 
 /** Fetch a single PI (with items) for client-side PDF generation. */
-/**
- * Fetch a logo from storage (server-side, so no browser CORS) and return it
- * as a base64 data URL. Returns null on any failure so the PDF still renders.
- */
-async function fetchLogoDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength === 0 || buf.byteLength > 3 * 1024 * 1024) return null;
-    const mime = res.headers.get('content-type') || 'image/png';
-    if (!mime.startsWith('image/')) return null;
-    return `data:${mime};base64,${buf.toString('base64')}`;
-  } catch {
-    return null;
-  }
-}
-
 export async function getInvoiceForPdfAction(
   id: string,
 ): Promise<InvoicePdfData | null> {

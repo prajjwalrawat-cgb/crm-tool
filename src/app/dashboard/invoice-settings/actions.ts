@@ -14,10 +14,6 @@ import {
 } from '@/lib/invoices/seller-profiles';
 import { isOwner, requireMembership } from '@/lib/membership';
 import { getOrgSettings } from '@/lib/org-settings/queries';
-import {
-  isStorageConfigured,
-  uploadInvoiceImage,
-} from '@/lib/storage/supabase';
 import { requireTenant } from '@/lib/tenant';
 
 const opt = (max: number) => z.string().trim().max(max).optional();
@@ -143,78 +139,6 @@ export async function deleteSellerProfileAction(
   if (!/^\d{2}$/.test(stateCode)) return { ok: false, error: 'Invalid state.' };
   return withOwner(async ({ tenantId }) => {
     await deleteSellerProfile(tenantId, stateCode);
-    revalidatePath('/dashboard/invoice-settings');
-    revalidatePath('/dashboard/invoices');
-    return { ok: true };
-  });
-}
-
-/* ---------- Logo (workspace-wide, persists immediately) ---------- */
-
-const LOGO_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
-const LOGO_TYPES: Record<string, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/webp': 'webp',
-};
-
-export type LogoUploadResult =
-  | { ok: true; url: string }
-  | { ok: false; error: string };
-
-export async function uploadInvoiceLogoAction(
-  formData: FormData,
-): Promise<LogoUploadResult> {
-  if (!isStorageConfigured()) {
-    return { ok: false, error: 'Image storage is not configured.' };
-  }
-  const file = formData.get('file');
-  if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, error: 'No file received.' };
-  }
-  if (file.size > LOGO_MAX_BYTES) {
-    return { ok: false, error: 'Logo must be 2 MB or smaller.' };
-  }
-  const ext = LOGO_TYPES[file.type];
-  if (!ext) return { ok: false, error: 'Use a PNG, JPG, or WebP image.' };
-
-  return withOwner(async ({ tenantId, userId }) => {
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const url = await uploadInvoiceImage({
-        tenantId,
-        bytes,
-        contentType: file.type,
-        ext,
-      });
-      await getOrgSettings(tenantId);
-      await tenantTransaction(async (tx) =>
-        tx
-          .update(organizationSettings)
-          .set({ invoiceLogoUrl: url, updatedBy: userId })
-          .where(eq(organizationSettings.tenantId, tenantId)),
-      );
-      revalidatePath('/dashboard/invoice-settings');
-      revalidatePath('/dashboard/invoices');
-      return { ok: true as const, url };
-    } catch (err) {
-      return {
-        ok: false as const,
-        error: err instanceof Error ? err.message : 'Upload failed.',
-      };
-    }
-  });
-}
-
-export async function removeInvoiceLogoAction(): Promise<InvoiceSettingsResult> {
-  return withOwner(async ({ tenantId, userId }) => {
-    await getOrgSettings(tenantId);
-    await tenantTransaction(async (tx) =>
-      tx
-        .update(organizationSettings)
-        .set({ invoiceLogoUrl: null, updatedBy: userId })
-        .where(eq(organizationSettings.tenantId, tenantId)),
-    );
     revalidatePath('/dashboard/invoice-settings');
     revalidatePath('/dashboard/invoices');
     return { ok: true };

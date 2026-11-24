@@ -47,12 +47,15 @@ export function TemplateBuilder({
   initialBody,
   isDefault,
   dealCustomFields,
+  logoUrl,
 }: {
   id: string;
   initialName: string;
   initialBody: QuoteTemplateBody;
   isDefault: boolean;
   dealCustomFields: DealFieldOption[];
+  /** Workspace logo as a data URL, for the preview. */
+  logoUrl: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -183,7 +186,7 @@ export function TemplateBuilder({
         </Card>
 
         <div className="h-[75vh] xl:sticky xl:top-20">
-          <PdfPreview body={body} />
+          <PdfPreview body={body} logoUrl={logoUrl} />
         </div>
       </div>
     </main>

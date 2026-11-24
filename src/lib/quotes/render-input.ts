@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm';
 
 import { deals, users } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
-import { getOrgSettings } from '@/lib/org-settings/queries';
+import { workspaceLogoDataUrl } from '@/lib/org-settings/logo';
 
 import type { QuoteRenderInput } from './pdf/context';
 import { buildPlaceholderValues } from './pdf/quote-document';
@@ -42,12 +42,10 @@ export async function buildQuoteRenderInput(tenantId: string, quoteId: string): 
       }
     : { name: '', email: '' };
 
-  const source = quote.templateSnapshot.theme.logoSource;
-  let logoUrl: string | null = null;
-  if (source !== 'none') {
-    const org = await getOrgSettings(tenantId);
-    logoUrl = (source === 'invoice' ? org.invoiceLogoUrl : org.logoUrl) ?? null;
-  }
+  // 'org' and the older 'invoice' option both print the workspace logo
+  // (Settings → Organization). Embedded as a data URL so the browser render
+  // never fetches the storage URL (CORS) and matches the server render.
+  const logoUrl = quote.templateSnapshot.theme.logoSource === 'none' ? null : await workspaceLogoDataUrl(tenantId);
 
   return {
     body: quote.templateSnapshot,

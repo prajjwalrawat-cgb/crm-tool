@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
+import { workspaceLogoDataUrl } from '@/lib/org-settings/logo';
 import { requirePersonas } from '@/lib/personas/guards';
 import { getQuoteTemplate } from '@/lib/quotes/queries';
 
@@ -13,7 +14,11 @@ export default async function QuoteTemplateEditorPage({ params }: { params: Prom
   await requirePersonas(['admin']);
   const { id } = await params;
   return await withTenantSession(async ({ tenant }) => {
-    const [template, defs] = await Promise.all([getQuoteTemplate(tenant.id, id), listCustomFieldDefs(tenant.id, 'deal')]);
+    const [template, defs, logoUrl] = await Promise.all([
+      getQuoteTemplate(tenant.id, id),
+      listCustomFieldDefs(tenant.id, 'deal'),
+      workspaceLogoDataUrl(tenant.id),
+    ]);
     // Archived templates can't be saved (saveQuoteTemplate only updates active rows).
     if (!template || template.archivedAt) notFound();
 
@@ -24,6 +29,7 @@ export default async function QuoteTemplateEditorPage({ params }: { params: Prom
         initialBody={template.body}
         isDefault={template.isDefault}
         dealCustomFields={defs.map((d) => ({ key: d.key, label: d.label }))}
+        logoUrl={logoUrl}
       />
     );
   });

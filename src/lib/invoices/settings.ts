@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { workspaceLogoUrl } from '@/lib/org-settings/logo';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 
 /**
@@ -19,6 +20,6 @@ export async function getInvoiceSettings(
   return {
     paymentTerms: s.invoicePaymentTerms ?? '',
     deliveryTerms: s.invoiceDeliveryTerms ?? '',
-    logoUrl: s.invoiceLogoUrl ?? null,
+    logoUrl: workspaceLogoUrl(s),
   };
 }

@@ -1,6 +1,7 @@
 'use client';
 
-import { ImageIcon, Loader2, Trash2, Upload } from 'lucide-react';
+import { ImageIcon, Loader2, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
@@ -9,10 +10,8 @@ import type { SellerProfile } from '@/lib/invoices/seller-profiles';
 
 import {
   deleteSellerProfileAction,
-  removeInvoiceLogoAction,
   saveSellerProfileAction,
   saveWorkspaceTermsAction,
-  uploadInvoiceLogoAction,
 } from '../actions';
 
 const inputCls =
@@ -79,10 +78,6 @@ export function InvoiceSettingsForm({
   deliveryTerms: string;
   profiles: SellerProfile[];
 }) {
-  // Logo (workspace-wide, persists on upload/remove)
-  const [logo, setLogo] = useState(logoUrl);
-  const [uploading, setUploading] = useState(false);
-
   // Default terms (workspace-wide)
   const [terms, setTerms] = useState({ paymentTerms, deliveryTerms });
   const [savingTerms, startTerms] = useTransition();
@@ -149,36 +144,6 @@ export function InvoiceSettingsForm({
     });
   }
 
-  async function handleLogo(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setUploading(true);
-    const fd = new FormData();
-    fd.append('file', file);
-    const res = await uploadInvoiceLogoAction(fd);
-    setUploading(false);
-    if (res.ok) {
-      setLogo(res.url);
-      toast.success('Logo saved');
-    } else {
-      toast.error(res.error);
-    }
-  }
-  function removeLogo() {
-    setUploading(true);
-    startProfile(async () => {
-      const res = await removeInvoiceLogoAction();
-      setUploading(false);
-      if (res.ok) {
-        setLogo('');
-        toast.success('Logo removed');
-      } else {
-        toast.error(res.error);
-      }
-    });
-  }
-
   function saveTerms() {
     startTerms(async () => {
       const res = await saveWorkspaceTermsAction(terms);
@@ -189,32 +154,24 @@ export function InvoiceSettingsForm({
 
   return (
     <div className="space-y-5">
-      {/* Logo */}
+      {/* Logo: managed under Settings → Organization, shared with quotes */}
       <Section title="Logo">
         <div className="flex items-center gap-4">
           <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
-            {logo ? (
+            {logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={logo} alt="Workspace logo" className="h-full w-full object-contain" />
+              <img src={logoUrl} alt="Workspace logo" className="h-full w-full object-contain" />
             ) : (
               <ImageIcon className="h-6 w-6 text-slate-300" aria-hidden />
             )}
           </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-50 dark:border-[#1F1F1F] dark:text-[#FAFAFA] dark:hover:bg-[#181818]">
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Upload className="h-4 w-4" aria-hidden />}
-                {logo ? 'Replace logo' : 'Upload logo'}
-                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleLogo} disabled={uploading} />
-              </label>
-              {logo ? (
-                <button type="button" onClick={removeLogo} disabled={uploading} className="text-[12px] text-red-600 hover:underline disabled:opacity-60">
-                  Remove
-                </button>
-              ) : null}
-            </div>
-            <p className="text-[11px] text-slate-400">PNG, JPG or WebP, up to 2 MB. Shown top-left on every PI.</p>
-          </div>
+          <p className="text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+            Shown top-left on every PI and quote. Upload or change it in{' '}
+            <Link href="/dashboard/settings/organization" className="font-medium text-indigo-600 hover:underline">
+              Settings → Organization
+            </Link>
+            .
+          </p>
         </div>
       </Section>
 

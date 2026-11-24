@@ -18,7 +18,14 @@ export const quoteThemeSchema = z.object({
   baseFontSize: z.number().min(8).max(12),
   pageSize: z.enum(['A4', 'LETTER']),
   marginsMm: z.number().min(10).max(30),
+  /** 'invoice' is a legacy value: it prints the same workspace logo as 'org'. */
   logoSource: z.enum(['org', 'invoice', 'none']),
+  /**
+   * 'modern' (default, also when missing on older templates): sections stack
+   * top to bottom. 'classic': the boxed Indian GST proforma grid, which places
+   * sections in fixed slots (see pdf/classic-document.tsx).
+   */
+  layout: z.enum(['modern', 'classic']).optional(),
 });
 
 const milestoneSchema = z.object({ label: z.string().min(1), percentBps: z.number().int().min(0).max(10_000) });
