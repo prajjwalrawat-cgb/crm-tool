@@ -1,3 +1,9 @@
+# Single-package repo. pnpm 9 (the version CI pins) refuses a workspace
+# file without `packages`, failing `pnpm install` with
+# ERR_PNPM_INVALID_WORKSPACE_CONFIGURATION.
+packages:
+  - '.'
+
 # Build scripts are intentionally NOT run on install. These packages ship
 # prebuilt binaries or have postinstall scripts we don't need (funding
 # notices, optional native rebuilds). Explicit `false` decisions keep
