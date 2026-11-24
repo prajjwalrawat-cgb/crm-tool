@@ -31,6 +31,7 @@ import {
 import type { WorkflowEvents } from '../events';
 import type { LocalStepAPI } from '../local-step';
 import { sendWorkflowEvent } from '../send';
+import { eachTenant } from './each-tenant';
 
 /**
  * Telephony workflows (build prompt 2):
@@ -38,7 +39,7 @@ import { sendWorkflowEvent } from '../send';
  *   call-recording-archive crm/call.completed → copy recording to our storage
  *   call-transcribe        crm/call.recording_archived | crm/call.transcribe_requested → speech-to-text
  *   call-ai-summarize      crm/call.transcribed → Claude summary → crm/call.summarized
- *   campaign-dialer-tick   every minute → stale claims, completed campaigns
+ *   campaign-dialer-tick   every 15 min → stale claims, completed campaigns
  */
 
 const toDate = (s: string | null) => (s ? new Date(s) : null);
@@ -282,25 +283,30 @@ export const campaignDialerTick = inngest.createFunction(
     name: 'Telephony — dialer tick',
     retries: 1,
     concurrency: { limit: 1 },
-    triggers: [cron('* * * * *')],
+    // Housekeeping only (agents claim calls themselves): releases claims past
+    // their LOCK_MINUTES expiry and closes finished campaigns. Every 15 min, in
+    // one step: the old every-minute, step-per-tenant tick used most of the
+    // Inngest plan on its own. Worst case an abandoned claim now waits
+    // LOCK_MINUTES + 15 before going back to the queue.
+    triggers: [cron('*/15 * * * *')],
   },
-  async ({ step }) => {
-    const all = await step.run('list-tenants', () => db.select({ id: tenants.id }).from(tenants));
-    const results: Record<string, unknown> = {};
-    for (const t of all) {
-      const running = await step.run(`running-${t.id}`, () =>
-        runWithSystemContext(t.id, () =>
-          tenantTransaction(async (tx) => {
-            const rows = await tx.execute<{ n: number }>(
-              sql`select count(*)::int as n from call_campaigns where tenant_id = ${t.id} and status = 'running'`,
-            );
-            return Number(rows[0]?.n ?? 0);
+  async ({ step }) =>
+    step.run('tick-all', async () => {
+      const all = await db.select({ id: tenants.id }).from(tenants);
+      const r = await eachTenant(
+        all.map((t) => t.id),
+        'campaign-dialer-tick',
+        (tenantId) =>
+          runWithSystemContext(tenantId, async () => {
+            const running = await tenantTransaction(async (tx) => {
+              const rows = await tx.execute<{ n: number }>(
+                sql`select count(*)::int as n from call_campaigns where tenant_id = ${tenantId} and status = 'running'`,
+              );
+              return Number(rows[0]?.n ?? 0);
+            });
+            return running ? await runDialerTick(tenantId) : null;
           }),
-        ),
       );
-      if (!running) continue;
-      results[t.id] = await step.run(`tick-${t.id}`, () => runWithSystemContext(t.id, () => runDialerTick(t.id)));
-    }
-    return results;
-  },
+      return { ticked: Object.fromEntries(Object.entries(r.ok).filter(([, v]) => v !== null)), failed: r.failed };
+    }),
 );

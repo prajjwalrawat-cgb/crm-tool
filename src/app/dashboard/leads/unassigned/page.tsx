@@ -29,7 +29,7 @@ export default async function UnassignedLeadsPage({ searchParams }: Props) {
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-[#FAFAFA]">Lead queue</h1>
           <p className="mt-1 max-w-2xl text-[13px] text-slate-500 dark:text-[#A1A1AA]">
             Captured leads no rule could place — nobody eligible, everyone off shift, or no matching rule. The
-            distributor retries every 10 minutes for 6 hours; assign them here to stop the wait.
+            distributor retries every 15 minutes for 6 hours; assign them here to stop the wait.
           </p>
         </header>
         <UnassignedQueue

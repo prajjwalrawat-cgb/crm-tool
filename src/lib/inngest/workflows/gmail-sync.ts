@@ -18,11 +18,12 @@ import {
   recordWorkflowStart,
   recordWorkflowSuccess,
 } from '../run-tracker';
+import { eachTenant } from './each-tenant';
 
 const WORKFLOW_ID = 'gmail-sync';
 
 /**
- * Every 10 minutes, sync each connected Gmail mailbox (Module 3). One cron
+ * Every 15 minutes, sync each connected Gmail mailbox (Module 3). One cron
  * entry point that fans out per connection via `step.run` — matching the
  * stale-deals-scan per-tenant pattern, keyed per connection so a single
  * mailbox failure retries in isolation. Only workspaces with
@@ -31,9 +32,9 @@ const WORKFLOW_ID = 'gmail-sync';
 export const gmailSync = inngest.createFunction(
   {
     id: WORKFLOW_ID,
-    name: 'Gmail sync — every 10 minutes',
+    name: 'Gmail sync — every 15 minutes',
     retries: 2,
-    triggers: [cron('*/10 * * * *')],
+    triggers: [cron('*/15 * * * *')],
   },
   async ({ step }) => {
     return await runWithTrace(
@@ -47,27 +48,30 @@ export const gmailSync = inngest.createFunction(
           return { skipped: 'gmail_not_configured' };
         }
 
-        const allTenants = await step.run('list-tenants', async () =>
-          db.select({ id: tenants.id }).from(tenants),
-        );
-
-        let mailboxes = 0;
-        for (const tenant of allTenants) {
-          // Return only ids — step.run JSON-serializes its result (dropping the
-          // Date fields the full connection carries), so we reload inside sync.
-          const connIds = await step.run(
-            `connections-${tenant.id}`,
-            async () =>
-              runWithSystemContext(tenant.id, async () => {
-                if (!(await isFeatureEnabled(tenant.id, 'emailSyncEnabled'))) {
-                  return [] as string[];
-                }
-                const list = await listActiveConnectionsForTenant(tenant.id);
+        // One step lists every tenant's mailboxes (Inngest bills per step, so
+        // a listing step per tenant cost an execution per tenant per run).
+        // Return only ids: step.run JSON-serializes its result (dropping the
+        // Date fields the full connection carries), so we reload inside sync.
+        const byTenant = await step.run('list-connections', async () => {
+          const all = await db.select({ id: tenants.id }).from(tenants);
+          const r = await eachTenant(
+            all.map((t) => t.id),
+            'gmail-sync.list-connections',
+            (tenantId) =>
+              runWithSystemContext(tenantId, async () => {
+                if (!(await isFeatureEnabled(tenantId, 'emailSyncEnabled'))) return [] as string[];
+                const list = await listActiveConnectionsForTenant(tenantId);
                 return list.map((c) => c.id);
               }),
           );
+          return Object.entries(r.ok).map(([id, connIds]) => ({ id, connIds }));
+        });
 
-          for (const connId of connIds) {
+        let mailboxes = 0;
+        // Each mailbox keeps its own step: syncing is network-bound, so it
+        // needs its own request timeout and isolated retry.
+        for (const tenant of byTenant) {
+          for (const connId of tenant.connIds) {
             mailboxes += 1;
             await step.run(`sync-${connId}`, async () =>
               runWithSystemContext(tenant.id, async () => {
@@ -76,7 +80,7 @@ export const gmailSync = inngest.createFunction(
                 const trackingId = await recordWorkflowStart({
                   tenantId: tenant.id,
                   workflowId: WORKFLOW_ID,
-                  eventName: 'cron/*/10 * * * *',
+                  eventName: 'cron/*/15 * * * *',
                   metadata: { connectionId: conn.id, mailbox: conn.email },
                 });
                 try {
@@ -100,7 +104,7 @@ export const gmailSync = inngest.createFunction(
         observe('workflow.duration_ms', Date.now() - startedAt, {
           workflow: WORKFLOW_ID,
         });
-        return { tenants: allTenants.length, mailboxes };
+        return { tenants: byTenant.length, mailboxes };
       },
     );
   },
