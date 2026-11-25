@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { memberships, meetingOutcomes, meetings, organizationSettings, users } from '@/db/schema';
@@ -19,7 +19,11 @@ const HOUR = 3_600_000;
 const DEFAULT_TZ = 'Asia/Kolkata';
 const REASON_ORDER: RiskReason[] = ['no_checkin', 'travel_gap', 'overlap', 'mom_missing'];
 
-export type RiskScanDeps = FieldDeps & { ignoreHours?: boolean };
+export type RiskScanDeps = FieldDeps & {
+  ignoreHours?: boolean;
+  /** Test hook: runs after risks are computed and before the write phase. */
+  afterCompute?: () => Promise<void>;
+};
 export type RiskScanResult = { scanned: number; added: number; cleared: number; notified: number };
 
 const TITLE: Record<RiskReason, string> = {
@@ -80,7 +84,9 @@ export async function tenantsWithMeetingsInWindow(now: Date): Promise<string[]> 
  * transaction (cache read, provider call, cache write); (3) one write tx that applies
  * each change as a compare-and-swap against the state read in (1), notifying only for
  * rows it actually changed. A concurrent edit or scan makes the swap miss; the next run
- * picks it up. Idempotent: a second run with the same inputs writes and notifies nothing.
+ * picks it up. The swap also compares updated_at (as exact text), so an owner, type or site
+ * edit to the meeting itself during the scan makes it miss. Edits to the OTHER meeting of a
+ * pair during a scan are not detected; the next scan corrects them. Idempotent: a second run with the same inputs writes and notifies nothing.
  */
 export async function scanTenantRisks(tenantId: string, deps: RiskScanDeps = {}): Promise<RiskScanResult> {
   const now = (deps.now ?? (() => new Date()))();
@@ -101,8 +107,10 @@ export async function scanTenantRisks(tenantId: string, deps: RiskScanDeps = {})
 
       const windowStart = new Date(now.getTime() - 48 * HOUR);
       const windowEnd = tenantDayBounds(localDate(now, tz), tz).end;
+      // updated_at is also read as text: a JS Date cannot hold its microseconds, and the swap
+      // needs exact equality.
       const rows = await tx
-        .select()
+        .select({ ...getTableColumns(meetings), updatedAtText: sql<string>`${meetings.updatedAt}::text` })
         .from(meetings)
         .where(
           and(
@@ -174,6 +182,8 @@ export async function scanTenantRisks(tenantId: string, deps: RiskScanDeps = {})
       for (const [id, r] of part) risks.set(id, r);
     }
 
+    await deps.afterCompute?.();
+
     type Change = { m: (typeof rows)[number]; next: RiskReason[]; added: RiskReason[]; removed: RiskReason[] };
     const changes: Change[] = [];
     for (const m of rows) {
@@ -208,6 +218,7 @@ export async function scanTenantRisks(tenantId: string, deps: RiskScanDeps = {})
               eq(meetings.status, m.status),
               eq(meetings.startAt, m.startAt),
               eq(meetings.endAt, m.endAt),
+              sql`${meetings.updatedAt}::text = ${m.updatedAtText}`,
               sql`${meetings.atRiskReasons} = ${prevArr}`,
             ),
           )

@@ -789,6 +789,29 @@ async function main() {
     );
     check('cross-day pair makes no drive call', driveCalls === callsBefore, driveCalls - callsBefore);
 
+    // CAS: an owner edit landing between compute and write makes the swap miss
+    const cas = await ins({ tenantId: C, ownerId: U.c3, title: 'ZZ cas', start: -200, end: -190 });
+    const casScan = await RS.scanTenantRisks(C, {
+      ...scanDeps,
+      afterCompute: async () => {
+        await db.execute(sql`UPDATE meetings SET owner_id = ${U.c2}, updated_at = now() WHERE id = ${cas.id}`);
+      },
+    });
+    check(
+      'stale scan (owner edited mid-scan) swaps nothing and notifies no one',
+      casScan.notified === 0 && j(await reasons(C, cas.id)) === '[]' && (await notifsFor(C, cas.id)).length === 0,
+      { casScan, reasons: await reasons(C, cas.id) },
+    );
+    const casNext = await RS.scanTenantRisks(C, scanDeps);
+    const casN = await notifsFor(C, cas.id);
+    check(
+      'next scan flags it for the new owner and manager only',
+      casNext.notified === 2 &&
+        j(await reasons(C, cas.id)) === '["no_checkin"]' &&
+        casN.map((n) => n.recipientUserId).sort().join() === [U.c2, U.cm].sort().join(),
+      { casNext, to: casN.map((n) => n.recipientUserId) },
+    );
+
     // cross-tenant: scanning C never touched D
     check(
       'cross-tenant: scanning A never touches B',
