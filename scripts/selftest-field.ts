@@ -126,6 +126,19 @@ async function main() {
       b,
     );
     check('travel_gap not on earlier', !r.get('A')!.reasons.includes('travel_gap') && r.get('A')!.travelGapMin === null);
+    const ov = (site: { lat: number; lng: number }) => [
+      mk({ id: 'A', startAt: T(10), endAt: T(11), site: noida }),
+      mk({ id: 'B', startAt: T(10, 30), endAt: T(11, 30), site }),
+    ];
+    const o1 = (await risk(ov(noida), now)).get('B')!;
+    check('overlap same site: no travel_gap, gap null', o1.reasons.includes('overlap') && !o1.reasons.includes('travel_gap') && o1.travelGapMin === null, o1);
+    const o2 = (await risk(ov(north(12000)), now)).get('B')!;
+    check('overlap 12 km: overlap only', JSON.stringify(o2.reasons) === '["overlap"]' && o2.travelGapMin === null && (o2.estDriveMin ?? 0) >= 39, o2);
+    const b2b = (await risk([
+      mk({ id: 'A', startAt: T(10), endAt: T(11), site: noida }),
+      mk({ id: 'B', startAt: T(11), endAt: T(12), site: north(5000) }),
+    ], now)).get('B')!;
+    check('back-to-back 5 km: travel_gap, gap 0', JSON.stringify(b2b.reasons) === '["travel_gap"]' && b2b.travelGapMin === 0, b2b);
     const mid = mk({ id: 'M', startAt: T(11, 5), endAt: T(11, 10), site: null });
     const r2 = await risk([A, mid, B], now);
     check('travel_gap skips site-less', r2.get('B')!.reasons.includes('travel_gap') && !r2.get('M')!.reasons.includes('travel_gap'));

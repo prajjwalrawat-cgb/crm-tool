@@ -75,9 +75,11 @@ export async function computeRisks(
       const gapMin = Math.round((next.startAt.getTime() - prev.endAt.getTime()) / MIN);
       const d = await drive(prev.site!, next.site!, prev.endAt);
       const r = out.get(next.id)!;
-      r.travelGapMin = gapMin;
       r.estDriveMin = d.minutes;
       r.estimate = d.estimate;
+      // Overlapping pair: the overlap reason covers it; no negative gap, no travel_gap.
+      if (gapMin < 0) continue;
+      r.travelGapMin = gapMin;
       if (d.minutes > gapMin) flags.get(next.id)!.add('travel_gap');
     }
   }
