@@ -18,6 +18,7 @@ import {
   Inbox,
   LayoutDashboard,
   LineChart,
+  MapPinned,
   PieChart,
   Radar,
   Settings as SettingsIcon,
@@ -91,6 +92,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/field/my-day', label: 'My day', icon: MapPinned },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
       { href: '/dashboard/leads/unassigned', label: 'Lead queue', icon: Inbox },
@@ -169,6 +171,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/field/my-day', label: 'My day', icon: MapPinned },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
       { href: '/dashboard/leads/unassigned', label: 'Lead queue', icon: Inbox },
@@ -222,6 +225,7 @@ const MEMBER_NAV: readonly NavGroup[] = [
       { href: '/dashboard/deals', label: 'My Deals', icon: Briefcase },
       { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/field/my-day', label: 'My day', icon: MapPinned },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       {
         href: '/dashboard/deals/at-risk',

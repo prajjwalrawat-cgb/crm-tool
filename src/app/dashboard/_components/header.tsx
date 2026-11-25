@@ -4,6 +4,7 @@ import { Menu, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import type { Notification } from '@/db/schema';
+import type { Persona } from '@/lib/personas';
 
 import { NotificationBell } from './notification-bell';
 import { PresenceIndicator } from './presence-indicator';
@@ -24,6 +25,8 @@ type Props = {
   currentTenantName: string;
   workspaces: WorkspaceLite[];
   canCreateWorkspace: boolean;
+  /** Viewer's persona (role-dependent notification links). */
+  persona: Persona;
 };
 
 export function Header({
@@ -36,6 +39,7 @@ export function Header({
   currentTenantName,
   workspaces,
   canCreateWorkspace,
+  persona,
 }: Props) {
   // Render the platform-correct shortcut on first mount only, so the
   // shortcut hint matches the OS the user is actually on without
@@ -88,6 +92,7 @@ export function Header({
           tenantId={tenantId}
           currentUserId={currentUserId}
           initialNotifications={initialNotifications}
+          persona={persona}
         />
         <PresenceIndicator key={tenantId} tenantId={tenantId} />
         <WorkspaceSwitcher

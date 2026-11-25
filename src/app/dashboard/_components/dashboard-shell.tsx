@@ -174,6 +174,7 @@ export function DashboardShell({
             currentTenantName={currentTenantName}
             workspaces={workspaces}
             canCreateWorkspace={canCreateWorkspace}
+            persona={persona}
           />
           {/*
             Tenant-scoped invalidation boundary. When the active tenant

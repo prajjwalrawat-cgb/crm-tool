@@ -18,6 +18,9 @@ import {
   setFieldErrorReporter,
 } from '../src/app/api/field/_lib/http';
 import type { MeetingStatus } from '../src/db/schema/enums';
+import { formatTimeInTz, isoToZonedInput, isValidDate, shiftDate, todayInTz, zonedInputToIso } from '../src/app/dashboard/field/_lib/datetime';
+import { directionsUrl } from '../src/app/dashboard/field/_lib/maps-link';
+import { geoErrorMessage, isLowAccuracy } from '../src/app/dashboard/field/_lib/geolocate';
 
 /**
  * Pure self-test for the Field Meetings core (no DB).
@@ -321,6 +324,39 @@ async function main() {
     const oc = parseOutcomeBody({ momText: 'm', nextSteps: [{ action: 'a', dueDate: null }], checkOutAt: { lat: 1, lng: 2, accuracyM: 3 } });
     check('parseOutcomeBody ok', oc.momText === 'm' && oc.checkOutAt?.accuracyM === 3, oc);
     check('parseOutcomeBody rejects bad sentiment', throwsZod(() => parseOutcomeBody({ momText: 'm', sentiment: 'happy' })));
+  }
+
+  // UI helpers (My day): tenant-tz datetime conversion, maps link, geolocation messages.
+  {
+    check('zonedInputToIso IST', zonedInputToIso('2026-11-25T10:00', 'Asia/Kolkata') === '2026-11-25T10:00:00+05:30', zonedInputToIso('2026-11-25T10:00', 'Asia/Kolkata'));
+    check('zonedInputToIso UTC', zonedInputToIso('2026-11-25T10:00', 'UTC') === '2026-11-25T10:00:00+00:00');
+    check('zonedInputToIso negative offset (NY winter)', zonedInputToIso('2026-01-15T09:30', 'America/New_York') === '2026-01-15T09:30:00-05:00');
+    check('zonedInputToIso NY summer', zonedInputToIso('2026-07-15T09:30', 'America/New_York') === '2026-07-15T09:30:00-04:00');
+    check('zonedInputToIso Nepal +05:45', zonedInputToIso('2026-11-25T23:59', 'Asia/Kathmandu') === '2026-11-25T23:59:00+05:45');
+    check('zonedInputToIso junk -> null', zonedInputToIso('nope', 'Asia/Kolkata') === null);
+    check('zonedInputToIso bad day -> null', zonedInputToIso('2026-02-30T10:00', 'Asia/Kolkata') === null);
+    const iso = zonedInputToIso('2026-11-25T10:00', 'Asia/Kolkata')!;
+    check('zonedInputToIso round-trips to the instant', new Date(iso).toISOString() === '2026-11-25T04:30:00.000Z', iso);
+    check('isoToZonedInput IST', isoToZonedInput(new Date('2026-11-25T04:30:00Z'), 'Asia/Kolkata') === '2026-11-25T10:00');
+    check('isoToZonedInput crosses midnight', isoToZonedInput('2026-11-25T20:00:00Z', 'Asia/Kolkata') === '2026-11-26T01:30');
+    check('todayInTz IST after UTC midnight', todayInTz('Asia/Kolkata', new Date('2026-11-25T19:00:00Z')) === '2026-11-26');
+    check('todayInTz UTC', todayInTz('UTC', new Date('2026-11-25T19:00:00Z')) === '2026-11-25');
+    check('todayInTz bad tz falls back to IST', todayInTz('Not/AZone', new Date('2026-11-25T19:00:00Z')) === '2026-11-26');
+    check('formatTimeInTz IST', formatTimeInTz('2026-11-25T04:30:00Z', 'Asia/Kolkata') === '10:00 am', formatTimeInTz('2026-11-25T04:30:00Z', 'Asia/Kolkata'));
+    check('formatTimeInTz pm', formatTimeInTz('2026-11-25T09:45:00Z', 'Asia/Kolkata') === '3:15 pm', formatTimeInTz('2026-11-25T09:45:00Z', 'Asia/Kolkata'));
+
+    check('shiftDate +1 over month end', shiftDate('2026-11-30', 1) === '2026-12-01');
+    check('shiftDate -1 over year start', shiftDate('2026-01-01', -1) === '2025-12-31');
+    check('isValidDate ok / bad', isValidDate('2026-11-25') && !isValidDate('2026-02-30') && !isValidDate('25-11-2026') && !isValidDate(undefined));
+
+    check('directionsUrl coords', directionsUrl({ lat: 28.5355, lng: 77.391, address: 'Sector 18' }) === 'https://www.google.com/maps/dir/?api=1&destination=28.5355,77.391');
+    check('directionsUrl address', directionsUrl({ lat: null, lng: null, address: 'A-12, Sector 62, Noida & Co' }) === 'https://www.google.com/maps/dir/?api=1&destination=A-12%2C%20Sector%2062%2C%20Noida%20%26%20Co');
+    check('directionsUrl blank -> null', directionsUrl({ lat: null, lng: null, address: '  ' }) === null);
+
+    check('geoErrorMessage denied', geoErrorMessage(1).includes('Location permission is off'));
+    check('geoErrorMessage unavailable', geoErrorMessage(2).includes('could not find your location'));
+    check('geoErrorMessage timeout', geoErrorMessage(3).includes('took too long'));
+    check('isLowAccuracy 101', isLowAccuracy(101) && !isLowAccuracy(100) && !isLowAccuracy(12));
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
