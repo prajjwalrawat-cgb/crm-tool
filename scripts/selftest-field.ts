@@ -21,7 +21,7 @@ import type { MeetingStatus } from '../src/db/schema/enums';
 import { formatTimeInTz, isoToZonedInput, isValidDate, shiftDate, todayInTz, zonedInputToIso } from '../src/app/dashboard/field/_lib/datetime';
 import { directionsUrl } from '../src/app/dashboard/field/_lib/maps-link';
 import { geoErrorMessage, isLowAccuracy } from '../src/app/dashboard/field/_lib/geolocate';
-import { blockColor, blockGeometry, layoutLane, type LaneItem } from '../src/app/dashboard/field/_lib/timeline';
+import { MIN_BLOCK_PCT, blockColor, blockGeometry, layoutLane, type LaneItem } from '../src/app/dashboard/field/_lib/timeline';
 
 /**
  * Pure self-test for the Field Meetings core (no DB).
@@ -425,6 +425,15 @@ async function main() {
     check('layoutLane connector geometry spans prev end -> next start', ac.leftPct === 10 && ac.widthPct === 10 && cd.widthPct === 0, [ac.leftPct, ac.widthPct, cd.widthPct]);
     const three = layoutLane([item('p', '09:00', '12:00'), item('q', '10:00', '11:00'), item('r', '11:00', '13:00')], 'Asia/Kolkata');
     check('layoutLane reuses the first free row', three.blocks.map((b) => b.row).join() === '0,1,1' && three.rows === 2, three.blocks.map((b) => b.row));
+    const early = layoutLane([item('e1', '07:30', '08:00'), item('e2', '08:15', '08:45')], 'Asia/Kolkata');
+    check('layoutLane two pre-09:00 meetings -> different rows, no overlap flag', early.blocks[0]!.row !== early.blocks[1]!.row && early.blocks.every((b) => !b.overlaps) && early.rows === 2, early.blocks.map((b) => [b.row, b.overlaps, b.leftPct, b.widthPct]));
+    const late = layoutLane([item('l1', '19:30', '20:00'), item('l2', '20:15', '21:00')], 'Asia/Kolkata');
+    check('layoutLane two post-19:00 meetings -> different rows, drawn at right edge', late.blocks[0]!.row !== late.blocks[1]!.row && late.blocks.every((b) => !b.overlaps && b.leftPct + b.widthPct === 100), late.blocks.map((b) => [b.row, b.leftPct, b.widthPct]));
+    const short = layoutLane([item('s1', '10:00', '10:10'), item('s2', '10:10', '10:20')], 'Asia/Kolkata');
+    check('layoutLane back-to-back 10-min meetings -> different rows, no overlap flag', short.blocks[0]!.row !== short.blocks[1]!.row && short.blocks.every((b) => !b.overlaps), short.blocks.map((b) => [b.row, b.overlaps]));
+    check('layoutLane drawn width is at least MIN_BLOCK_PCT', short.blocks.every((b) => b.widthPct === MIN_BLOCK_PCT && b.geometry.widthPct < MIN_BLOCK_PCT), short.blocks.map((b) => b.widthPct));
+    const real = layoutLane([item('r1', '10:00', '11:00'), item('r2', '10:30', '11:30')], 'Asia/Kolkata');
+    check('layoutLane real overlap still flagged', real.blocks.every((b) => b.overlaps) && real.blocks[0]!.row !== real.blocks[1]!.row);
     check('layoutLane empty', layoutLane([], 'UTC').rows === 1 && layoutLane([], 'UTC').blocks.length === 0);
   }
 

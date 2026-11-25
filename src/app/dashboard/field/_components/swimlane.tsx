@@ -7,14 +7,12 @@ import { cn } from '@/lib/utils';
 
 import { formatTimeInTz } from '../_lib/datetime';
 import { STATUS_LABEL, riskLabel } from '../_lib/labels';
-import { DAY_END_HOUR, DAY_START_HOUR, blockColor, blockGeometry, layoutLane, type BlockColor } from '../_lib/timeline';
+import { DAY_END_HOUR, DAY_START_HOUR, blockColor, layoutLane, type BlockColor } from '../_lib/timeline';
 import { useTenantTz } from '../_lib/tz-context';
 
 export const NAME_COL = 'w-44 shrink-0';
 const ROW_H = 44;
 const TRAVEL_H = 22;
-/** Blocks never render narrower than this, so short or clamped meetings stay clickable. */
-const MIN_BLOCK = '2.25rem';
 
 const COLOR: Record<BlockColor, string> = {
   planned:
@@ -99,8 +97,7 @@ export function Swimlane({
         ) : null}
 
         <ul aria-label={`${rep.name}'s meetings`}>
-          {lane.blocks.map(({ meeting: m, row, overlaps }) => {
-            const g = blockGeometry(m.startAt, m.endAt, tz);
+          {lane.blocks.map(({ meeting: m, row, overlaps, leftPct, widthPct, geometry: g }) => {
             const color = blockColor(m);
             const selected = m.id === selectedId;
             return (
@@ -121,8 +118,8 @@ export function Swimlane({
                   style={{
                     top: row * ROW_H + 4,
                     height: ROW_H - 8,
-                    left: `min(${g.leftPct}%, calc(100% - ${MIN_BLOCK}))`,
-                    width: `max(${g.widthPct}%, ${MIN_BLOCK})`,
+                    left: `${leftPct}%`,
+                    width: `${widthPct}%`,
                   }}
                 >
                   {g.clippedStart ? <ChevronLeft className="h-3 w-3 shrink-0" aria-hidden /> : null}

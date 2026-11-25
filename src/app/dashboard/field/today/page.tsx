@@ -3,6 +3,7 @@ import { formatCompactTenantCurrency } from '@/lib/currency/format';
 import { getDay } from '@/lib/field/day';
 import type { FieldActor } from '@/lib/field/types';
 import { getOrgSettings } from '@/lib/org-settings/queries';
+import { can } from '@/lib/rbac';
 
 import { DayBoard } from '../_components/day-board';
 import { isValidDate, safeTz, todayInTz } from '../_lib/datetime';
@@ -33,7 +34,7 @@ export default async function FieldTodayPage({ searchParams }: { searchParams: S
     const org = await getOrgSettings(tenant.id);
     const tz = safeTz(org.timezone);
     const today = todayInTz(tz);
-    const focusId = first(sp.m) ?? null;
+    const focusId = first(sp.m)?.trim() || null;
 
     let date = first(sp.date);
     if (!isValidDate(date)) {
@@ -60,6 +61,7 @@ export default async function FieldTodayPage({ searchParams }: { searchParams: S
           atRiskOnly={atRiskOnly}
           focusId={focusId}
           pipelineLabel={formatCompactTenantCurrency(day.kpis.pipelineMinor, org)}
+          canManageReporting={can(membership.role, 'manageMembers')}
         />
       </TenantTzProvider>
     );

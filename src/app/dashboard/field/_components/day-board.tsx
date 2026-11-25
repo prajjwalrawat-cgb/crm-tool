@@ -50,6 +50,7 @@ export function DayBoard({
   atRiskOnly,
   focusId,
   pipelineLabel,
+  canManageReporting,
 }: {
   day: DayView;
   today: string;
@@ -60,6 +61,8 @@ export function DayBoard({
   atRiskOnly: boolean;
   focusId: string | null;
   pipelineLabel: string;
+  /** Owner/admin (manageMembers): can set up reporting lines themselves; picks the banner copy. */
+  canManageReporting: boolean;
 }) {
   const router = useRouter();
   const tz = useTenantTz();
@@ -205,13 +208,20 @@ export function DayBoard({
           className="mb-4 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-[12.5px] text-sky-900 dark:border-sky-900/60 dark:bg-sky-500/10 dark:text-sky-200"
         >
           <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <p>
-            You have no reps reporting to you yet — showing the whole workspace. Set up reporting lines in{' '}
-            <Link href="/dashboard/settings/reporting-lines" className="font-medium underline">
-              Settings → Reporting lines
-            </Link>
-            .
-          </p>
+          {canManageReporting ? (
+            <p>
+              You have no reps reporting to you yet — showing the whole workspace. Set up reporting lines in{' '}
+              <Link href="/dashboard/settings/reporting-lines" className="font-medium underline">
+                Settings → Reporting lines
+              </Link>
+              .
+            </p>
+          ) : (
+            <p>
+              You have no reps reporting to you yet — showing the whole workspace. Ask an admin to set up reporting lines
+              (Settings → Reporting lines).
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -312,7 +322,7 @@ export function DayBoard({
       </p>
 
       {selected && !creating ? (
-        <MeetingPanel meeting={selected.meeting} repName={selected.repName} onClose={closePanel} onChanged={refresh} />
+        <MeetingPanel key={selected.meeting.id} meeting={selected.meeting} repName={selected.repName} onClose={closePanel} onChanged={refresh} />
       ) : null}
 
       {creating ? (

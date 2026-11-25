@@ -71,7 +71,21 @@ export type LaneItem = Pick<DayMeeting, 'id' | 'type' | 'status' | 'lat' | 'lng'
   endAt: When;
 };
 
-export type LaneBlock<T extends LaneItem> = { meeting: T; row: number; overlaps: boolean };
+/**
+ * Narrowest a block is drawn, as % of the window (the swimlane draws exactly
+ * this), so short or edge-clamped meetings stay visible and clickable.
+ */
+export const MIN_BLOCK_PCT = 4;
+
+/** `leftPct` / `widthPct` are the DRAWN extent (clamped, widened to MIN_BLOCK_PCT); `geometry` is the raw one. */
+export type LaneBlock<T extends LaneItem> = {
+  meeting: T;
+  row: number;
+  overlaps: boolean;
+  leftPct: number;
+  widthPct: number;
+  geometry: BlockGeometry;
+};
 
 export type LaneConnector = {
   fromId: string;
@@ -91,8 +105,10 @@ const ms = (w: When) => new Date(w).getTime();
 
 /**
  * One rep's lane: cancelled meetings dropped, the rest sorted by start and put
- * in the first sub-row whose last block ends at or before this one starts.
- * `overlaps` marks blocks whose time range intersects another block's.
+ * in the first sub-row whose last DRAWN block ends at or before this one's
+ * drawn start (drawn = clamped to the window, at least MIN_BLOCK_PCT wide), so
+ * edge-clamped or very short meetings never cover each other. `overlaps` marks
+ * only real time overlaps; a purely visual collision just takes another row.
  * Connectors join consecutive physical meetings that have a pinned site (the
  * same pairs the risk engine measures), carrying the later meeting's drive
  * estimate and travel_gap flag.
@@ -107,17 +123,22 @@ export function layoutLane<T extends LaneItem>(
     .filter((m) => m.status !== 'cancelled')
     .sort((a, b) => ms(a.startAt) - ms(b.startAt) || ms(a.endAt) - ms(b.endAt) || a.id.localeCompare(b.id));
 
+  const EPS = 1e-6;
   const rowEnds: number[] = [];
   const blocks: Array<LaneBlock<T>> = list.map((m) => {
-    let row = rowEnds.findIndex((end) => end <= ms(m.startAt));
+    const geometry = blockGeometry(m.startAt, m.endAt, tz, dayStartHour, dayEndHour);
+    const widthPct = Math.max(geometry.widthPct, MIN_BLOCK_PCT);
+    const leftPct = Math.min(geometry.leftPct, 100 - widthPct);
+    const drawnEnd = leftPct + widthPct;
+    let row = rowEnds.findIndex((end) => end <= leftPct + EPS);
     if (row === -1) {
       row = rowEnds.length;
-      rowEnds.push(ms(m.endAt));
+      rowEnds.push(drawnEnd);
     } else {
-      rowEnds[row] = ms(m.endAt);
+      rowEnds[row] = drawnEnd;
     }
     const overlaps = list.some((o) => o !== m && ms(o.startAt) < ms(m.endAt) && ms(m.startAt) < ms(o.endAt));
-    return { meeting: m, row, overlaps };
+    return { meeting: m, row, overlaps, leftPct: round(leftPct), widthPct: round(widthPct), geometry };
   });
 
   const sited = list.filter((m) => m.type === 'physical' && m.lat !== null && m.lng !== null);
