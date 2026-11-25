@@ -13,6 +13,8 @@ type MatrixResponse = {
   }>;
 };
 
+const GOOGLE_TIMEOUT_MS = 4000;
+
 export class GoogleProvider implements MapsProvider {
   readonly name = 'google';
   private readonly fetchFn: FetchLike;
@@ -20,8 +22,9 @@ export class GoogleProvider implements MapsProvider {
     this.fetchFn = fetchFn ?? ((u, i) => fetch(u, i));
   }
 
+  /** Bounded: these calls can run inside a DB transaction (walk-in, day view). */
   private async json<T>(url: string): Promise<T> {
-    const res = await this.fetchFn(url);
+    const res = await this.fetchFn(url, { signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`maps http ${res.status}`);
     return (await res.json()) as T;
   }

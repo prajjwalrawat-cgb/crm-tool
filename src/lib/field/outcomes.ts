@@ -8,7 +8,7 @@ import { tenantTransaction } from '@/lib/db-context';
 
 import { checkOutTx } from './checkins';
 import { asActor, nowOf, optText, publishMeetingUpdated, type FieldDeps, type Position } from './internal';
-import { lockOwnedMeeting } from './scope';
+import { assertCanWrite, fieldUserScope, lockOwnedMeeting } from './scope';
 import { assertTransition } from './state-machine';
 import { FieldError, type FieldActor } from './types';
 
@@ -62,8 +62,10 @@ export function saveOutcome(
   return asActor(actor, async () => {
     const values = parseInput(input);
     const now = nowOf(deps);
+    assertCanWrite(actor);
+    const scope = await fieldUserScope(actor); // before the tx: no second connection under the lock
     return tenantTransaction(async (tx) => {
-      let cur = await lockOwnedMeeting(tx, actor, id);
+      let cur = await lockOwnedMeeting(tx, actor, scope, id);
       if (input.checkOutAt && cur.status === 'checked_in') {
         cur = (await checkOutTx(tx, actor, cur, input.checkOutAt, now)).meeting;
       }

@@ -275,7 +275,8 @@ async function main() {
       slot++;
       return M.createMeeting(
         actor,
-        { title: `ZZ m${slot}`, type: 'physical', startAt: hours(slot), endAt: hours(slot + 0.5), ...extra },
+        // 15-min slots from 11:00 IST keep every base-day meeting on 2026-12-02 IST.
+        { title: `ZZ m${slot}`, type: 'physical', startAt: hours(0.25 * slot + 0.25), endAt: hours(0.25 * slot + 0.45), ...extra },
         deps,
       );
     };
@@ -294,6 +295,7 @@ async function main() {
       rej?.code === 'outside_radius' && dist >= 480 && dist <= 520 && rej?.details?.radiusM === 300,
       { code: rej?.code, details: rej?.details },
     );
+    check('a rejected check-in leaves status planned', (await meetingRow(m1.id)).status === 'planned');
     const ov = await CI.checkIn(r1, m1.id, { ...north(500), accuracyM: 10, overrideReason: 'gate closed' }, deps);
     const rows1 = (await checkinsOf(m1.id)).sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime());
     check(
@@ -313,6 +315,17 @@ async function main() {
     const m3 = await mk(r1, { companyId: siteCo!.id });
     const in3 = await CI.checkIn(r1, m3.id, { ...north(50), accuracyM: 2000 }, deps);
     check('low accuracy inside radius still verified', in3.verified, in3);
+
+    // --- edit gates once the visit has started (m2 is checked_in)
+    check('type flip on checked_in → invalid_transition', (await code(M.updateMeeting(r1, m2.id, { type: 'virtual' }, deps))) === 'invalid_transition');
+    check('owner change on checked_in → invalid_transition', (await code(M.updateMeeting(m, m2.id, { ownerId: U.r2 }, deps))) === 'invalid_transition');
+    check(
+      'time change on checked_in → invalid_transition',
+      (await code(M.updateMeeting(r1, m2.id, { endAt: hours(20) }, deps))) === 'invalid_transition',
+    );
+    const renamed = await M.updateMeeting(r1, m2.id, { title: 'Renamed visit', type: 'physical', notes: 'n1' }, deps);
+    check('title/notes edit on checked_in ok (unchanged type resent)', renamed.title === 'Renamed visit' && renamed.notes === 'n1', renamed);
+    check('pin on checked_in → invalid_transition', (await code(M.pinMeetingSite(m, m2.id, '28.61, 77.21', deps))) === 'invalid_transition');
 
     const m4 = await mk(r1);
     const in4 = await CI.checkIn(r1, m4.id, { ...S, accuracyM: 10 }, deps);
@@ -438,6 +451,36 @@ async function main() {
     await OC.saveOutcome(r1, m10.id, { momText: 'virtual call notes' }, deps);
     check('virtual planned → mom_logged', (await meetingRow(m10.id)).status === 'mom_logged');
     check('empty MOM → validation', (await code(OC.saveOutcome(r1, m9.id, { momText: '  ' }, deps))) === 'validation');
+    check('mom_logged: title edit → invalid_transition', (await code(M.updateMeeting(r1, m8.id, { title: 'x2' }, deps))) === 'invalid_transition');
+    check('mom_logged: notes edit ok', (await M.updateMeeting(r1, m8.id, { notes: 'after MOM' }, deps)).notes === 'after MOM');
+    check('pin virtual → validation', (await code(M.pinMeetingSite(m, m10.id, '28.61, 77.21', deps))) === 'validation');
+    check('owner change to out-of-scope user on planned → forbidden', (await code(M.updateMeeting(m, m9.id, { ownerId: U.r3 }, deps))) === 'forbidden');
+    const moved = await M.updateMeeting(m, m9.id, { ownerId: U.r2 }, deps);
+    check('owner change in scope on planned ok', moved.ownerId === U.r2, moved.ownerId);
+    const geoThrows = fake({
+      geocode: async () => {
+        throw new Error('geocoder down');
+      },
+    });
+    const gf = await M.createMeeting(r1, { title: 'ZZ geo fail', type: 'physical', startAt: hours(10), endAt: hours(10.1), address: 'Somewhere 1' }, { maps: geoThrows, now: () => fixedNow });
+    check('geocoder throw never blocks saving (failed)', gf.geocodeStatus === 'failed' && gf.lat === null, gf.geocodeStatus);
+
+    // --- pool: 12 concurrent manager edits (pool max 10) must not hang
+    const many = await Promise.all(Array.from({ length: 12 }, (_, i) => mk(r1, { title: `ZZ pool ${i}` })));
+    const race = await Promise.race([
+      Promise.allSettled(many.map((x, i) => M.updateMeeting(m, x.id, { title: `ZZ pool edited ${i}` }, deps))).then((r) => r),
+      new Promise<'timeout'>((res) => setTimeout(() => res('timeout'), 20_000)),
+    ]);
+    check(
+      '12 concurrent manager edits complete (no pool deadlock)',
+      race !== 'timeout' && race.every((x) => x.status === 'fulfilled'),
+      race === 'timeout' ? 'timeout' : race.filter((x) => x.status === 'rejected').map((x) => String((x as PromiseRejectedResult).reason)),
+    );
+    const cancels = await Promise.race([
+      Promise.allSettled(many.map((x) => M.cancelMeeting(m, x.id, 'pool', deps))),
+      new Promise<'timeout'>((res) => setTimeout(() => res('timeout'), 20_000)),
+    ]);
+    check('12 concurrent manager cancels complete', cancels !== 'timeout' && cancels.every((x) => x.status === 'fulfilled'));
 
     // --- scoping (own day: 2026-12-03 IST)
     const day3 = (h: number) => new Date(`2026-12-03T${String(h).padStart(2, '0')}:00:00+05:30`);
@@ -484,6 +527,26 @@ async function main() {
     check('garbage pin → validation', (await code(M.pinMeetingSite(m, mp.id, 'not a place', deps))) === 'validation');
     const co = await M.pinCompanySite(m, bigCo!.id, `${S.lat}, ${S.lng}`, 800, deps);
     check('pinCompanySite sets manual + radius', co.geocodeStatus === 'manual' && co.checkinRadiusM === 800, co);
+    // Company pin propagates to not-started meetings without their own manual pin.
+    const [pCo] = await db.insert(s.companies).values({ tenantId: A, name: 'ZZ Pending Co' }).returning();
+    const pa = await mk(r1, { companyId: pCo!.id });
+    const pb = await mk(r1, { companyId: pCo!.id });
+    await M.pinMeetingSite(m, pb.id, '28.61, 77.21', deps);
+    const pc = await mk(r1, { companyId: pCo!.id });
+    await CI.checkIn(r1, pc.id, { ...S, accuracyM: 5 }, deps);
+    await M.pinCompanySite(m, pCo!.id, '28.55, 77.25', undefined, deps);
+    const [ra, rb, rc] = [await meetingRow(pa.id), await meetingRow(pb.id), await meetingRow(pc.id)];
+    check(
+      'company pin moves only not-started, non-manual meetings',
+      pa.geocodeStatus === 'pending' &&
+        ra.lat === 28.55 &&
+        ra.geocodeStatus === 'manual' &&
+        rb.lat === 28.61 &&
+        rc.lat === null &&
+        rc.status === 'checked_in',
+      { a: [ra.lat, ra.geocodeStatus], b: rb.lat, c: [rc.lat, rc.status] },
+    );
+
     const mBig = await mk(r1, { companyId: bigCo!.id });
     const inBig = await CI.checkIn(r1, mBig.id, { ...north(500), accuracyM: 10 }, deps);
     check('company radius 800 overrides tenant 300', inBig.verified, inBig);

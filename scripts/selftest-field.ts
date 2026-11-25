@@ -218,6 +218,21 @@ async function main() {
     check('google geocode ZERO_RESULTS is failed', (await gz.geocode('nowhere')).status === 'failed');
     const gq = new GoogleProvider('K', async () => new Response(JSON.stringify({ status: 'OVER_QUERY_LIMIT' }), { status: 200 }));
     check('google geocode quota error is pending, not failed', (await gq.geocode('x')).status === 'pending');
+    let sawSignal = false;
+    const gs = new GoogleProvider('K', async (_u, init) => {
+      sawSignal = init?.signal instanceof AbortSignal;
+      return new Response(JSON.stringify({ status: 'ZERO_RESULTS', results: [] }), { status: 200 });
+    });
+    await gs.geocode('x');
+    check('google requests carry an abort signal (timeout)', sawSignal);
+    const ghang = new GoogleProvider('K', (_u, init) =>
+      new Promise<Response>((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new Error('aborted')))),
+    );
+    const t0h = Date.now();
+    const keepAlive = setTimeout(() => {}, 10_000); // AbortSignal.timeout's timer is unref'd
+    const hung = await ghang.geocode('slow');
+    clearTimeout(keepAlive);
+    check('google geocode times out to pending within ~4 s', hung.status === 'pending' && Date.now() - t0h < 6000, Date.now() - t0h);
 
     const e = new EstimateProvider();
     const eg = await e.geocode('Sector 62 Noida');

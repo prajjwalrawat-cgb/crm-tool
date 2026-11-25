@@ -19,7 +19,7 @@ import {
   type Tx,
 } from './internal';
 import { checkLinks } from './meetings';
-import { assertCanWrite, lockOwnedMeeting } from './scope';
+import { assertCanWrite, fieldUserScope, lockOwnedMeeting } from './scope';
 import { getFieldSettings } from './settings';
 import { assertTransition } from './state-machine';
 import { FieldError, type FieldActor, type LatLng } from './types';
@@ -77,11 +77,13 @@ export function checkIn(
     const p = validatePosition(pos);
     const override = optText(pos.overrideReason, 'Override reason', 500);
     const now = nowOf(deps);
+    assertCanWrite(actor);
+    const scope = await fieldUserScope(actor); // before the tx: no second connection under the lock
 
     // The row lock serialises double taps: the second caller re-reads
     // `checked_in` and fails assertTransition with invalid_transition.
     const res: CheckInTx = await tenantTransaction(async (tx) => {
-      const cur = await lockOwnedMeeting(tx, actor, id);
+      const cur = await lockOwnedMeeting(tx, actor, scope, id);
       assertTransition(cur.status, 'checked_in', cur.type);
       const radiusM = await effectiveRadius(tx, actor.tenantId, cur.companyId);
       const site = siteOf(cur);
@@ -194,7 +196,11 @@ export function checkOut(actor: FieldActor, id: string, pos: Position, deps?: Fi
   return asActor(actor, async () => {
     const p = validatePosition(pos);
     const now = nowOf(deps);
-    const r = await tenantTransaction(async (tx) => checkOutTx(tx, actor, await lockOwnedMeeting(tx, actor, id), p, now));
+    assertCanWrite(actor);
+    const scope = await fieldUserScope(actor);
+    const r = await tenantTransaction(async (tx) =>
+      checkOutTx(tx, actor, await lockOwnedMeeting(tx, actor, scope, id), p, now),
+    );
     return { checkin: r.checkin, verified: r.verified, distanceM: r.distanceM };
   });
 }

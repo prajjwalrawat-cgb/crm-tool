@@ -47,12 +47,16 @@ export type DayView = {
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-function validTz(tz: string): string {
+/** Spec default tenant timezone (organization_settings.timezone default). */
+const DEFAULT_TZ = 'Asia/Kolkata';
+
+function validTz(tz: string | null | undefined): string {
+  if (!tz) return DEFAULT_TZ;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
     return tz;
   } catch {
-    return 'UTC';
+    return DEFAULT_TZ;
   }
 }
 
@@ -102,7 +106,7 @@ export function getDay(
 ): Promise<DayView> {
   return asActor(actor, async () => {
     const org = await getOrgSettings(actor.tenantId);
-    const tz = validTz(org.timezone || 'UTC');
+    const tz = validTz(org.timezone);
     const { start, end } = tenantDayBounds(q.date, tz);
     const baseScope = await fieldUserScope(actor);
     const scope = narrowToOwner(baseScope, q.repId);
