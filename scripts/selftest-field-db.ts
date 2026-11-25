@@ -66,6 +66,7 @@ async function main() {
     return Object.assign(m, over);
   };
 
+  const extraTenants: string[] = [];
   try {
     check('getMapsProvider without key is estimate', getMapsProvider().name === 'estimate');
     check(
@@ -171,12 +172,14 @@ async function main() {
     check('isWithinTrackingHours honors tz (same instant, UTC)', !isWithinTrackingHours(st, ist('09:00'), 'UTC'));
 
     await meetingServiceTests();
+    await riskScanTests();
   } catch (err) {
     check('selftest ran without throwing', false, String(err instanceof Error ? err.stack : err));
   } finally {
     // Tenant delete cascades meetings/memberships/deals; meetings.owner_id has no
     // ON DELETE, so users go last.
     await db.execute(sql`DELETE FROM tenants WHERE id IN (${A}, ${B})`);
+    for (const x of extraTenants) await db.execute(sql`DELETE FROM tenants WHERE id = ${x}`);
     await db.execute(sql`DELETE FROM users WHERE id LIKE ${`zz_field_%_${stamp}`}`);
   }
 
@@ -585,6 +588,203 @@ async function main() {
       'atRiskOnly filters to at-risk meetings',
       riskOnly.reps.flatMap((r) => r.meetings).every((x) => x.risk.reasons.length > 0) && riskOnly.reps.flatMap((r) => r.meetings).length > 0,
     );
+  }
+
+  // ---------------------------------------------------------------- risk scan (Task 5)
+  async function riskScanTests() {
+    const RS = await import('../src/lib/field/risk-scan');
+    const M = await import('../src/lib/field/meetings');
+    const CI = await import('../src/lib/field/checkins');
+    const OC = await import('../src/lib/field/outcomes');
+    type FieldActor = import('../src/lib/field/types').FieldActor;
+
+    const C = await mk('rc');
+    const D = await mk('rd');
+    extraTenants.push(C, D);
+    const uid = (n: string) => `zz_field_${n}_${stamp}`;
+    const U = { cm: uid('cm'), c1: uid('c1'), c2: uid('c2'), c3: uid('c3'), c4: uid('c4'), c5: uid('c5'), c6: uid('c6'), d1: uid('d1') };
+    await db.insert(s.users).values(
+      Object.entries(U).map(([k, id]) => ({ id, email: `${id}@example.test`, firstName: k.toUpperCase(), lastName: 'Scan' })),
+    );
+    await db.insert(s.memberships).values([
+      { tenantId: C, userId: U.cm, role: 'manager' as const },
+      { tenantId: C, userId: U.c1, role: 'member' as const, reportsToUserId: U.cm },
+      { tenantId: C, userId: U.c2, role: 'member' as const, reportsToUserId: U.cm },
+      { tenantId: C, userId: U.c3, role: 'member' as const },
+      { tenantId: C, userId: U.c4, role: 'member' as const, reportsToUserId: U.cm },
+      { tenantId: C, userId: U.c5, role: 'member' as const, reportsToUserId: U.cm },
+      { tenantId: C, userId: U.c6, role: 'member' as const, reportsToUserId: U.cm },
+      { tenantId: D, userId: U.d1, role: 'member' as const },
+    ]);
+    const act = (tenantId: string, userId: string, role: FieldActor['role']): FieldActor => ({ tenantId, userId, role });
+    const N = new Date('2026-12-10T05:00:00Z'); // 10:30 IST, inside 09:00-19:00
+    const min = (n: number) => new Date(N.getTime() + n * 60_000);
+    const maps: MapsProvider = {
+      name: 'fake',
+      async geocode() {
+        return { status: 'failed' };
+      },
+      async reverseGeocode() {
+        return 'x';
+      },
+      async driveMinutes() {
+        return { minutes: 25, estimate: false };
+      },
+      async resolveShortUrl() {
+        return null;
+      },
+    };
+    const deps = { maps, now: () => N };
+    const scanDeps = { maps, now: () => N };
+    const S1 = { lat: 28.5355, lng: 77.391 };
+    const S2 = { lat: 28.6, lng: 77.2 };
+    type Ins = {
+      tenantId: string;
+      ownerId: string;
+      title: string;
+      start: number;
+      end: number;
+      site?: { lat: number; lng: number };
+      virtual?: boolean;
+      status?: 'planned' | 'checked_out';
+      checkedOutMin?: number;
+    };
+    const ins = async (x: Ins) => {
+      const [r] = await db
+        .insert(s.meetings)
+        .values({
+          tenantId: x.tenantId,
+          ownerId: x.ownerId,
+          title: x.title,
+          type: x.virtual ? 'virtual' : 'physical',
+          startAt: min(x.start),
+          endAt: min(x.end),
+          lat: x.site?.lat ?? null,
+          lng: x.site?.lng ?? null,
+          geocodeStatus: x.site ? 'ok' : 'pending',
+          status: x.status ?? 'planned',
+          checkedInAt: x.status === 'checked_out' ? min(x.start) : null,
+          checkedOutAt: x.checkedOutMin !== undefined ? min(x.checkedOutMin) : null,
+        })
+        .returning();
+      return r!;
+    };
+    const row = async (t: string, id: string) =>
+      (await inT(t, (tx) => tx.select().from(s.meetings).where(sql`${s.meetings.id} = ${id}`)))[0]!;
+    const reasons = async (t: string, id: string) => (await row(t, id)).atRiskReasons;
+    // Notifications are recipient-scoped under RLS; read them as the service role.
+    const notifsFor = async (t: string, id: string) =>
+      db
+        .select()
+        .from(s.notifications)
+        .where(sql`${s.notifications.tenantId} = ${t} AND ${s.notifications.entityId} = ${id} AND ${s.notifications.type} = 'field_meeting_at_risk'`);
+    const j = JSON.stringify;
+
+    // 1/2: acceptance: start+16 amber, exactly one notification per recipient
+    const a1 = await ins({ tenantId: C, ownerId: U.c1, title: 'ZZ Acme visit', start: -16, end: 14 });
+    const a3 = await ins({ tenantId: C, ownerId: U.c3, title: 'ZZ Solo visit', start: -16, end: 14 });
+    // 3: travel gap on the later meeting (gap 20 min, drive 25)
+    const tP = await ins({ tenantId: C, ownerId: U.c2, title: 'ZZ tp', start: 60, end: 90, site: S1 });
+    const tQ = await ins({ tenantId: C, ownerId: U.c2, title: 'ZZ tq', start: 110, end: 140, site: S2 });
+    // 4: overlap
+    const oX = await ins({ tenantId: C, ownerId: U.c4, title: 'ZZ ox', start: 180, end: 240, virtual: true });
+    const oY = await ins({ tenantId: C, ownerId: U.c4, title: 'ZZ oy', start: 210, end: 270, virtual: true });
+    // 5: check-in clears
+    const k5 = await ins({ tenantId: C, ownerId: U.c5, title: 'ZZ k5', start: -30, end: 0, site: S1 });
+    // 6: mom_missing (checked out 3 h ago, no outcome)
+    const k6 = await ins({ tenantId: C, ownerId: U.c6, title: 'ZZ k6', start: -300, end: -240, site: S1, status: 'checked_out', checkedOutMin: -180 });
+    // cross-tenant meeting in D
+    const dm = await ins({ tenantId: D, ownerId: U.d1, title: 'ZZ dm', start: -40, end: -10 });
+
+    const r1st = await RS.scanTenantRisks(C, scanDeps);
+    const r2nd = await RS.scanTenantRisks(C, scanDeps);
+    const n1 = await notifsFor(C, a1.id);
+    check(
+      'acceptance: start+16 amber and exactly one manager notification',
+      j(await reasons(C, a1.id)) === '["no_checkin"]' &&
+        n1.length === 2 &&
+        n1.filter((n) => n.recipientUserId === U.cm).length === 1 &&
+        n1.filter((n) => n.recipientUserId === U.c1).length === 1 &&
+        r2nd.notified === 0 &&
+        r1st.scanned >= 8,
+      { reasons: await reasons(C, a1.id), n1: n1.map((n) => n.recipientUserId), r1st, r2nd },
+    );
+    const n1row = n1.find((n) => n.recipientUserId === U.cm);
+    check(
+      'notification copy, entity and metadata',
+      !!n1row &&
+        n1row.title === 'No check-in: ZZ Acme visit' &&
+        n1row.subtitle === 'C1 Scan · 10:14' &&
+        n1row.entityType === 'meeting' &&
+        j(n1row.metadata) === '{"reason":"no_checkin"}' &&
+        n1row.actorUserId === null,
+      n1row,
+    );
+    const n3 = await notifsFor(C, a3.id);
+    check('rep without manager notifies only the rep', n3.length === 1 && n3[0]!.recipientUserId === U.c3, n3.map((n) => n.recipientUserId));
+    check(
+      'acceptance: 12 km / 20 min travel_gap persisted on the later meeting',
+      j(await reasons(C, tQ.id)) === '["travel_gap"]' && j(await reasons(C, tP.id)) === '[]' && (await notifsFor(C, tQ.id)).length === 2,
+      { q: await reasons(C, tQ.id), p: await reasons(C, tP.id) },
+    );
+    check('overlap flags both meetings', j(await reasons(C, oX.id)) === '["overlap"]' && j(await reasons(C, oY.id)) === '["overlap"]');
+    check('mom_missing flagged after 2h', j(await reasons(C, k6.id)) === '["mom_missing"]', await reasons(C, k6.id));
+
+    // reschedule clears overlap, no new notifications
+    const nOverlapBefore = (await notifsFor(C, oX.id)).length + (await notifsFor(C, oY.id)).length;
+    await M.updateMeeting(act(C, U.c4, 'member'), oY.id, { startAt: min(300), endAt: min(360) }, deps);
+    const rr = await RS.scanTenantRisks(C, scanDeps);
+    const nOverlapAfter = (await notifsFor(C, oX.id)).length + (await notifsFor(C, oY.id)).length;
+    check(
+      'reschedule clears overlap',
+      j(await reasons(C, oX.id)) === '[]' && j(await reasons(C, oY.id)) === '[]' && nOverlapAfter === nOverlapBefore && rr.cleared >= 2,
+      { x: await reasons(C, oX.id), y: await reasons(C, oY.id), nOverlapBefore, nOverlapAfter, rr },
+    );
+
+    // check-in clears no_checkin; clear then re-appear notifies again
+    check('k5 flagged before check-in', j(await reasons(C, k5.id)) === '["no_checkin"]', await reasons(C, k5.id));
+    const nk5a = (await notifsFor(C, k5.id)).length;
+    await CI.checkIn(act(C, U.c5, 'member'), k5.id, { ...S1, accuracyM: 5 }, deps);
+    await RS.scanTenantRisks(C, scanDeps);
+    check('flag clears after check-in', j(await reasons(C, k5.id)) === '[]', await reasons(C, k5.id));
+    await db.execute(sql`UPDATE meetings SET status = 'planned', checked_in_at = NULL WHERE id = ${k5.id}`);
+    await RS.scanTenantRisks(C, scanDeps);
+    check(
+      're-appearing flag notifies again',
+      j(await reasons(C, k5.id)) === '["no_checkin"]' && (await notifsFor(C, k5.id)).length === nk5a * 2,
+      { before: nk5a, after: (await notifsFor(C, k5.id)).length },
+    );
+
+    // mom_missing cleared by outcome
+    await OC.saveOutcome(act(C, U.c6, 'member'), k6.id, { momText: 'done' }, deps);
+    const nk6 = (await notifsFor(C, k6.id)).length;
+    await RS.scanTenantRisks(C, scanDeps);
+    check('mom_missing cleared by outcome', j(await reasons(C, k6.id)) === '[]' && (await notifsFor(C, k6.id)).length === nk6, await reasons(C, k6.id));
+
+    // cross-tenant: scanning C never touched D
+    check(
+      'cross-tenant: scanning A never touches B',
+      j(await reasons(D, dm.id)) === '[]' && (await notifsFor(D, dm.id)).length === 0,
+      await reasons(D, dm.id),
+    );
+    const rd = await RS.scanTenantRisks(D, scanDeps);
+    check(
+      'cross-tenant: scanning D flags D',
+      rd.scanned === 1 && j(await reasons(D, dm.id)) === '["no_checkin"]' && (await notifsFor(D, dm.id)).length === 1,
+      rd,
+    );
+
+    // tracking hours: 21:00 IST skipped unless ignoreHours
+    const night = { maps, now: () => new Date('2026-12-10T15:30:00Z') };
+    const rn = await RS.scanTenantRisks(C, night);
+    const rni = await RS.scanTenantRisks(C, { ...night, ignoreHours: true });
+    check('outside tracking hours skipped', rn.scanned === 0 && rn.notified === 0 && rni.scanned > 0, { rn, rni });
+
+    // tenant selection
+    const ids = await RS.tenantsWithMeetingsInWindow(N);
+    check('tenant selection includes C and D', ids.includes(C) && ids.includes(D), ids);
+    const far = await RS.tenantsWithMeetingsInWindow(new Date('2027-06-01T00:00:00Z'));
+    check('tenant selection excludes out-of-window tenants', !far.includes(C) && !far.includes(D), far);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

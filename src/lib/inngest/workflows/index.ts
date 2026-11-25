@@ -64,6 +64,7 @@ import {
   regenerateEmbedding,
   regenerateEmbeddingHandler,
 } from './regenerate-embedding';
+import { fieldRiskScan } from './field';
 import { prospectEnrich, prospectEnrichHandler, prospectMaintenanceDaily } from './prospects';
 import { notificationsRetention } from './notifications-retention';
 import { relationshipSignalsDerive } from './relationship-signals-derive';
@@ -109,6 +110,7 @@ export {
   dealHealthRecompute,
   dealRiskNightly,
   dealScoresNightly,
+  fieldRiskScan,
   forecastSnapshotWeekly,
   gmailSync,
   holdRevisitDaily,

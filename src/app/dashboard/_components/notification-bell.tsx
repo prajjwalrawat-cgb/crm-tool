@@ -57,6 +57,7 @@ const TYPE_ICON: Record<string, LucideIcon> = {
   call_missed: PhoneMissed,
   prospect_claim_assigned: UserCog,
   prospect_claim_expired: Bell,
+  field_meeting_at_risk: Bell,
 };
 
 const TYPE_TINT: Record<string, string> = {
@@ -74,6 +75,7 @@ const TYPE_TINT: Record<string, string> = {
   call_missed: 'text-rose-500',
   prospect_claim_assigned: 'text-blue-500',
   prospect_claim_expired: 'text-amber-500',
+  field_meeting_at_risk: 'text-amber-500',
 };
 
 function notificationHref(n: NotificationItem): string | null {
@@ -89,6 +91,8 @@ function notificationHref(n: NotificationItem): string | null {
       return `/dashboard/contacts`;
     case 'prospect':
       return `/dashboard/prospects?p=${n.entityId}`;
+    case 'meeting':
+      return `/dashboard/field/today`;
     case 'workflow':
       return `/dashboard/workflows`;
     default:

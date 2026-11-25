@@ -34,6 +34,8 @@ export const NOTIFICATION_TYPES = [
   'prospect_claim_assigned',
   /** Prospect Board: the recipient's claim expired and was released. */
   'prospect_claim_expired',
+  /** Field Meetings: a meeting newly flagged at risk (no check-in, tight travel, overlap, MOM missing). */
+  'field_meeting_at_risk',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
