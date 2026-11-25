@@ -329,6 +329,45 @@ CREATE TABLE IF NOT EXISTS "drive_time_cache" (
 );
 --> statement-breakpoint
 
+-- Same-tenant enforcement for meeting children: a child row's tenant_id must
+-- equal its meeting's. The composite FK sits next to the plain meeting_id FK
+-- (which stays, harmlessly). Every constraint below is added only when missing
+-- by name, so a replay on a DB that already has 0081 applies them too.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'meetings_tenant_id_id_unique' AND conrelid = '"meetings"'::regclass) THEN
+    ALTER TABLE "meetings" ADD CONSTRAINT "meetings_tenant_id_id_unique" UNIQUE ("tenant_id", "id");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'meeting_checkins_tenant_meeting_fk' AND conrelid = '"meeting_checkins"'::regclass) THEN
+    ALTER TABLE "meeting_checkins" ADD CONSTRAINT "meeting_checkins_tenant_meeting_fk"
+      FOREIGN KEY ("tenant_id", "meeting_id") REFERENCES "meetings" ("tenant_id", "id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'meeting_outcomes_tenant_meeting_fk' AND conrelid = '"meeting_outcomes"'::regclass) THEN
+    ALTER TABLE "meeting_outcomes" ADD CONSTRAINT "meeting_outcomes_tenant_meeting_fk"
+      FOREIGN KEY ("tenant_id", "meeting_id") REFERENCES "meetings" ("tenant_id", "id") ON DELETE CASCADE;
+  END IF;
+END $$;
+--> statement-breakpoint
+
+-- Sanity bounds on tenant_field_settings (guarded the same way).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_checkin_radius_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
+    ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_checkin_radius_check" CHECK ("checkin_radius_m" BETWEEN 50 AND 5000);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_grace_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
+    ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_grace_check" CHECK ("no_checkin_grace_min" BETWEEN 0 AND 120);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_mom_due_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
+    ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_mom_due_check" CHECK ("mom_due_hours" BETWEEN 1 AND 72);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_interval_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
+    ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_interval_check" CHECK ("tracking_interval_sec" BETWEEN 30 AND 3600);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_tracking_window_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
+    ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_tracking_window_check" CHECK ("tracking_start" < "tracking_end");
+  END IF;
+END $$;
+--> statement-breakpoint
+
 DO $$
 DECLARE
   t text;

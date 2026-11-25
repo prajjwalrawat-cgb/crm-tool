@@ -1,6 +1,9 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -10,6 +13,7 @@ import {
   text,
   time,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -96,6 +100,8 @@ export const meetings = pgTable(
     index('meetings_tenant_owner_start_idx').on(t.tenantId, t.ownerId, t.startAt),
     index('meetings_tenant_start_idx').on(t.tenantId, t.startAt),
     index('meetings_tenant_deal_idx').on(t.tenantId, t.dealId),
+    // Target of the composite (tenant_id, meeting_id) FKs on the child tables.
+    unique('meetings_tenant_id_id_unique').on(t.tenantId, t.id),
   ],
 );
 
@@ -130,6 +136,12 @@ export const meetingCheckins = pgTable(
       t.meetingId,
       t.capturedAt,
     ),
+    // A check-in can never belong to another tenant's meeting.
+    foreignKey({
+      name: 'meeting_checkins_tenant_meeting_fk',
+      columns: [t.tenantId, t.meetingId],
+      foreignColumns: [meetings.tenantId, meetings.id],
+    }).onDelete('cascade'),
   ],
 );
 
@@ -140,7 +152,9 @@ export type MeetingNextStep = {
 };
 
 /** One outcome (MOM) per meeting; editing replaces it. */
-export const meetingOutcomes = pgTable('meeting_outcomes', {
+export const meetingOutcomes = pgTable(
+  'meeting_outcomes',
+  {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id')
     .notNull()
@@ -165,7 +179,15 @@ export const meetingOutcomes = pgTable('meeting_outcomes', {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-});
+  },
+  (t) => [
+    foreignKey({
+      name: 'meeting_outcomes_tenant_meeting_fk',
+      columns: [t.tenantId, t.meetingId],
+      foreignColumns: [meetings.tenantId, meetings.id],
+    }).onDelete('cascade'),
+  ],
+);
 
 /** Per-user Google / Outlook link. Unused until PR 2. Tokens are encrypted (KMS_KEY). */
 export const calendarConnections = pgTable(
@@ -254,7 +276,9 @@ export const locationViewAudit = pgTable(
 );
 
 /** One row per tenant; a missing row means defaults. */
-export const tenantFieldSettings = pgTable('tenant_field_settings', {
+export const tenantFieldSettings = pgTable(
+  'tenant_field_settings',
+  {
   tenantId: uuid('tenant_id')
     .primaryKey()
     .references(() => tenants.id, { onDelete: 'cascade' }),
@@ -272,7 +296,15 @@ export const tenantFieldSettings = pgTable('tenant_field_settings', {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-});
+  },
+  (t) => [
+    check('tenant_field_settings_checkin_radius_check', sql`${t.checkinRadiusM} BETWEEN 50 AND 5000`),
+    check('tenant_field_settings_grace_check', sql`${t.noCheckinGraceMin} BETWEEN 0 AND 120`),
+    check('tenant_field_settings_mom_due_check', sql`${t.momDueHours} BETWEEN 1 AND 72`),
+    check('tenant_field_settings_interval_check', sql`${t.trackingIntervalSec} BETWEEN 30 AND 3600`),
+    check('tenant_field_settings_tracking_window_check', sql`${t.trackingStart} < ${t.trackingEnd}`),
+  ],
+);
 
 /** Geocoder responses, tenant scoped because client addresses are tenant data. */
 export const geocodeCache = pgTable(
