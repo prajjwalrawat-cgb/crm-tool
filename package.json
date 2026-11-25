@@ -36,6 +36,7 @@
     "selftest:recover-stuck-leads-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-recover-stuck-leads-db.ts",
     "selftest:lead-capture-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-lead-capture-db.ts",
     "selftest:field": "tsx scripts/selftest-field.ts",
+    "selftest:field-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-field-db.ts",
     "selftest:quotes": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes.ts",
     "selftest:quotes-pdf": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes-pdf.ts",
     "selftest:quotes-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-quotes-db.ts",

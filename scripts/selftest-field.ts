@@ -5,6 +5,8 @@ import { MEETING_TRANSITIONS, assertTransition } from '../src/lib/field/state-ma
 import { computeRisks, diffReasons, type RiskMeeting, type DriveFn } from '../src/lib/field/risk';
 import { computeKpis } from '../src/lib/field/kpis';
 import { FieldError } from '../src/lib/field/types';
+import { GoogleProvider } from '../src/lib/field/maps/google';
+import { EstimateProvider } from '../src/lib/field/maps/estimate';
 import type { MeetingStatus } from '../src/db/schema/enums';
 
 /**
@@ -179,6 +181,51 @@ async function main() {
     );
     check('kpi distinct deals', k.pipelineMinor === 15000000 && k.otherCurrencyDeals === 1, k);
     check('kpi counts', k.planned === 5 && k.checkedIn === 2 && k.atRisk === 1, k);
+  }
+
+  // ---- maps providers (no network: fetch is injected) ----
+  {
+    const urls: string[] = [];
+    const fakeFetch = async (u: string) => {
+      urls.push(u);
+      return new Response(
+        JSON.stringify({
+          status: 'OK',
+          rows: [{ elements: [{ status: 'OK', duration: { value: 600 }, duration_in_traffic: { value: 1500 } }] }],
+        }),
+        { status: 200 },
+      );
+    };
+    const g = new GoogleProvider('KEY123', fakeFetch);
+    const depart = new Date(Date.now() + 3600_000);
+    const r = await g.driveMinutes(noida, cyber, depart);
+    const unix = Math.floor(depart.getTime() / 1000);
+    check(
+      'google provider builds Distance Matrix URL with departure_time',
+      urls[0]!.includes('distancematrix') &&
+        urls[0]!.includes(`departure_time=${unix}`) &&
+        urls[0]!.includes('key=KEY123') &&
+        urls[0]!.includes('traffic_model=best_guess'),
+      urls[0],
+    );
+    check('google drive parses duration_in_traffic', r.minutes === 25 && r.estimate === false, r);
+
+    const gfail = new GoogleProvider('K', async () => new Response('x', { status: 500 }));
+    const rf = await gfail.driveMinutes(noida, cyber, depart);
+    check('google drive falls back to estimate on error', rf.estimate === true && rf.minutes > 0, rf);
+
+    const gz = new GoogleProvider('K', async () => new Response(JSON.stringify({ status: 'ZERO_RESULTS', results: [] }), { status: 200 }));
+    check('google geocode ZERO_RESULTS is failed', (await gz.geocode('nowhere')).status === 'failed');
+    const gq = new GoogleProvider('K', async () => new Response(JSON.stringify({ status: 'OVER_QUERY_LIMIT' }), { status: 200 }));
+    check('google geocode quota error is pending, not failed', (await gq.geocode('x')).status === 'pending');
+
+    const e = new EstimateProvider(async () => new Response(null, { status: 302, headers: { location: 'https://example.com/long' } }));
+    const eg = await e.geocode('Sector 62 Noida');
+    check('estimate geocode is pending, never a fake point', eg.status === 'pending' && eg.point === undefined, eg);
+    check('estimate reverseGeocode format', (await e.reverseGeocode({ lat: 28.5355, lng: 77.391 })) === '28.53550, 77.39100');
+    const ed = await e.driveMinutes(noida, cyber, depart);
+    check('estimate drive flagged estimate', ed.estimate === true && ed.minutes === estimateDriveMinutes(noida, cyber), ed);
+    check('estimate resolveShortUrl returns Location', (await e.resolveShortUrl('https://goo.gl/x')) === 'https://example.com/long');
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
