@@ -219,13 +219,31 @@ async function main() {
     const gq = new GoogleProvider('K', async () => new Response(JSON.stringify({ status: 'OVER_QUERY_LIMIT' }), { status: 200 }));
     check('google geocode quota error is pending, not failed', (await gq.geocode('x')).status === 'pending');
 
-    const e = new EstimateProvider(async () => new Response(null, { status: 302, headers: { location: 'https://example.com/long' } }));
+    const e = new EstimateProvider();
     const eg = await e.geocode('Sector 62 Noida');
     check('estimate geocode is pending, never a fake point', eg.status === 'pending' && eg.point === undefined, eg);
     check('estimate reverseGeocode format', (await e.reverseGeocode({ lat: 28.5355, lng: 77.391 })) === '28.53550, 77.39100');
     const ed = await e.driveMinutes(noida, cyber, depart);
     check('estimate drive flagged estimate', ed.estimate === true && ed.minutes === estimateDriveMinutes(noida, cyber), ed);
-    check('estimate resolveShortUrl returns Location', (await e.resolveShortUrl('https://goo.gl/x')) === 'https://example.com/long');
+    {
+      let calls = 0;
+      const mk = (status: number, location?: string) =>
+        new EstimateProvider(async () => {
+          calls++;
+          return new Response(null, { status, headers: location ? { location } : {} });
+        });
+      const good = 'https://www.google.com/maps/place/Noida/@28.5,77.3,15z';
+      for (const bad of ['http://127.0.0.1/x', 'https://example.com/x', 'http://goo.gl/x', 'https://169.254.169.254/maps', 'not a url']) {
+        check(`resolveShortUrl rejects ${bad} without fetching`, (await mk(302, good).resolveShortUrl(bad)) === null && calls === 0, calls);
+      }
+      check('resolveShortUrl 200 returns null', (await mk(200, good).resolveShortUrl('https://goo.gl/x')) === null);
+      check('resolveShortUrl non-Google Location returns null', (await mk(302, 'https://evil.example.com/maps').resolveShortUrl('https://goo.gl/x')) === null);
+      check('resolveShortUrl http Location returns null', (await mk(302, 'http://www.google.com/maps/x').resolveShortUrl('https://goo.gl/x')) === null);
+      check('resolveShortUrl goo.gl -> google maps returns Location', (await mk(302, good).resolveShortUrl('https://goo.gl/x')) === good);
+      check('resolveShortUrl maps.app.goo.gl ok', (await mk(301, good).resolveShortUrl('https://maps.app.goo.gl/abc')) === good);
+      check('resolveShortUrl google.com/maps input ok', (await mk(302, good).resolveShortUrl('https://www.google.com/maps/x')) === good);
+      check('resolveShortUrl google.com non-maps path rejected', (await mk(302, good).resolveShortUrl('https://www.google.com/search')) === null);
+    }
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
