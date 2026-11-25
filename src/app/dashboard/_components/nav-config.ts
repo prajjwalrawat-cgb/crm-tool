@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   LineChart,
   MapPinned,
+  Route,
   PieChart,
   Radar,
   Settings as SettingsIcon,
@@ -92,6 +93,7 @@ const ADMIN_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/field/today', label: 'Field day', icon: Route },
       { href: '/dashboard/field/my-day', label: 'My day', icon: MapPinned },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },
@@ -171,6 +173,7 @@ const MANAGER_NAV: readonly NavGroup[] = [
     items: [
       { href: '/dashboard/prospects', label: 'Prospect board', icon: ClipboardList },
       { href: '/dashboard/deals/board', label: 'Pipeline', icon: GitBranch },
+      { href: '/dashboard/field/today', label: 'Field day', icon: Route },
       { href: '/dashboard/field/my-day', label: 'My day', icon: MapPinned },
       { href: '/dashboard/suggestions', label: 'AI suggestions', icon: Sparkles, badge: 'suggestions' },
       { href: '/dashboard/deals', label: 'Deals', icon: Briefcase },

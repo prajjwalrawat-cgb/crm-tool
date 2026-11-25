@@ -21,6 +21,7 @@ import type { MeetingStatus } from '../src/db/schema/enums';
 import { formatTimeInTz, isoToZonedInput, isValidDate, shiftDate, todayInTz, zonedInputToIso } from '../src/app/dashboard/field/_lib/datetime';
 import { directionsUrl } from '../src/app/dashboard/field/_lib/maps-link';
 import { geoErrorMessage, isLowAccuracy } from '../src/app/dashboard/field/_lib/geolocate';
+import { blockColor, blockGeometry, layoutLane, type LaneItem } from '../src/app/dashboard/field/_lib/timeline';
 
 /**
  * Pure self-test for the Field Meetings core (no DB).
@@ -357,6 +358,74 @@ async function main() {
     check('geoErrorMessage unavailable', geoErrorMessage(2).includes('could not find your location'));
     check('geoErrorMessage timeout', geoErrorMessage(3).includes('took too long'));
     check('isLowAccuracy 101', isLowAccuracy(101) && !isLowAccuracy(100) && !isLowAccuracy(12));
+  }
+
+
+  // Manager board timeline (Field day): geometry in tenant tz, colours, lane stacking, travel connectors.
+  {
+    const ist = (hhmm: string) => new Date(`2026-11-25T${hhmm}:00+05:30`);
+    const g1 = blockGeometry(ist('09:00'), ist('10:00'), 'Asia/Kolkata');
+    check('blockGeometry 09:00-10:00 -> left 0 width 10', g1.leftPct === 0 && g1.widthPct === 10 && !g1.clippedStart && !g1.clippedEnd, g1);
+    const g2 = blockGeometry(ist('08:00'), ist('09:30'), 'Asia/Kolkata');
+    check('blockGeometry 08:00-09:30 -> clippedStart width 5', g2.leftPct === 0 && g2.widthPct === 5 && g2.clippedStart && !g2.clippedEnd, g2);
+    const g3 = blockGeometry(ist('14:00'), ist('15:30'), 'Asia/Kolkata');
+    check('blockGeometry 14:00-15:30 -> left 50 width 15', g3.leftPct === 50 && g3.widthPct === 15, g3);
+    const g4 = blockGeometry(ist('18:30'), ist('20:00'), 'Asia/Kolkata');
+    check('blockGeometry 18:30-20:00 -> clippedEnd', g4.leftPct === 95 && g4.widthPct === 5 && g4.clippedEnd && !g4.clippedStart, g4);
+    const g5 = blockGeometry(ist('07:00'), ist('08:00'), 'Asia/Kolkata');
+    check('blockGeometry entirely before -> at left edge, clipped', g5.leftPct === 0 && g5.widthPct === 0 && g5.clippedStart, g5);
+    const g6 = blockGeometry(ist('20:00'), ist('21:00'), 'Asia/Kolkata');
+    check('blockGeometry entirely after -> at right edge, clipped', g6.leftPct === 100 && g6.widthPct === 0 && g6.clippedEnd, g6);
+    const g7 = blockGeometry(ist('18:00'), new Date('2026-11-25T19:30:00Z'), 'Asia/Kolkata');
+    check('blockGeometry past midnight end stays clipped (not wrapped)', g7.leftPct === 90 && g7.widthPct === 10 && g7.clippedEnd, g7);
+    const g8 = blockGeometry(new Date('2026-11-25T09:00:00Z'), new Date('2026-11-25T10:00:00Z'), 'UTC');
+    check('blockGeometry uses the given tz', g8.leftPct === 0 && g8.widthPct === 10, g8);
+    const g9 = blockGeometry(ist('09:00'), ist('10:00'), 'Asia/Kolkata', 8, 18);
+    check('blockGeometry custom day window', g9.leftPct === 10 && g9.widthPct === 10, g9);
+    const g10 = blockGeometry(ist('09:00').toISOString(), ist('10:00').toISOString(), 'Asia/Kolkata');
+    check('blockGeometry accepts ISO strings', g10.leftPct === 0 && g10.widthPct === 10, g10);
+
+    const noRisk = { reasons: [] as Array<'no_checkin' | 'travel_gap' | 'overlap' | 'mom_missing'>, travelGapMin: null, estDriveMin: null, estimate: false };
+    const atRisk = { ...noRisk, reasons: ['overlap' as const] };
+    check('blockColor planned', blockColor({ status: 'planned', risk: noRisk }) === 'planned');
+    check('blockColor en_route / checked_out -> planned', blockColor({ status: 'en_route', risk: noRisk }) === 'planned' && blockColor({ status: 'checked_out', risk: noRisk }) === 'planned');
+    check('blockColor arrived / checked_in -> onsite', blockColor({ status: 'arrived', risk: noRisk }) === 'onsite' && blockColor({ status: 'checked_in', risk: noRisk }) === 'onsite');
+    check('blockColor mom_logged -> done', blockColor({ status: 'mom_logged', risk: noRisk }) === 'done');
+    check('blockColor at risk wins over planned / onsite / done', (['planned', 'checked_in', 'mom_logged'] as const).every((s) => blockColor({ status: s, risk: atRisk }) === 'atrisk'));
+
+    const item = (id: string, from: string, to: string, extra: Partial<LaneItem> = {}): LaneItem => ({
+      id,
+      type: 'physical',
+      status: 'planned',
+      startAt: ist(from),
+      endAt: ist(to),
+      lat: 28.5,
+      lng: 77.3,
+      risk: noRisk,
+      ...extra,
+    });
+    const lane = layoutLane([
+      item('c', '11:00', '12:00', { risk: { reasons: ['travel_gap'], travelGapMin: 15, estDriveMin: 40, estimate: true } }),
+      item('a', '09:00', '10:00'),
+      item('b', '09:30', '10:30', { type: 'virtual', lat: null, lng: null }),
+      item('x', '09:15', '09:45', { status: 'cancelled' }),
+      item('d', '12:00', '13:00', { risk: { reasons: [], travelGapMin: 0, estDriveMin: 5, estimate: false } }),
+    ], 'Asia/Kolkata');
+    const row = (id: string) => lane.blocks.find((b) => b.meeting.id === id);
+    check('layoutLane hides cancelled', !row('x') && lane.blocks.length === 4, lane.blocks.map((b) => b.meeting.id));
+    check('layoutLane sorts by start', lane.blocks.map((b) => b.meeting.id).join() === 'a,b,c,d');
+    check('layoutLane stacks an overlap in a second row', row('a')?.row === 0 && row('b')?.row === 1 && lane.rows === 2, lane.blocks.map((b) => [b.meeting.id, b.row]));
+    check('layoutLane back-to-back stays in row 0', row('c')?.row === 0 && row('d')?.row === 0);
+    check('layoutLane flags overlapping blocks only', row('a')?.overlaps === true && row('b')?.overlaps === true && row('c')?.overlaps === false && row('d')?.overlaps === false);
+    check('layoutLane connectors join consecutive physical sited blocks', lane.connectors.map((c) => `${c.fromId}>${c.toId}`).join() === 'a>c,c>d', lane.connectors);
+    const ac = lane.connectors[0]!;
+    check('layoutLane connector carries drive minutes, est. and travel_gap', ac.minutes === 40 && ac.estimate && ac.tight, ac);
+    const cd = lane.connectors[1]!;
+    check('layoutLane connector without gap is not tight', cd.minutes === 5 && !cd.estimate && !cd.tight, cd);
+    check('layoutLane connector geometry spans prev end -> next start', ac.leftPct === 10 && ac.widthPct === 10 && cd.widthPct === 0, [ac.leftPct, ac.widthPct, cd.widthPct]);
+    const three = layoutLane([item('p', '09:00', '12:00'), item('q', '10:00', '11:00'), item('r', '11:00', '13:00')], 'Asia/Kolkata');
+    check('layoutLane reuses the first free row', three.blocks.map((b) => b.row).join() === '0,1,1' && three.rows === 2, three.blocks.map((b) => b.row));
+    check('layoutLane empty', layoutLane([], 'UTC').rows === 1 && layoutLane([], 'UTC').blocks.length === 0);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
