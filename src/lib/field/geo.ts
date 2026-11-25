@@ -25,10 +25,16 @@ function validPoint(lat: number, lng: number): LatLng | null {
 
 const NUM = '(-?\\d{1,3}(?:\\.\\d+)?)';
 const PAIR = `${NUM}\\s*,\\s*${NUM}`;
+/** In a query string the comma may arrive encoded (%2C). */
+const QPAIR = `${NUM}\\s*(?:,|%2C)\\s*${NUM}`;
+/** First match wins, so the place beats the map camera. */
 const PATTERNS = [
+  // /place/ URLs: "!3d<lat>!4d<lng>" in the data blob is the place itself...
+  new RegExp(`!3d${NUM}!4d${NUM}`),
+  // ...while "@lat,lng" is only where the camera is.
   new RegExp(`@${PAIR}`),
-  new RegExp(`[?&]q=${PAIR}`),
-  new RegExp(`[?&]query=${PAIR}`),
+  new RegExp(`[?&]q=${QPAIR}`, 'i'),
+  new RegExp(`[?&]query=${QPAIR}`, 'i'),
   new RegExp(`^\\s*${PAIR}\\s*$`),
 ];
 
@@ -37,7 +43,11 @@ export function parseSiteInput(
 ): { kind: 'point'; point: LatLng } | { kind: 'short_url'; url: string } | null {
   const s = input.trim();
   if (!s) return null;
-  if (/^https?:\/\/(maps\.app\.goo\.gl\/|goo\.gl\/maps)/i.test(s)) return { kind: 'short_url', url: s };
+  // Short links are resolved over https only: an http:// paste is upgraded here, and the
+  // resolver's allowlist (https, known hosts) stays strict.
+  if (/^https?:\/\/(maps\.app\.goo\.gl\/|goo\.gl\/maps)/i.test(s)) {
+    return { kind: 'short_url', url: s.replace(/^http:/i, 'https:') };
+  }
   for (const re of PATTERNS) {
     const m = re.exec(s);
     if (!m) continue;

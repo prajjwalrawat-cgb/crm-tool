@@ -24,10 +24,29 @@ export type PreGeocode = { address: string; result: GeocodeResult; store: boolea
 const companyHasPoint = (c: Company | null): c is Company & { lat: number; lng: number } =>
   !!c && c.lat !== null && c.lng !== null;
 
+type CompanyAddress = Pick<Company, 'address' | 'city' | 'state' | 'postalCode'>;
+
+/**
+ * The single line sent to the geocoder for a company, and the address a meeting
+ * inherits from it: street, city, state, postal code. Null when all are blank.
+ */
+export function companyGeocodeLine(c: CompanyAddress | null | undefined): string | null {
+  if (!c) return null;
+  const line = [c.address, c.city, c.state, c.postalCode]
+    .map((p) => p?.trim())
+    .filter(Boolean)
+    .join(', ');
+  return line || null;
+}
+
+/** The meeting's address is the company's own (full line, or the street line older rows carry). */
+const isCompanyAddress = (addr: string | null, c: Company) =>
+  addr === null || addr === companyGeocodeLine(c) || addr === c.address;
+
 /** The address siteFor would geocode, or null when it copies the company site or has no address. */
 export function geocodeTarget(address: string | null, company: Company | null): string | null {
-  const addr = address ?? company?.address ?? null;
-  if (companyHasPoint(company) && (addr === null || addr === company.address)) return null;
+  const addr = address ?? companyGeocodeLine(company);
+  if (companyHasPoint(company) && isCompanyAddress(addr, company)) return null;
   return addr || null;
 }
 
@@ -68,8 +87,8 @@ export async function siteFor(
   providerName: string,
   now: () => Date,
 ): Promise<Site> {
-  const addr = address ?? company?.address ?? null;
-  if (companyHasPoint(company) && (addr === null || addr === company.address)) {
+  const addr = address ?? companyGeocodeLine(company);
+  if (companyHasPoint(company) && isCompanyAddress(addr, company)) {
     return { address: addr, lat: company.lat, lng: company.lng, geocodeStatus: company.geocodeStatus ?? 'ok' };
   }
   if (!addr) return { address: null, lat: null, lng: null, geocodeStatus: 'pending' };

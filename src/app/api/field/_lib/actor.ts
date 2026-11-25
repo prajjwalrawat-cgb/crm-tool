@@ -17,12 +17,13 @@ setFieldErrorReporter((err) => captureError(err, { category: 'field.route_failed
  * JSON payload (200) or a ready Response; thrown errors are mapped.
  */
 export async function withFieldActor(fn: (actor: FieldActor) => Promise<unknown>): Promise<Response> {
-  const { userId } = await auth();
-  if (!userId) return errorBody('Sign in again to continue.', 401);
-  const tenant = await getCurrentTenant();
-  if (!tenant) return errorBody('Choose a workspace first.', 401);
-
   try {
+    // Inside the try: an auth or tenant lookup failure maps to the JSON 500 and is reported.
+    const { userId } = await auth();
+    if (!userId) return errorBody('Sign in again to continue.', 401);
+    const tenant = await getCurrentTenant();
+    if (!tenant) return errorBody('Choose a workspace first.', 401);
+
     return await runWithTenantContext({ tenantId: tenant.id, userId }, async () => {
       const membership = await getCurrentMembership();
       if (!membership || membership.status !== 'active') return errorBody('You do not have permission.', 403);

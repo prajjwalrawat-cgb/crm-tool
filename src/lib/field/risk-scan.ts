@@ -59,6 +59,15 @@ function localHm(at: Date, tz: string): string {
  * Cheap superset of the tenants worth scanning: any non-cancelled meeting starting in
  * [now - 48 h, now + 24 h]. Runs outside RLS (ids only); each tenant is then scanned
  * under its own system context.
+ *
+ * RLS assumption: `meetings` is FORCE ROW LEVEL SECURITY, and this query uses the raw
+ * `db` with no tenant context and no `SET LOCAL ROLE app_user`. It sees every tenant
+ * only because the connection role bypasses RLS (superuser / BYPASSRLS, as on
+ * Supabase's `postgres`). That is the same assumption migration 0004
+ * (0004_rls_enforcement_role.sql: policies only bite once a transaction drops to
+ * app_user) and the 0045 backfill comment ("runs as the migration role (BYPASSRLS)")
+ * rely on. If the app ever connects as a non-bypass role, this returns no tenants and
+ * the scan silently does nothing: move it to a SECURITY DEFINER function then.
  */
 export async function tenantsWithMeetingsInWindow(now: Date): Promise<string[]> {
   const rows = await db

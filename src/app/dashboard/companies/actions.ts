@@ -25,8 +25,8 @@ import {
 } from '@/lib/db-context';
 import { getMapsProvider } from '@/lib/field/maps';
 import { geocodeStore } from '@/lib/field/maps/cached';
-import { pinCompanySite } from '@/lib/field/meetings';
-import { fetchPre, lookupPre } from '@/lib/field/site';
+import { pinCompanySite, propagateCompanyPoint } from '@/lib/field/meetings';
+import { companyGeocodeLine, fetchPre, lookupPre } from '@/lib/field/site';
 import { FieldError } from '@/lib/field/types';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { can } from '@/lib/rbac';
@@ -181,12 +181,6 @@ export async function createCompanyAction(
 const ADDRESS_FIELDS = ['address', 'city', 'state', 'postalCode'] as const;
 type AddressField = (typeof ADDRESS_FIELDS)[number];
 
-/** The single line sent to the geocoder: street, city, state, postal code. */
-function geocodeLine(a: Record<AddressField, string | null>): string | null {
-  const line = [a.address, a.city, a.state, a.postalCode].filter((p) => p && p.trim()).join(', ');
-  return line || null;
-}
-
 export async function updateCompanyAction(
   formData: FormData,
 ): Promise<UpdateCompanyResult> {
@@ -289,9 +283,11 @@ export async function updateCompanyAction(
         const changed = ADDRESS_FIELDS.some((f) => addressIn[f] !== undefined && addressIn[f] !== cur[f]);
         // Re-locate on an address change, and retry companies that still have no point
         // (e.g. saved before a MAPS_API_KEY existed). Manual pins are never overwritten.
-        const regeocode = cur.geocodeStatus !== 'manual' && (changed || (cur.lat === null && geocodeLine(next) !== null));
-        const target = regeocode ? geocodeLine(next) : null;
-        return { next, regeocode, target, cached: await lookupPre(tx, tenant.id, target) };
+        const regeocode = cur.geocodeStatus !== 'manual' && (changed || (cur.lat === null && companyGeocodeLine(next) !== null));
+        const target = regeocode ? companyGeocodeLine(next) : null;
+        // Addresses that company meetings may carry when they inherited it (old line, old street).
+        const prevAddresses = [companyGeocodeLine(cur), cur.address];
+        return { next, regeocode, target, prevAddresses, cached: await lookupPre(tx, tenant.id, target) };
       });
       if (!plan) return { ok: false, message: 'Company not found in this tenant.' };
       const pre = await fetchPre(plan.target, plan.cached, maps);
@@ -331,6 +327,16 @@ export async function updateCompanyAction(
           )
           .returning();
         if (!row) return null;
+        // A fresh (non-manual) point reaches the company's not-started meetings that have no site yet.
+        if (plan.regeocode && row.lat !== null && row.lng !== null && row.geocodeStatus === 'ok') {
+          await propagateCompanyPoint(
+            tx,
+            tenant.id,
+            { ...row, lat: row.lat, lng: row.lng },
+            [...plan.prevAddresses, companyGeocodeLine(row), row.address],
+            new Date(),
+          );
+        }
         await recordActivity(tx, {
           tenantId: tenant.id,
           actorUserId: membership.userId,

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import { companies, contacts, deals, meetings, type Company, type Meeting, type NewMeeting } from '@/db/schema';
 import type { MeetingStatus } from '@/db/schema/enums';
@@ -29,7 +29,16 @@ import {
   lockOwnedMeeting,
   readMeeting,
 } from './scope';
-import { fetchPre, geocodeTarget, lookupPre, resolvePin, siteFor, type PreGeocode, type Site } from './site';
+import {
+  companyGeocodeLine,
+  fetchPre,
+  geocodeTarget,
+  lookupPre,
+  resolvePin,
+  siteFor,
+  type PreGeocode,
+  type Site,
+} from './site';
 import { assertTransition } from './state-machine';
 import { FieldError, type FieldActor } from './types';
 
@@ -186,8 +195,12 @@ const PRE_VISIT = new Set<MeetingStatus>(['planned', 'en_route']);
 type UpdatePlan = {
   set: Partial<NewMeeting>;
   ownerChange: string | null;
-  /** Re-site from this address (null = the company's) and company. */
-  resite: { address: string | null; companyId: string | null } | null;
+  /**
+   * Re-site from this address and company. address null = the company's;
+   * undefined = keep the meeting's own address, or follow the company when the
+   * current address was inherited from the old one (see resiteInput).
+   */
+  resite: { address: string | null | undefined; companyId: string | null } | null;
 };
 
 /**
@@ -278,10 +291,30 @@ function buildUpdate(cur: Meeting, patch: Partial<CreateMeetingInput>): UpdatePl
     // A manual pin (or a virtual meeting) keeps its coordinates; only the label changes.
     if (sitable) resite = { address, companyId: set.companyId !== undefined ? set.companyId : cur.companyId };
     else set.address = address;
-  } else if (set.companyId && sitable) {
-    resite = { address: null, companyId: set.companyId };
+  } else if (sitable && (set.companyId !== undefined || set.type === 'physical')) {
+    // Company changed or cleared, or the meeting became physical: re-site from the
+    // (new) company or the meeting's own address. Never keep the old company's point.
+    resite = { address: undefined, companyId: set.companyId !== undefined ? set.companyId : cur.companyId };
   }
   return { set, ownerChange, resite };
+}
+
+/**
+ * The address and company to re-site from. With no explicit address, a meeting whose
+ * address was inherited from its old company (blank, or that company's line) follows
+ * the new company (none when the link was cleared); its own address is kept and geocoded.
+ */
+async function resiteInput(
+  tx: Tx,
+  tenantId: string,
+  cur: Meeting,
+  resite: NonNullable<UpdatePlan['resite']>,
+): Promise<{ address: string | null; company: Company | null }> {
+  const company = await loadCompany(tx, tenantId, resite.companyId);
+  if (resite.address !== undefined) return { address: resite.address, company };
+  const old = cur.companyId === resite.companyId ? company : await loadCompany(tx, tenantId, cur.companyId);
+  const inherited = !cur.address || (!!old && (cur.address === companyGeocodeLine(old) || cur.address === old.address));
+  return { address: inherited ? null : cur.address, company };
 }
 
 export function updateMeeting(
@@ -302,7 +335,8 @@ export function updateMeeting(
       if (!canSeeOwner(actor, scope, cur.ownerId)) throw new FieldError('not_found', 'Meeting not found');
       const { resite } = buildUpdate(cur, patch);
       if (!resite) return { target: null, cached: null };
-      const target = geocodeTarget(resite.address, await loadCompany(tx, actor.tenantId, resite.companyId));
+      const input = await resiteInput(tx, actor.tenantId, cur, resite);
+      const target = geocodeTarget(input.address, input.company);
       return { target, cached: await lookupPre(tx, actor.tenantId, target) };
     });
     const pre = await fetchPre(plan.target, plan.cached, maps);
@@ -314,8 +348,8 @@ export function updateMeeting(
       // Only links being changed are validated; an untouched link never blocks an edit.
       await checkLinks(tx, actor.tenantId, { dealId: set.dealId, contactId: set.contactId, companyId: set.companyId });
       if (resite) {
-        const company = await loadCompany(tx, actor.tenantId, resite.companyId);
-        Object.assign(set, await siteFor(tx, actor.tenantId, resite.address, company, pre, maps.name, now));
+        const input = await resiteInput(tx, actor.tenantId, cur, resite);
+        Object.assign(set, await siteFor(tx, actor.tenantId, input.address, input.company, pre, maps.name, now));
       }
       if (Object.keys(set).length === 0) return cur;
       const [row] = await setMeeting(tx, cur, { ...set, updatedAt: now() });
@@ -390,6 +424,49 @@ export function pinMeetingSite(actor: FieldActor, id: string, input: string, dep
 }
 
 /**
+ * A company's address re-geocode succeeded (non-manual): give its new point to its
+ * not-started physical meetings that still have no site, no manual pin, and whose
+ * address is the company's (blank, or one of `companyAddresses`, old or new). A
+ * meeting with its own, different address keeps waiting for its own geocode.
+ * Runs inside the caller's write transaction; no network.
+ */
+export async function propagateCompanyPoint(
+  tx: Tx,
+  tenantId: string,
+  company: Company & { lat: number; lng: number },
+  companyAddresses: Array<string | null>,
+  now: Date,
+): Promise<number> {
+  const known = [...new Set(companyAddresses.filter((a): a is string => !!a))];
+  const inherited = known.length
+    ? sql`(${meetings.address} IS NULL OR ${meetings.address} = '' OR ${inArray(meetings.address, known)})`
+    : sql`(${meetings.address} IS NULL OR ${meetings.address} = '')`;
+  const moved = await tx
+    .update(meetings)
+    .set({
+      lat: company.lat,
+      lng: company.lng,
+      geocodeStatus: 'ok',
+      address: companyGeocodeLine(company),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(meetings.tenantId, tenantId),
+        eq(meetings.companyId, company.id),
+        eq(meetings.type, 'physical'),
+        inArray(meetings.status, [...PINNABLE]),
+        isNull(meetings.lat),
+        ne(meetings.geocodeStatus, 'manual'),
+        inherited,
+      ),
+    )
+    .returning({ id: meetings.id, tenantId: meetings.tenantId, ownerId: meetings.ownerId });
+  for (const m of moved) await publishMeetingUpdated(tx, m);
+  return moved.length;
+}
+
+/**
  * Pin a company site; `radiusM` undefined keeps the override, null clears it.
  * The pin also moves that company's physical meetings that have not started
  * (planned / en_route / arrived), except meetings with their own manual pin.
@@ -432,7 +509,7 @@ export function pinCompanySite(
           lat: point.lat,
           lng: point.lng,
           geocodeStatus: 'manual',
-          address: sql`COALESCE(NULLIF(${meetings.address}, ''), ${row.address}::text)`,
+          address: sql`COALESCE(NULLIF(${meetings.address}, ''), ${companyGeocodeLine(row)}::text)`,
           updatedAt: now,
         })
         .where(

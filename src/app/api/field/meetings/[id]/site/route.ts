@@ -7,7 +7,11 @@ import { pinMeetingSite } from '@/lib/field/meetings';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** POST /api/field/meetings/:id/site - {input} (address, lat,lng or maps link). 200 Meeting. */
+/**
+ * POST /api/field/meetings/:id/site - {input}: a Google Maps link (short links resolved
+ * server-side) or "lat, lng". Addresses are not accepted here (edit the meeting address
+ * instead). 200 Meeting; 400 validation when the input is not a pin.
+ */
 export function POST(req: NextRequest, ctx: IdCtx): Promise<Response> {
   return withFieldActor(async (actor) => {
     const id = parseMeetingId((await ctx.params).id);

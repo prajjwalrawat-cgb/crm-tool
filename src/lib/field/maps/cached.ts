@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { driveTimeCache, geocodeCache } from '@/db/schema';
 import type { DbExecutor } from '@/lib/db-context';
 import type { LatLng } from '../types';
@@ -74,6 +74,77 @@ export async function geocodeCached(
   return res;
 }
 
+const bucketOf = (departAt: Date) => new Date(Math.floor(departAt.getTime() / TTL_MS) * TTL_MS);
+
+/** Cache key of one drive lookup (4-decimal points, 30-minute departure bucket). */
+export function driveKey(a: LatLng, b: LatLng, departAt: Date): string {
+  return `${key(a)}|${key(b)}|${bucketOf(departAt).toISOString()}`;
+}
+
+export type DrivePair = { a: LatLng; b: LatLng; departAt: Date };
+
+/**
+ * Fresh (within the TTL) cached minutes for each pair, keyed by `driveKey`.
+ * One query for the whole batch; misses are absent from the map.
+ */
+export async function driveLookupMany(
+  tx: DbExecutor,
+  tenantId: string,
+  pairs: DrivePair[],
+  opts: Opts = {},
+): Promise<Map<string, DriveResult>> {
+  const out = new Map<string, DriveResult>();
+  if (pairs.length === 0) return out;
+  const now = (opts.now ?? (() => new Date()))();
+  const origins = [...new Set(pairs.map((p) => key(p.a)))];
+  const dests = [...new Set(pairs.map((p) => key(p.b)))];
+  const buckets = [...new Set(pairs.map((p) => bucketOf(p.departAt).getTime()))].map((t) => new Date(t));
+  const rows = await tx
+    .select()
+    .from(driveTimeCache)
+    .where(
+      and(
+        eq(driveTimeCache.tenantId, tenantId),
+        inArray(driveTimeCache.originKey, origins),
+        inArray(driveTimeCache.destKey, dests),
+        inArray(driveTimeCache.departBucket, buckets),
+      ),
+    );
+  const wanted = new Set(pairs.map((p) => driveKey(p.a, p.b, p.departAt)));
+  for (const r of rows) {
+    const k = `${r.originKey}|${r.destKey}|${r.departBucket.toISOString()}`;
+    if (wanted.has(k) && now.getTime() - r.fetchedAt.getTime() <= TTL_MS) out.set(k, { minutes: r.minutes, estimate: false });
+  }
+  return out;
+}
+
+/** Store a provider answer. Estimates are never stored: they must not mask a later real key. */
+export async function driveStore(
+  tx: DbExecutor,
+  tenantId: string,
+  pair: DrivePair,
+  res: DriveResult,
+  providerName: string,
+  opts: Opts = {},
+): Promise<void> {
+  if (res.estimate) return;
+  const now = (opts.now ?? (() => new Date()))();
+  const set = { minutes: res.minutes, provider: providerName, fetchedAt: now };
+  await tx
+    .insert(driveTimeCache)
+    .values({ tenantId, originKey: key(pair.a), destKey: key(pair.b), departBucket: bucketOf(pair.departAt), ...set })
+    .onConflictDoUpdate({
+      target: [driveTimeCache.tenantId, driveTimeCache.originKey, driveTimeCache.destKey, driveTimeCache.departBucket],
+      set,
+    });
+}
+
+/**
+ * Cache read, provider call and cache write on one executor. The provider call
+ * runs while `tx` is open, so the caller's transaction must be short and hold no
+ * locks (the risk scan opens one per lookup). getDay uses the batch helpers above
+ * and calls the provider with no transaction open.
+ */
 export async function driveMinutesCached(
   tx: DbExecutor,
   tenantId: string,
@@ -83,34 +154,10 @@ export async function driveMinutesCached(
   maps: MapsProvider,
   opts: Opts = {},
 ): Promise<DriveResult> {
-  const now = (opts.now ?? (() => new Date()))();
-  const bucket = new Date(Math.floor(departAt.getTime() / TTL_MS) * TTL_MS);
-  const originKey = key(a);
-  const destKey = key(b);
-  const [hit] = await tx
-    .select()
-    .from(driveTimeCache)
-    .where(
-      and(
-        eq(driveTimeCache.tenantId, tenantId),
-        eq(driveTimeCache.originKey, originKey),
-        eq(driveTimeCache.destKey, destKey),
-        eq(driveTimeCache.departBucket, bucket),
-      ),
-    )
-    .limit(1);
-  if (hit && now.getTime() - hit.fetchedAt.getTime() <= TTL_MS) {
-    return { minutes: hit.minutes, estimate: false };
-  }
+  const pair = { a, b, departAt };
+  const hit = (await driveLookupMany(tx, tenantId, [pair], opts)).get(driveKey(a, b, departAt));
+  if (hit) return hit;
   const res = await maps.driveMinutes(a, b, departAt);
-  if (res.estimate) return res; // estimator is cheap and must not mask a later real key
-  const set = { minutes: res.minutes, provider: maps.name, fetchedAt: now };
-  await tx
-    .insert(driveTimeCache)
-    .values({ tenantId, originKey, destKey, departBucket: bucket, ...set })
-    .onConflictDoUpdate({
-      target: [driveTimeCache.tenantId, driveTimeCache.originKey, driveTimeCache.destKey, driveTimeCache.departBucket],
-      set,
-    });
+  await driveStore(tx, tenantId, pair, res, maps.name, opts);
   return res;
 }

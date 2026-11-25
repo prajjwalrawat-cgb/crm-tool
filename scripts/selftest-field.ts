@@ -22,6 +22,7 @@ import { formatTimeInTz, isoToZonedInput, isValidDate, shiftDate, todayInTz, zon
 import { directionsUrl } from '../src/app/dashboard/field/_lib/maps-link';
 import { geoErrorMessage, isLowAccuracy } from '../src/app/dashboard/field/_lib/geolocate';
 import { MIN_BLOCK_PCT, blockColor, blockGeometry, layoutLane, type LaneItem } from '../src/app/dashboard/field/_lib/timeline';
+import { canCancelMeeting, canEditMeeting, editErrorText, editGates, meetingPatch, type MeetingFormValues } from '../src/app/dashboard/field/_lib/meeting-edit';
 
 /**
  * Pure self-test for the Field Meetings core (no DB).
@@ -63,6 +64,15 @@ const north = (m: number) => ({ lat: noida.lat + m / 111195, lng: noida.lng });
   const s = parseSiteInput('https://maps.app.goo.gl/abc');
   check('parse short url', s?.kind === 'short_url' && s.url === 'https://maps.app.goo.gl/abc', s);
   check('parse goo.gl/maps short url', parseSiteInput('https://goo.gl/maps/xyz')?.kind === 'short_url');
+  const h = parseSiteInput('http://maps.app.goo.gl/abc');
+  check('parse http short url upgraded to https', h?.kind === 'short_url' && h.url === 'https://maps.app.goo.gl/abc', h);
+  const place = parseSiteInput(
+    'https://www.google.com/maps/place/Acme/@28.6000,77.2000,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x1!8m2!3d28.5355!4d77.391!16s%2Fg%2F1',
+  );
+  check('parse /place/ prefers !3d!4d (place) over @ (camera)', eq(place), place);
+  check('parse camera-only @ still works', parseSiteInput('https://www.google.com/maps/@28.61,77.21,15z')?.kind === 'point');
+  check('parse ?q=lat%2Clng', eq(parseSiteInput('https://maps.google.com/?q=28.5355%2C77.391')));
+  check('parse query=lat%2clng (lower-case)', eq(parseSiteInput('https://www.google.com/maps/search/?api=1&query=28.5355%2c77.391')));
 }
 {
   const all: MeetingStatus[] = ['planned', 'en_route', 'arrived', 'checked_in', 'checked_out', 'mom_logged', 'cancelled'];
@@ -169,6 +179,26 @@ async function main() {
     check('mom_missing with outcome none', r2.get('a')?.reasons.length === 0);
     const r3 = await risk([mk({ id: 'a', ...base, checkedOutAt: co(119) })], now);
     check('mom_missing 1h59m none', r3.get('a')?.reasons.length === 0);
+    // Virtual meetings are never checked out: due from the end time while still planned.
+    const end = (min: number) => new Date(now.getTime() - min * 60000);
+    const v = (o: Partial<RiskMeeting>) => mk({ id: 'v', type: 'virtual', startAt: end(181), endAt: end(121), ...o });
+    check('mom_missing virtual planned end+2h01m flagged', JSON.stringify((await risk([v({})], now)).get('v')?.reasons) === '["mom_missing"]');
+    check('mom_missing virtual planned end+1h59m none', (await risk([v({ startAt: end(179), endAt: end(119) })], now)).get('v')?.reasons.length === 0);
+    check('mom_missing virtual with outcome none', (await risk([v({ hasOutcome: true })], now)).get('v')?.reasons.length === 0);
+    check('mom_missing virtual mom_logged none', (await risk([v({ status: 'mom_logged', hasOutcome: true })], now)).get('v')?.reasons.length === 0);
+    check('mom_missing virtual cancelled none', (await risk([v({ status: 'cancelled' })], now)).get('v')?.reasons.length === 0);
+    check('mom_missing physical planned (no check-out) none', (await risk([v({ type: 'physical' })], now)).get('v')?.reasons.includes('mom_missing') === false);
+  }
+  {
+    // A drive function may answer null (no figure): no estimate, no travel_gap.
+    const A = mk({ id: 'A', startAt: T(10), endAt: T(11), site: noida });
+    const B = mk({ id: 'B', startAt: T(11, 5), endAt: T(12), site: north(12000) });
+    const r = await computeRisks([A, B], T(9), settings, async () => null);
+    const b = r.get('B')!;
+    check('drive null -> no figure, no travel_gap', b.estDriveMin === null && b.travelGapMin === null && b.reasons.length === 0, b);
+    let seen: string | null = null;
+    await computeRisks([A, B], T(9), settings, async (_a, _b, _d, next) => ((seen = next.id), null));
+    check('drive fn receives the later meeting', seen === 'B', seen);
   }
   {
     const d = diffReasons(['overlap'], ['overlap', 'no_checkin']);
@@ -435,6 +465,58 @@ async function main() {
     const real = layoutLane([item('r1', '10:00', '11:00'), item('r2', '10:30', '11:30')], 'Asia/Kolkata');
     check('layoutLane real overlap still flagged', real.blocks.every((b) => b.overlaps) && real.blocks[0]!.row !== real.blocks[1]!.row);
     check('layoutLane empty', layoutLane([], 'UTC').rows === 1 && layoutLane([], 'UTC').blocks.length === 0);
+  }
+  {
+    const all: MeetingStatus[] = ['planned', 'en_route', 'arrived', 'checked_in', 'checked_out', 'mom_logged', 'cancelled'];
+    const cancellable = all.filter(canCancelMeeting);
+    check('edit UI: cancel only before check-in', cancellable.join() === 'planned,en_route,arrived', cancellable);
+    check('edit UI: edit for any non-cancelled', all.filter(canEditMeeting).length === 6 && !canEditMeeting('cancelled'));
+    const g = (s: MeetingStatus) => editGates(s);
+    check(
+      'edit UI gates mirror the service',
+      g('planned').structural && g('en_route').structural && !g('arrived').structural && g('arrived').details &&
+        !g('checked_out').structural && g('checked_out').details && !g('mom_logged').details && g('mom_logged').notes &&
+        !g('cancelled').notes,
+    );
+    const base: MeetingFormValues = {
+      title: 'Demo',
+      type: 'physical',
+      date: '2026-12-02',
+      startTime: '10:00',
+      endTime: '11:00',
+      ownerId: 'u1',
+      dealId: null,
+      companyId: 'c1',
+      contactId: null,
+      address: 'Site Rd',
+      virtualUrl: '',
+      notes: '',
+    };
+    const open = editGates('planned');
+    check('patch: unchanged form sends nothing', JSON.stringify(meetingPatch(base, { ...base, title: ' Demo ' }, 'Asia/Kolkata', open)) === '{}');
+    const p1 = meetingPatch(base, { ...base, startTime: '12:00', endTime: '12:30', notes: ' hi ' }, 'Asia/Kolkata', open);
+    check(
+      'patch: changed times and notes only',
+      JSON.stringify(p1) === JSON.stringify({ notes: 'hi', startAt: '2026-12-02T12:00:00+05:30', endAt: '2026-12-02T12:30:00+05:30' }),
+      p1,
+    );
+    const p2 = meetingPatch(base, { ...base, companyId: null, address: '' }, 'Asia/Kolkata', open);
+    check('patch: cleared company and address are sent as null', JSON.stringify(p2) === '{"companyId":null,"address":null}', p2);
+    const late = editGates('checked_in');
+    const p3 = meetingPatch(base, { ...base, title: 'New', type: 'virtual', startTime: '09:00' }, 'Asia/Kolkata', late);
+    check('patch: structural fields dropped past en_route', JSON.stringify(p3) === '{"title":"New"}', p3);
+    let threw = '';
+    try {
+      meetingPatch(base, { ...base, endTime: '09:00' }, 'Asia/Kolkata', open);
+    } catch (e) {
+      threw = (e as Error).message;
+    }
+    check('patch: end before start throws copy', threw === 'End time must be after the start.', threw);
+    check(
+      'edit error copy for invalid_transition',
+      editErrorText({ error: 'Cannot change time once the visit has started', code: 'invalid_transition' }).includes('refresh') &&
+        editErrorText({ error: 'Title is required', code: 'validation' }) === 'Title is required',
+    );
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

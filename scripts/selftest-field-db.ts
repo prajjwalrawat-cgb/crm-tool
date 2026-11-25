@@ -588,6 +588,141 @@ async function main() {
       'atRiskOnly filters to at-risk meetings',
       riskOnly.reps.flatMap((r) => r.meetings).every((x) => x.risk.reasons.length > 0) && riskOnly.reps.flatMap((r) => r.meetings).length > 0,
     );
+
+    // --- getDay drive lookups: no provider call with a transaction open, cache reused, past pairs frozen
+    {
+      let openTx = 0;
+      let calls = 0;
+      let callsInTx = 0;
+      const realTx = db.transaction.bind(db);
+      const patched = ((fn: Parameters<typeof db.transaction>[0], cfg?: Parameters<typeof db.transaction>[1]) =>
+        realTx(async (tx) => {
+          openTx++;
+          try {
+            return await fn(tx);
+          } finally {
+            openTx--;
+          }
+        }, cfg)) as typeof db.transaction;
+      const dmaps = fake({
+        async driveMinutes() {
+          calls++;
+          if (openTx > 0) callsInTx++;
+          await new Promise((r) => setTimeout(r, 5));
+          return { minutes: 15, estimate: false };
+        },
+      });
+      const ddeps = { maps: dmaps, now: () => fixedNow };
+      // r3 on 2026-12-02 IST: a past pair (later meeting started) and two future pairs.
+      const at = (h: number, len = 0.5, address = 'Geo Rd') =>
+        M.createMeeting(r3, { title: `ZZ drive ${h}`, type: 'physical', startAt: hours(h), endAt: hours(h + len), address }, deps);
+      await at(-3, 0.5, 'Geo Rd');
+      const pastLater = await at(-2, 0.5, 'Other Rd');
+      await at(1, 0.5, 'Geo Rd');
+      const f2 = await at(2, 0.5, 'Other Rd');
+      (db as { transaction: typeof db.transaction }).transaction = patched;
+      try {
+        const v1 = await DY.getDay(r3, { date: '2026-12-02' }, ddeps);
+        const first = calls;
+        const firstInTx = callsInTx;
+        const v2 = await DY.getDay(r3, { date: '2026-12-02' }, ddeps);
+        const mine = (v: typeof v1) => v.reps.flatMap((r) => r.meetings);
+        const past = mine(v1).find((x) => x.id === pastLater.id)!;
+        const fut = mine(v2).find((x) => x.id === f2.id)!;
+        check('getDay: misses priced (2 future pairs), past pair not priced', first === 2 && past.risk.estDriveMin === null, {
+          first,
+          past: past.risk,
+        });
+        check('getDay: no provider call while a transaction is open', firstInTx === 0 && callsInTx === 0, { firstInTx, callsInTx });
+        check('getDay: second call within TTL makes 0 provider calls (cache)', calls === first && fut.risk.estDriveMin === 15 && !fut.risk.estimate, {
+          calls,
+          fut: fut.risk,
+        });
+        const stored = await inT(A, (tx) => tx.select().from(s.driveTimeCache).where(sql`${s.driveTimeCache.provider} = 'fake'`));
+        check('getDay: real answers stored in one write phase', stored.length >= 2, stored.length);
+      } finally {
+        (db as { transaction: typeof db.transaction }).transaction = realTx;
+      }
+    }
+
+    // --- company geocode line: a company with city/state but no point geocodes the full line
+    {
+      const queries: string[] = [];
+      const rec = fake({
+        async geocode(address) {
+          queries.push(address);
+          return { status: 'ok', point: { lat: 28.45, lng: 77.05 } };
+        },
+      });
+      const [lineCo] = await db
+        .insert(s.companies)
+        .values({ tenantId: A, name: 'ZZ Line Co', address: '12 Main St', city: 'Gurugram', state: 'Haryana', postalCode: '122001' })
+        .returning();
+      const ml = await M.createMeeting(
+        r1,
+        { title: 'ZZ line', type: 'physical', startAt: hours(30), endAt: hours(30.5), companyId: lineCo!.id },
+        { maps: rec, now: () => fixedNow },
+      );
+      check(
+        'meeting for a company without a point geocodes "address, city, state, postal code"',
+        queries.length === 1 && queries[0] === '12 Main St, Gurugram, Haryana, 122001' && ml.address === queries[0] && ml.lat === 28.45,
+        { queries, address: ml.address, lat: ml.lat },
+      );
+    }
+
+    // --- re-site on type change / company change or clear
+    {
+      const [twoCo] = await db
+        .insert(s.companies)
+        .values({ tenantId: A, name: 'ZZ Two Co', address: 'Two Rd', city: 'Noida', lat: 28.4, lng: 77.0, geocodeStatus: 'ok' })
+        .returning();
+      const v = await mk(r1, { type: 'virtual', companyId: siteCo!.id, virtualUrl: 'https://meet.example/x' });
+      const vp = await M.updateMeeting(r1, v.id, { type: 'physical' }, deps);
+      check('virtual -> physical re-sites from the company', vp.lat === S.lat && vp.lng === S.lng && vp.address === 'Site Rd, Noida' && vp.geocodeStatus === 'ok', vp);
+      const c1 = await mk(r1, { companyId: siteCo!.id });
+      const cleared = await M.updateMeeting(r1, c1.id, { companyId: null }, deps);
+      check('clearing the company drops its inherited site', cleared.companyId === null && cleared.lat === null && cleared.lng === null && cleared.address === null, cleared);
+      const c2 = await mk(r1, { companyId: siteCo!.id });
+      const moved = await M.updateMeeting(r1, c2.id, { companyId: twoCo!.id }, deps);
+      check('changing the company moves an inherited site to the new company', moved.lat === 28.4 && moved.address === 'Two Rd, Noida', moved);
+      const c3 = await mk(r1, { companyId: siteCo!.id, address: 'Geo Rd' });
+      const own = await M.updateMeeting(r1, c3.id, { companyId: twoCo!.id }, deps);
+      check('changing the company keeps (and geocodes) a meeting\'s own address', own.address === 'Geo Rd' && own.lat === 28.6, own);
+      const c4 = await mk(r1, { companyId: siteCo!.id, address: 'Geo Rd' });
+      const ownCleared = await M.updateMeeting(r1, c4.id, { companyId: null }, deps);
+      check('clearing the company keeps a meeting\'s own geocoded address', ownCleared.address === 'Geo Rd' && ownCleared.lat === 28.6, ownCleared);
+    }
+
+    // --- company re-geocode propagates to not-started, site-less, inherited meetings
+    {
+      const [qCo] = await db.insert(s.companies).values({ tenantId: A, name: 'ZZ Q Co', address: 'Q Rd', city: 'Noida' }).returning();
+      const qa = await mk(r1, { companyId: qCo!.id }); // inherits 'Q Rd, Noida', fails to geocode
+      const qb = await mk(r1, { companyId: qCo!.id, address: 'Nowhere 9' }); // own address, failed
+      const qc = await mk(r1, { companyId: qCo!.id, address: 'Geo Rd' }); // own site already
+      const qd = await mk(r1, { companyId: qCo!.id });
+      await CI.checkIn(r1, qd.id, { ...S, accuracyM: 5 }, deps); // started
+      const [qCoNew] = await db
+        .update(s.companies)
+        .set({ address: 'Q Road 2', lat: 28.33, lng: 77.11, geocodeStatus: 'ok' })
+        .where(sql`${s.companies.id} = ${qCo!.id}`)
+        .returning();
+      const n = await inT(A, (tx) =>
+        M.propagateCompanyPoint(tx, A, { ...qCoNew!, lat: 28.33, lng: 77.11 }, ['Q Rd, Noida', 'Q Rd', 'Q Road 2, Noida', 'Q Road 2'], fixedNow),
+      );
+      const [ra, rb, rc, rd] = [await meetingRow(qa.id), await meetingRow(qb.id), await meetingRow(qc.id), await meetingRow(qd.id)];
+      check(
+        'company re-geocode propagates only to not-started, site-less, inherited meetings',
+        qa.lat === null &&
+          n === 1 &&
+          ra.lat === 28.33 &&
+          ra.geocodeStatus === 'ok' &&
+          ra.address === 'Q Road 2, Noida' &&
+          rb.lat === null &&
+          rc.lat === 28.6 &&
+          rd.lat === null,
+        { n, a: [ra.lat, ra.address], b: rb.lat, c: rc.lat, d: [rd.lat, rd.status] },
+      );
+    }
   }
 
   // ---------------------------------------------------------------- risk scan (Task 5)

@@ -13,7 +13,13 @@ export type RiskMeeting = {
   hasOutcome: boolean;
 };
 
-export type DriveFn = (a: LatLng, b: LatLng, departAt: Date) => Promise<{ minutes: number; estimate: boolean }>;
+/** Drive minutes for a pair; `null` = no figure (the pair gets no drive estimate and no travel_gap). */
+export type DriveFn = (
+  a: LatLng,
+  b: LatLng,
+  departAt: Date,
+  next: RiskMeeting,
+) => Promise<{ minutes: number; estimate: boolean } | null>;
 
 export type MeetingRisk = {
   reasons: RiskReason[];
@@ -51,7 +57,10 @@ export async function computeRisks(
     if (m.type === 'physical' && PRE_CHECKIN.includes(m.status) && now.getTime() > m.startAt.getTime() + s.graceMin * MIN) {
       f.add('no_checkin');
     }
-    if (m.checkedOutAt && !m.hasOutcome && m.checkedOutAt.getTime() + s.momDueHours * 60 * MIN < now.getTime()) {
+    // MOM due from check-out; a virtual meeting is never checked out, so it is due from its end.
+    const momFrom =
+      m.checkedOutAt ?? (m.type === 'virtual' && m.status === 'planned' ? m.endAt : null);
+    if (momFrom && !m.hasOutcome && momFrom.getTime() + s.momDueHours * 60 * MIN < now.getTime()) {
       f.add('mom_missing');
     }
   }
@@ -76,7 +85,8 @@ export async function computeRisks(
       const gapMin = Math.round((next.startAt.getTime() - prev.endAt.getTime()) / MIN);
       // Caller-frozen pair (e.g. the later meeting already started): no drive lookup, no flag.
       if (opts.skipDrive?.(next)) continue;
-      const d = await drive(prev.site!, next.site!, prev.endAt);
+      const d = await drive(prev.site!, next.site!, prev.endAt, next);
+      if (!d) continue;
       const r = out.get(next.id)!;
       r.estDriveMin = d.minutes;
       r.estimate = d.estimate;

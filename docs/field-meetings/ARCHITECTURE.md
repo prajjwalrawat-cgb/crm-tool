@@ -35,6 +35,7 @@ Rules worth knowing:
 - `saveOutcome` moves a meeting to `mom_logged`. It can check out in the same transaction when the meeting is still `checked_in`. Editing an existing MOM replaces it without another transition.
 - What a status lets you change on a meeting (`buildUpdate` in `meetings.ts`): planned and en_route, anything; arrived, checked_in and checked_out, title, notes and deal/company/contact links; mom_logged, notes only; cancelled, nothing.
 - Only the meeting owner can check in, check out, mark en route or log the MOM. Managers act for reps through create/update/cancel/pin only.
+- UI for edit and cancel (`meeting-actions.tsx`, gates in `_lib/meeting-edit.ts` mirror the rules above): the rep's My day card offers Edit and Cancel meeting on the owner's planned and en_route meetings; the manager board panel offers Edit on any non-cancelled in-scope meeting (fields the status no longer allows are read-only) and Cancel on planned, en_route and arrived. Viewers see neither. Edit sends only changed fields (PATCH); server errors are shown as-is, a 409 with a "refresh and try again" hint.
 
 ## 2. Risk engine
 
@@ -45,13 +46,13 @@ Pure rules in `risk.ts` (`computeRisks`). Reasons per meeting, over one owner's 
 | `no_checkin` | physical, status in planned / en_route / arrived, and `now > start + grace` (default 15 min) |
 | `overlap` | two of the owner's meetings intersect in time; both are flagged |
 | `travel_gap` | consecutive physical meetings that both have coordinates, and `drive(prev.site, next.site, prev.end) > next.start - prev.end`. Flagged on the later meeting. An overlapping pair gets `overlap` only, no negative gap. |
-| `mom_missing` | `checked_out_at + mom_due_hours < now` (default 2 h) and no outcome row |
+| `mom_missing` | `checked_out_at + mom_due_hours < now` (default 2 h) and no outcome row. A virtual meeting is never checked out, so while it is still `planned` it is due from `end_at + mom_due_hours`. |
 
 Drive time comes from `driveMinutesCached`: a 30-minute cache bucket keyed on 4-decimal coordinates, per tenant. Estimates (no `MAPS_API_KEY`, or a Google failure) are never cached, so they cannot mask a later real key, and the UI marks them as estimates.
 
 ### The scan (`risk-scan.ts`, `scanTenantRisks`)
 
-Cron `field-risk-scan` (`*/5 * * * *`, `src/lib/inngest/workflows/field.ts`) picks tenants with any non-cancelled meeting starting in `[now - 48 h, now + 24 h]` and scans each under its own system context. A tenant outside its tracking hours (tenant time zone) is skipped, unless the caller passes `ignoreHours` (the seed does).
+Cron `field-risk-scan` (`*/5 * * * *`, `src/lib/inngest/workflows/field.ts`) picks tenants with any non-cancelled meeting starting in `[now - 48 h, now + 24 h]` and scans each under its own system context. The tenant pick reads FORCE-RLS `meetings` with the raw `db` and no tenant context: it relies on the connection role bypassing RLS (superuser / BYPASSRLS, the assumption of migration 0004 and the 0045 backfill). Under a non-bypass role it would find no tenants. A tenant outside its tracking hours (tenant time zone) is skipped, unless the caller passes `ignoreHours` (the seed does).
 
 Window: meetings starting from 48 h ago to the end of today in the tenant's time zone, so a `mom_missing` that falls due after hours is flagged at the next in-hours run.
 
@@ -65,7 +66,13 @@ Notify-once: for each reason newly added to a meeting, one `field_meeting_at_ris
 
 Check-in clears `no_checkin` and saving the MOM clears `mom_missing` immediately (`array_remove`), without waiting for a scan.
 
-The Field day API (`getDay`) runs the same `computeRisks` live, so the board is current between scans. It does not persist anything and it looks up drive times inside its read transaction (provider calls there are bounded to 4 s).
+The Field day API (`getDay`) runs the same `computeRisks` live, so the board is current between scans. It persists no risk, and it never calls the maps provider with a transaction open:
+
+1. One read transaction: meetings, check-ins, outcomes, names, settings, and the cached drive times for every pair the risk rules will ask about (a pure collecting pass of `computeRisks` lists them; one batched cache query).
+2. No transaction: provider calls for the cache misses, at most 4 in parallel. A pair whose later meeting has already started is never priced: it uses the cache, or gets no drive figure. A `travel_gap` the scan stored on a started meeting is kept on the board.
+3. One short write transaction storing the real (non-estimate) answers. A failed cache write is logged and does not fail the board.
+
+A second load within the cache TTL makes no provider calls.
 
 ## 3. Check-in verification
 
@@ -114,13 +121,17 @@ Where a meeting's coordinates come from (`site.ts`, `siteFor`):
 2. Otherwise the address is geocoded (cache, then provider). `ok` gives coordinates; `failed` and `pending` leave them null and record the status.
 3. Virtual meetings have no site.
 
+"The company's address" is one line everywhere: `companyGeocodeLine(company)` in `site.ts` = address, city, state, postal code. The company form geocodes that line and a meeting with a blank address inherits it (and geocodes it when the company has no point). A meeting address equal to the street line alone (older rows) also counts as the company's.
+
+Re-siting on edit (`updateMeeting`, planned / en_route, not manual): an address change geocodes the new address. A company change or clear, or a type change to physical, re-sites too: a meeting whose address was inherited from the old company (blank, or that company's line) follows the new company, or has no site when the company was cleared; a meeting with its own address keeps it and geocodes it. The old company's point is never kept.
+
 Pins:
 
-- A pin is a Google Maps link (short links resolved server-side) or `lat, lng`. `resolvePin` accepts `@lat,lng`, `?q=lat,lng`, `?query=lat,lng` and a bare pair; (0, 0) and out-of-range values are rejected. Input over 2000 characters is rejected.
+- A pin is a Google Maps link (short links resolved server-side) or `lat, lng`; addresses are not pins. `resolvePin` accepts `!3d<lat>!4d<lng>` (the place, in /place/ URLs; preferred over the camera's `@lat,lng`), `@lat,lng`, `?q=lat,lng` and `?query=lat,lng` (comma may be `%2C`) and a bare pair; (0, 0) and out-of-range values are rejected. Input over 2000 characters is rejected. An `http://` short link is upgraded to https before resolving; the resolver's allowlist is unchanged.
 - Only owner, admin and manager (`pinFieldSites`) can pin. Reps can never set or move a site.
 - Meeting pin (`pinMeetingSite`): sets the point and `geocode_status = 'manual'`. Allowed while the meeting is planned, en_route or arrived. Virtual meetings cannot be pinned.
 - Company pin (`pinCompanySite`, used by the company form): sets `lat`, `lng`, `geocode_status = 'manual'` and optionally the per-company `checkin_radius_m` (undefined keeps it, null clears it). It then moves that company's physical meetings that have not started (planned, en_route, arrived) to the new point, except meetings that carry their own manual pin, and fills a blank meeting address from the company's.
-- Company address edits (address, city, state, postal code) re-geocode unless the company is `manual`. A company that still has no point is retried on its next save. This does not move existing meetings: only a pin propagates. A company with a manual pin keeps it when its address changes.
+- Company address edits (address, city, state, postal code) re-geocode unless the company is `manual`. A company that still has no point is retried on its next save. A successful re-geocode (`propagateCompanyPoint`, same write transaction) gives the new point to that company's not-started physical meetings that have no site yet (`lat IS NULL`), no manual pin, and an inherited address (blank, or the company's old or new line); their address becomes the new line. Meetings that already have a site, or carry their own address, are not moved: only a pin moves sited meetings. A company with a manual pin keeps it when its address changes.
 - Geocode status in words on the company form: ok "Located", manual "Pinned manually", pending "Not located yet", failed "Couldn't locate".
 
 ## 6. Data minimisation: what location is stored, and where

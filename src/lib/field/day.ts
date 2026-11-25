@@ -21,11 +21,13 @@ import { narrowToOwner } from '@/lib/reports/manager/scope';
 
 import { computeKpis } from './kpis';
 import { asActor, mapsOf, nowOf, type FieldDeps } from './internal';
-import { driveMinutesCached } from './maps/cached';
+import { estimateDriveMinutes } from './geo';
+import { driveKey, driveLookupMany, driveStore, type DrivePair } from './maps/cached';
+import type { DriveResult } from './maps';
 import { computeRisks, type MeetingRisk, type RiskMeeting } from './risk';
 import { fieldUserScope } from './scope';
 import { getFieldSettings } from './settings';
-import { FieldError, type FieldActor } from './types';
+import { FieldError, type FieldActor, type RiskReason } from './types';
 
 export type DayMeeting = Meeting & {
   deal: { id: string; name: string; amountMinor: number; currency: string; stage: DealStage } | null;
@@ -121,7 +123,8 @@ export function getDay(
     };
     if (scope.userIds !== null && scope.userIds.length === 0) return empty;
 
-    return tenantTransaction(async (tx) => {
+    // Phase 1: one read transaction, including the cached drive times for every pair.
+    const snap = await tenantTransaction(async (tx) => {
       const conds = [eq(meetings.tenantId, actor.tenantId), gte(meetings.startAt, start), lt(meetings.startAt, end)];
       if (scope.userIds !== null) conds.push(inArray(meetings.ownerId, scope.userIds));
       const rows = await tx
@@ -144,7 +147,7 @@ export function getDay(
         .leftJoin(companies, eq(companies.id, meetings.companyId))
         .where(and(...conds))
         .orderBy(asc(meetings.startAt), asc(meetings.id));
-      if (rows.length === 0) return empty;
+      if (rows.length === 0) return null;
 
       const ids = rows.map((r) => r.meeting.id);
       const ownerIds = [...new Set(rows.map((r) => r.meeting.ownerId))];
@@ -163,10 +166,7 @@ export function getDay(
         .from(users)
         .where(inArray(users.id, ownerIds));
       const settings = await getFieldSettings(tx, actor.tenantId);
-      const checkinsBy = new Map<string, MeetingCheckin[]>();
-      for (const c of checkins) checkinsBy.set(c.meetingId, [...(checkinsBy.get(c.meetingId) ?? []), c]);
-      const outcomeBy = new Map(outcomes.map((o) => [o.meetingId, o]));
-
+      const outcomeIds = new Set(outcomes.map((o) => o.meetingId));
       const riskInput: RiskMeeting[] = rows.map(({ meeting: m }) => ({
         id: m.id,
         ownerId: m.ownerId,
@@ -176,55 +176,137 @@ export function getDay(
         endAt: m.endAt,
         site: m.lat !== null && m.lng !== null ? { lat: m.lat, lng: m.lng } : null,
         checkedOutAt: m.checkedOutAt,
-        hasOutcome: outcomeBy.has(m.id),
+        hasOutcome: outcomeIds.has(m.id),
       }));
-      const risks = await computeRisks(
-        riskInput,
-        now,
-        { graceMin: settings.graceMin, momDueHours: settings.momDueHours },
-        (a, b, departAt) => driveMinutesCached(tx, actor.tenantId, a, b, departAt, maps, { now: () => now }),
-      );
-
-      const all: DayMeeting[] = rows.map((r) => ({
-        ...r.meeting,
-        deal:
-          r.dealId !== null
-            ? {
-                id: r.dealId,
-                name: r.dealName!,
-                amountMinor: r.dealAmountMinor!,
-                currency: r.dealCurrency!,
-                stage: r.dealStage!,
-              }
-            : null,
-        contact:
-          r.contactId !== null ? { id: r.contactId, name: fullName(r.contactFirst, r.contactLast) || 'Unnamed contact' } : null,
-        company: r.companyId !== null ? { id: r.companyId, name: r.companyName! } : null,
-        checkins: checkinsBy.get(r.meeting.id) ?? [],
-        outcome: outcomeBy.get(r.meeting.id) ?? null,
-        risk: risks.get(r.meeting.id)!,
-      }));
-
-      const kpis = computeKpis(
-        all.map((m) => ({
-          status: m.status,
-          atRisk: m.risk.reasons.length > 0,
-          dealId: m.deal?.id ?? null,
-          amountMinor: m.deal?.amountMinor ?? null,
-          currency: m.deal?.currency ?? null,
-        })),
-        org.defaultCurrency,
-      );
-
-      const shown = q.atRiskOnly ? all.filter((m) => m.risk.reasons.length > 0) : all;
-      const nameOf = new Map(people.map((p) => [p.id, fullName(p.firstName, p.lastName) || p.email]));
-      const byRep = new Map<string, DayMeeting[]>();
-      for (const m of shown) byRep.set(m.ownerId, [...(byRep.get(m.ownerId) ?? []), m]);
-      const reps = [...byRep.entries()]
-        .map(([userId, list]) => ({ userId, name: nameOf.get(userId) ?? userId, meetings: list }))
-        .sort((a, b) => a.name.localeCompare(b.name) || a.userId.localeCompare(b.userId));
-
-      return { date: q.date, tz, kpis, reps, scopeFallback: baseScope.fallback };
+      const pairs = await drivePairsOf(riskInput, now, settings);
+      const cached = await driveLookupMany(tx, actor.tenantId, pairs, { now: () => now });
+      return { rows, checkins, outcomes, people, settings, riskInput, pairs, cached };
     });
+    if (!snap) return empty;
+    const { rows, checkins, outcomes, people, settings, riskInput, pairs, cached } = snap;
+
+    // Phase 2: provider calls for cache misses, with no transaction open. A pair whose
+    // later meeting has started is never re-priced: cache only, else no drive figure.
+    const misses = pairs.filter((p) => p.next.startAt.getTime() > now.getTime() && !cached.has(p.key));
+    const fetched = new Map<string, DriveResult>();
+    await eachLimited(misses, DRIVE_CONCURRENCY, async (p) => {
+      let res: DriveResult;
+      try {
+        res = await maps.driveMinutes(p.a, p.b, p.departAt);
+      } catch {
+        res = { minutes: estimateDriveMinutes(p.a, p.b), estimate: true };
+      }
+      fetched.set(p.key, res);
+    });
+
+    // Phase 3: one short write transaction storing the real (non-estimate) answers.
+    const toStore = misses.filter((p) => fetched.get(p.key)?.estimate === false);
+    if (toStore.length > 0) {
+      try {
+        await tenantTransaction(async (tx) => {
+          for (const p of toStore) await driveStore(tx, actor.tenantId, p, fetched.get(p.key)!, maps.name, { now: () => now });
+        });
+      } catch (err) {
+        // A cache write must never break the board; the next refresh refetches.
+        console.warn('[field] drive cache write failed', err);
+      }
+    }
+
+    const risks = await computeRisks(
+      riskInput,
+      now,
+      { graceMin: settings.graceMin, momDueHours: settings.momDueHours },
+      async (a, b, departAt) => {
+        const k = driveKey(a, b, departAt);
+        return cached.get(k) ?? fetched.get(k) ?? null;
+      },
+    );
+    // A started meeting's pair is not re-priced; keep a travel_gap the scan stored on it.
+    for (const { meeting: m } of rows) {
+      const r = risks.get(m.id)!;
+      if (m.startAt.getTime() <= now.getTime() && m.atRiskReasons.includes('travel_gap') && !r.reasons.includes('travel_gap')) {
+        r.reasons = REASON_ORDER.filter((x) => x === 'travel_gap' || r.reasons.includes(x));
+      }
+    }
+
+    const checkinsBy = new Map<string, MeetingCheckin[]>();
+    for (const c of checkins) checkinsBy.set(c.meetingId, [...(checkinsBy.get(c.meetingId) ?? []), c]);
+    const outcomeBy = new Map(outcomes.map((o) => [o.meetingId, o]));
+
+    const all: DayMeeting[] = rows.map((r) => ({
+      ...r.meeting,
+      deal:
+        r.dealId !== null
+          ? {
+              id: r.dealId,
+              name: r.dealName!,
+              amountMinor: r.dealAmountMinor!,
+              currency: r.dealCurrency!,
+              stage: r.dealStage!,
+            }
+          : null,
+      contact:
+        r.contactId !== null ? { id: r.contactId, name: fullName(r.contactFirst, r.contactLast) || 'Unnamed contact' } : null,
+      company: r.companyId !== null ? { id: r.companyId, name: r.companyName! } : null,
+      checkins: checkinsBy.get(r.meeting.id) ?? [],
+      outcome: outcomeBy.get(r.meeting.id) ?? null,
+      risk: risks.get(r.meeting.id)!,
+    }));
+
+    const kpis = computeKpis(
+      all.map((m) => ({
+        status: m.status,
+        atRisk: m.risk.reasons.length > 0,
+        dealId: m.deal?.id ?? null,
+        amountMinor: m.deal?.amountMinor ?? null,
+        currency: m.deal?.currency ?? null,
+      })),
+      org.defaultCurrency,
+    );
+
+    const shown = q.atRiskOnly ? all.filter((m) => m.risk.reasons.length > 0) : all;
+    const nameOf = new Map(people.map((p) => [p.id, fullName(p.firstName, p.lastName) || p.email]));
+    const byRep = new Map<string, DayMeeting[]>();
+    for (const m of shown) byRep.set(m.ownerId, [...(byRep.get(m.ownerId) ?? []), m]);
+    const reps = [...byRep.entries()]
+      .map(([userId, list]) => ({ userId, name: nameOf.get(userId) ?? userId, meetings: list }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.userId.localeCompare(b.userId));
+
+    return { date: q.date, tz, kpis, reps, scopeFallback: baseScope.fallback };
   });
+}
+
+const REASON_ORDER: RiskReason[] = ['no_checkin', 'travel_gap', 'overlap', 'mom_missing'];
+
+/** Parallel provider calls per getDay. */
+const DRIVE_CONCURRENCY = 4;
+
+type DayPair = DrivePair & { key: string; next: RiskMeeting };
+
+/** Every drive pair computeRisks will ask about (pure: the collecting pass makes no lookups). */
+async function drivePairsOf(
+  input: RiskMeeting[],
+  now: Date,
+  s: { graceMin: number; momDueHours: number },
+): Promise<DayPair[]> {
+  const byKey = new Map<string, DayPair>();
+  await computeRisks(input, now, s, async (a, b, departAt, next) => {
+    const key = driveKey(a, b, departAt);
+    const seen = byKey.get(key);
+    // Same lookup for two pairs: keep the one that may still be priced (later meeting not started).
+    if (!seen || (seen.next.startAt.getTime() <= now.getTime() && next.startAt.getTime() > now.getTime())) {
+      byKey.set(key, { a, b, departAt, key, next });
+    }
+    return null;
+  });
+  return [...byKey.values()];
+}
+
+/** Run `fn` over `items`, at most `limit` at a time. */
+async function eachLimited<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  const worker = async () => {
+    while (i < items.length) await fn(items[i++]!);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
