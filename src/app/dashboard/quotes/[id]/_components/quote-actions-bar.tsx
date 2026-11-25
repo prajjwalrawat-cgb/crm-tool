@@ -59,7 +59,7 @@ export function QuoteActionsBar({
   const [pending, startTransition] = useTransition();
   const busy = pending || saving;
 
-  function run(fn: () => Promise<{ ok: true } | { ok: false; error: string }>, success: string, after?: () => void) {
+  function run(fn: () => Promise<{ ok: true } | { ok: false; error: string }>, success: string) {
     startTransition(async () => {
       const res = await fn();
       if (!res.ok) {
@@ -67,8 +67,6 @@ export function QuoteActionsBar({
         return;
       }
       toast.success(success);
-      if (after) after();
-      else router.refresh();
     });
   }
 

@@ -27,9 +27,9 @@ export default async function InvoiceSettingsPage() {
             Invoice settings
           </h1>
           <p className="mt-0.5 text-[12px] text-slate-500 dark:text-[#A1A1AA]">
-            Seller &amp; bank details for {tenant.name}, per state. Add a profile
-            for each GST registration (e.g. Delhi, Karnataka). Members pick the
-            state when creating a PI and the seller block auto-fills.
+            Default payment and delivery terms for {tenant.name}&apos;s invoices.
+            The logo and seller &amp; bank details per state are in Settings →
+            Organization, shared with quotes.
           </p>
         </header>
 
@@ -37,7 +37,7 @@ export default async function InvoiceSettingsPage() {
           logoUrl={settings.logoUrl ?? ''}
           paymentTerms={settings.paymentTerms}
           deliveryTerms={settings.deliveryTerms}
-          profiles={profiles}
+          sellerStates={profiles.map((p) => p.stateName)}
         />
       </main>
     );

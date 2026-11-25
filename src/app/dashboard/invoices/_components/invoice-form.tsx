@@ -31,7 +31,7 @@ type SellerFields = PartyFields & {
   bankIfsc: string;
   bankBranch: string;
 };
-/** A configured per-state seller profile (from Invoice settings). */
+/** A configured per-state seller profile (from Settings → Organization). */
 export type SellerProfileOption = {
   stateCode: string;
   stateName: string;
@@ -286,10 +286,10 @@ export function InvoiceForm({
   if (blocked) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-6 text-[13px] text-amber-800">
-        <p className="font-medium">Invoice settings aren&apos;t ready yet</p>
+        <p className="font-medium">Seller details aren&apos;t set up yet</p>
         <p className="mt-1">
           An owner needs to add seller &amp; bank details (per state) in{' '}
-          <span className="font-semibold">Invoice settings</span> before invoices
+          <span className="font-semibold">Settings → Organization</span> before invoices
           can be created.
         </p>
       </div>
@@ -332,11 +332,11 @@ export function InvoiceForm({
           </Field>
         ) : (
           <p className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[12px] text-slate-500">
-            Seller details are taken from this invoice (no states configured in Invoice settings).
+            Seller details are taken from this invoice (no states configured in Settings → Organization).
           </p>
         )}
         <p className="mb-1 mt-3 text-[12px] text-slate-500">
-          Managed by the owner in <span className="font-medium text-slate-700">Invoice settings</span> — not editable here.
+          Managed by the owner in <span className="font-medium text-slate-700">Settings → Organization</span> — not editable here.
         </p>
         <PartyInputs value={seller} onChange={() => {}} errors={errors} prefix="seller" namePlaceholder="" readOnly />
         <div className="mt-3 grid gap-3 sm:grid-cols-3">

@@ -2,7 +2,6 @@
 
 import { ArrowLeft, Link2, Loader2, Unlink } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
@@ -36,7 +35,6 @@ export function QuoteDealLink({
   dirty: boolean;
   limitedToOwnDeals: boolean;
 }) {
-  const router = useRouter();
   const [picking, setPicking] = useState(false);
   const [choice, setChoice] = useState<QuoteDealOption | null>(null);
   const [pending, startTransition] = useTransition();
@@ -51,7 +49,6 @@ export function QuoteDealLink({
       }
       toast.success(success);
       setPicking(false);
-      router.refresh();
     });
   }
 

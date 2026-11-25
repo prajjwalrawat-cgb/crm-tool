@@ -3,7 +3,6 @@
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
@@ -57,7 +56,6 @@ export function TemplateBuilder({
   /** Workspace logo as a data URL, for the preview. */
   logoUrl: string | null;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState(initialName);
   const [body, setBody] = useState<QuoteTemplateBody>(initialBody);
@@ -112,7 +110,6 @@ export function TemplateBuilder({
       setSaved(snapshotOf(sentName, sentBody));
       setServerErrors(NO_ERRORS);
       toast.success('Template saved');
-      router.refresh();
     });
   }
 

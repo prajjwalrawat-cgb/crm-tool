@@ -149,7 +149,7 @@ async function sellerFromProfile(
 export type QuoteSellerChoice = { id: string; label: string; seller: PdfSeller };
 
 /**
- * The seller profiles (Invoice settings → Seller details by state) a quote
+ * The seller profiles (Settings → Organization → Seller details by state) a quote
  * can be issued from, lowest state code first: the editor's Seller select.
  */
 export async function listQuoteSellerChoices(tenantId: string): Promise<QuoteSellerChoice[]> {

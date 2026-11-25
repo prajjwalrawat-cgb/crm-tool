@@ -2,8 +2,7 @@
 
 import { Archive, Copy, Pencil, Star } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -23,10 +22,15 @@ export type TemplateListItem = {
 };
 
 export function TemplateList({ templates }: { templates: TemplateListItem[] }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
+  /** Which button is working, e.g. "duplicate:<id>", so it can say so. */
+  const [busy, setBusy] = useState<string | null>(null);
 
-  function run(action: () => Promise<{ ok: true } | { ok: false; error: string }>, okMsg: string) {
+  // The actions call revalidatePath(TEMPLATES_PATH), which already sends the
+  // refreshed page back in the action response. A router.refresh() here would
+  // re-render the whole settings page a second time (that was the slow INP).
+  function run(key: string, action: () => Promise<{ ok: true } | { ok: false; error: string }>, okMsg: string) {
+    setBusy(key);
     startTransition(async () => {
       const res = await action();
       if (!res.ok) {
@@ -34,7 +38,6 @@ export function TemplateList({ templates }: { templates: TemplateListItem[] }) {
         return;
       }
       toast.success(okMsg);
-      router.refresh();
     });
   }
 
@@ -63,17 +66,17 @@ export function TemplateList({ templates }: { templates: TemplateListItem[] }) {
               <Button
                 variant="ghost"
                 disabled={pending}
-                onClick={() => run(() => duplicateQuoteTemplateAction(t.id), `Duplicated “${t.name}”`)}
+                onClick={() => run(`duplicate:${t.id}`, () => duplicateQuoteTemplateAction(t.id), `Duplicated “${t.name}”`)}
               >
-                <Copy className="h-3.5 w-3.5" aria-hidden /> Duplicate
+                <Copy className="h-3.5 w-3.5" aria-hidden /> {pending && busy === `duplicate:${t.id}` ? 'Duplicating…' : 'Duplicate'}
               </Button>
               {!t.isDefault ? (
                 <Button
                   variant="ghost"
                   disabled={pending}
-                  onClick={() => run(() => setDefaultQuoteTemplateAction(t.id), `“${t.name}” is now the default`)}
+                  onClick={() => run(`default:${t.id}`, () => setDefaultQuoteTemplateAction(t.id), `“${t.name}” is now the default`)}
                 >
-                  <Star className="h-3.5 w-3.5" aria-hidden /> Set default
+                  <Star className="h-3.5 w-3.5" aria-hidden /> {pending && busy === `default:${t.id}` ? 'Setting…' : 'Set default'}
                 </Button>
               ) : null}
               {!t.isDefault ? (
@@ -82,10 +85,10 @@ export function TemplateList({ templates }: { templates: TemplateListItem[] }) {
                   disabled={pending}
                   onClick={() => {
                     if (!confirm(`Archive “${t.name}”? New quotes can no longer use it; existing quotes are unchanged.`)) return;
-                    run(() => archiveQuoteTemplateAction(t.id), `Archived “${t.name}”`);
+                    run(`archive:${t.id}`, () => archiveQuoteTemplateAction(t.id), `Archived “${t.name}”`);
                   }}
                 >
-                  <Archive className="h-3.5 w-3.5" aria-hidden /> Archive
+                  <Archive className="h-3.5 w-3.5" aria-hidden /> {pending && busy === `archive:${t.id}` ? 'Archiving…' : 'Archive'}
                 </Button>
               ) : null}
               <Link

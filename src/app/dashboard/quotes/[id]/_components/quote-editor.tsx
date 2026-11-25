@@ -3,7 +3,6 @@
 import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
@@ -89,10 +88,9 @@ export function QuoteEditor({
   offerings: OfferingChoice[];
   /** Reps: the deal picker lists only their own and unassigned deals. */
   limitedToOwnDeals: boolean;
-  /** Seller profiles (Invoice settings) this draft can be issued from; [] when not editable. */
+  /** Seller profiles (Settings → Organization) this draft can be issued from; [] when not editable. */
   sellerChoices: QuoteSellerChoice[];
 }) {
-  const router = useRouter();
   const quote = renderInput.quote;
   const body = renderInput.body;
   const editable = quote.status === 'draft' && canManage;
@@ -134,7 +132,6 @@ export function QuoteEditor({
       setFormError(null);
       setSaved(snapshotOf(sent));
       toast.success('Quote saved');
-      router.refresh();
     });
   }
 
@@ -349,7 +346,7 @@ function SellerField({
         ))}
       </select>
       <span className="block text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
-        GSTIN, address and bank details printed on the quote. Edit them in Invoice settings.
+        GSTIN, address and bank details printed on the quote. The owner edits them in Settings → Organization.
       </span>
       <FieldErrors messages={errors} />
     </label>

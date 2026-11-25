@@ -10,7 +10,7 @@ import { INDIAN_STATES } from './india-geo';
 /**
  * Per-state seller profile (one company, multiple GST registrations). Read on
  * the PI form so the user can pick which state's details to bill from; managed
- * (owner-only) on the Invoice settings page.
+ * (owner-only) in Settings → Organization; used by invoices and quotes.
  *
  * Accessed via the base `db` connection (not RLS) with an explicit tenant
  * filter on every query — the same pattern as org_invitations. Membership /
