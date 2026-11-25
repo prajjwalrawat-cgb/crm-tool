@@ -234,20 +234,42 @@ CREATE INDEX IF NOT EXISTS "location_pings_tenant_user_captured_idx"
   ON "location_pings" ("tenant_id", "user_id", "captured_at");
 --> statement-breakpoint
 -- Daily partitions location_pings_YYYYMMDD for today..today+7 (UTC).
+--
+-- CONTRACT for anything that creates a partition later (PR 3's partition job):
+--   * bounds are one UTC day: [d 00:00 UTC, d+1 00:00 UTC)
+--   * name is location_pings_YYYYMMDD
+--   * after CREATE, run ENABLE + FORCE ROW LEVEL SECURITY on the partition and
+--     REVOKE ALL on it from app_user (and anon / authenticated if they exist).
+-- Why: the default privileges from 0004 grant app_user full DML on every new
+-- table, and RLS is not inherited by partitions, so a bare partition would let
+-- a query that names it directly read every tenant's pings. With RLS on and no
+-- policies, direct access is denied; access through the parent still uses the
+-- parent's policies and privileges.
 DO $$
 DECLARE
   d date;
+  part text;
+  r text;
 BEGIN
   FOR d IN SELECT g::date FROM generate_series(
     (now() AT TIME ZONE 'UTC')::date,
     (now() AT TIME ZONE 'UTC')::date + 7,
     interval '1 day') AS g
   LOOP
+    part := 'location_pings_' || to_char(d, 'YYYYMMDD');
     EXECUTE format(
       'CREATE TABLE IF NOT EXISTS %I PARTITION OF location_pings FOR VALUES FROM (%L) TO (%L)',
-      'location_pings_' || to_char(d, 'YYYYMMDD'),
+      part,
       (d::timestamp AT TIME ZONE 'UTC'),
       ((d + 1)::timestamp AT TIME ZONE 'UTC'));
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', part);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', part);
+    EXECUTE format('REVOKE ALL ON %I FROM app_user', part);
+    FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+        EXECUTE format('REVOKE ALL ON %I FROM %I', part, r);
+      END IF;
+    END LOOP;
   END LOOP;
 END $$;
 --> statement-breakpoint
