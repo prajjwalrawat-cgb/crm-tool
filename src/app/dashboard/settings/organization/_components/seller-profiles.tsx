@@ -7,11 +7,12 @@ import { toast } from 'sonner';
 import { INDIAN_STATES } from '@/lib/invoices/india-geo';
 import type { SellerProfile } from '@/lib/invoices/seller-profiles';
 
-import { SettingsSection } from '../../_components/settings-form';
+import { SettingsCard, SettingsSection } from '../../_components/settings-form';
 import { deleteSellerProfileAction, saveSellerProfileAction } from '../seller-actions';
 
+// Same look as the settings rows (InputRow / SelectRow) above it.
 const inputCls =
-  'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13.5px] text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:bg-slate-50 disabled:text-slate-600 dark:border-[#1F1F1F] dark:bg-[#0A0A0A] dark:text-[#FAFAFA] dark:disabled:bg-[#111111] dark:disabled:text-[#A1A1AA]';
+  'w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 disabled:bg-slate-50 disabled:text-slate-600 dark:border-[#1F1F1F] dark:bg-[#111111] dark:text-[#FAFAFA] dark:disabled:text-[#A1A1AA]';
 
 /** Input class with a red border when the field has an error. */
 function cls(error?: string): string {
@@ -132,111 +133,113 @@ export function SellerProfiles({
   }
 
   return (
-    <SettingsSection
-      title="Seller details by state"
-      description="Company, GSTIN, address and bank details for each GST registration (e.g. Delhi, Karnataka). Printed on invoices and quotes; reps pick the state on each one."
-      icon={Landmark}
-    >
-      {locked ? (
-        <p className="rounded-md bg-slate-50 px-3 py-2 text-[12px] text-slate-500 dark:bg-[#111111] dark:text-[#A1A1AA]">
-          Only the workspace owner can change these.
-        </p>
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-2">
-        {profiles.map((p) => (
-          <button
-            key={p.stateCode}
-            type="button"
-            onClick={() => selectActive(p.stateCode)}
-            className={
-              p.stateCode === activeCode
-                ? 'rounded-full bg-indigo-600 px-3 py-1 text-[12px] font-medium text-white'
-                : 'rounded-full border border-slate-200 px-3 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-50 dark:border-[#1F1F1F] dark:text-[#A1A1AA] dark:hover:bg-[#181818]'
-            }
-          >
-            {p.stateName}
-          </button>
-        ))}
-        {!locked && available.length > 0 ? (
-          <select
-            value=""
-            onChange={(e) => addState(e.target.value)}
-            className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-[12px] text-slate-600 dark:border-[#2A2A2A] dark:bg-[#0A0A0A] dark:text-[#A1A1AA]"
-          >
-            <option value="">+ Add a state</option>
-            {available.map((s) => (
-              <option key={s.code} value={s.code}>
-                {s.name} ({s.code})
-              </option>
-            ))}
-          </select>
+    <SettingsCard>
+      <SettingsSection
+        title="Seller details by state"
+        description="Company, GSTIN, address and bank details for each GST registration (e.g. Delhi, Karnataka). Printed on invoices and quotes; reps pick the state on each one."
+        icon={Landmark}
+      >
+        {locked ? (
+          <p className="rounded-md bg-slate-50 px-3 py-2 text-[12px] text-slate-500 dark:bg-[#111111] dark:text-[#A1A1AA]">
+            Only the workspace owner can change these.
+          </p>
         ) : null}
-      </div>
 
-      {active ? (
-        <fieldset disabled={locked} className="space-y-3 rounded-lg border border-slate-200 p-4 dark:border-[#1F1F1F]">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[13px] font-semibold text-slate-900 dark:text-[#FAFAFA]">
-              {active.stateName} <span className="text-slate-400">· code {active.stateCode}</span>
-            </h3>
-            {!locked ? (
-              <button
-                type="button"
-                onClick={removeActive}
-                disabled={saving}
-                className="inline-flex items-center gap-1 text-[12px] text-red-600 hover:underline disabled:opacity-60"
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden /> Remove state
-              </button>
-            ) : null}
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Company name" required error={errors.name}>
-              <input value={active.name} onChange={(e) => patchActive({ name: e.target.value })} placeholder="Your company name" className={cls(errors.name)} />
-            </Field>
-            <Field label="GSTIN/UIN" required error={errors.gstin}>
-              <input value={active.gstin} onChange={(e) => patchActive({ gstin: e.target.value })} placeholder={`${active.stateCode}ABCDE1234F1Z5`} className={cls(errors.gstin)} />
-            </Field>
-          </div>
-          {!locked ? (
-            <p className="text-[11px] text-slate-400">
-              GSTIN must start with {active.stateCode} (the {active.stateName} GST code).
-            </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {profiles.map((p) => (
+            <button
+              key={p.stateCode}
+              type="button"
+              onClick={() => selectActive(p.stateCode)}
+              className={
+                p.stateCode === activeCode
+                  ? 'rounded-full bg-indigo-600 px-3 py-1 text-[12px] font-medium text-white'
+                  : 'rounded-full border border-slate-200 px-3 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-50 dark:border-[#1F1F1F] dark:text-[#A1A1AA] dark:hover:bg-[#181818]'
+              }
+            >
+              {p.stateName}
+            </button>
+          ))}
+          {!locked && available.length > 0 ? (
+            <select
+              value=""
+              onChange={(e) => addState(e.target.value)}
+              className="rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-[12px] text-slate-600 dark:border-[#2A2A2A] dark:bg-[#0A0A0A] dark:text-[#A1A1AA]"
+            >
+              <option value="">+ Add a state</option>
+              {available.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name} ({s.code})
+                </option>
+              ))}
+            </select>
           ) : null}
-          <Field label="Address" required error={errors.address}>
-            <textarea value={active.address} onChange={(e) => patchActive({ address: e.target.value })} rows={3} placeholder="Full address — street, area, city, state, pincode" className={cls(errors.address)} />
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="PAN" required error={errors.pan}><input value={active.pan} onChange={(e) => patchActive({ pan: e.target.value })} placeholder="ABCDE1234F" className={cls(errors.pan)} /></Field>
-            <Field label="CIN"><input value={active.cin} onChange={(e) => patchActive({ cin: e.target.value })} placeholder="U12345KA… (optional)" className={inputCls} /></Field>
-            <Field label="Bank name" required error={errors.bankName}><input value={active.bankName} onChange={(e) => patchActive({ bankName: e.target.value })} placeholder="Axis Bank" className={cls(errors.bankName)} /></Field>
-            <Field label="A/c No." required error={errors.bankAccount}><input value={active.bankAccount} onChange={(e) => patchActive({ bankAccount: e.target.value })} placeholder="Account number" className={cls(errors.bankAccount)} /></Field>
-            <Field label="IFSC" required error={errors.bankIfsc}><input value={active.bankIfsc} onChange={(e) => patchActive({ bankIfsc: e.target.value })} placeholder="UTIB0000009" className={cls(errors.bankIfsc)} /></Field>
-            <Field label="Branch" required error={errors.bankBranch}><input value={active.bankBranch} onChange={(e) => patchActive({ bankBranch: e.target.value })} placeholder="Branch" className={cls(errors.bankBranch)} /></Field>
-          </div>
-          {!locked ? (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={saveActive}
-                disabled={saving}
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-[13px] font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                Save {active.stateName}
-              </button>
+        </div>
+
+        {active ? (
+          <fieldset disabled={locked} className="space-y-3 border-t border-slate-100 pt-3 dark:border-[#1F1F1F]">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[13px] font-semibold text-slate-900 dark:text-[#FAFAFA]">
+                {active.stateName} <span className="font-normal text-slate-400">· code {active.stateCode}</span>
+              </h3>
+              {!locked ? (
+                <button
+                  type="button"
+                  onClick={removeActive}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 text-[12px] text-red-600 hover:underline disabled:opacity-60"
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden /> Remove state
+                </button>
+              ) : null}
             </div>
-          ) : null}
-        </fieldset>
-      ) : (
-        <p className="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-[13px] text-slate-500 dark:border-[#2A2A2A] dark:text-[#A1A1AA]">
-          {locked
-            ? 'No seller details yet. The workspace owner adds them here.'
-            : 'Add a state above to set up seller & bank details.'}
-        </p>
-      )}
-    </SettingsSection>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Company name" required error={errors.name}>
+                <input value={active.name} onChange={(e) => patchActive({ name: e.target.value })} placeholder="Your company name" className={cls(errors.name)} />
+              </Field>
+              <Field label="GSTIN/UIN" required error={errors.gstin}>
+                <input value={active.gstin} onChange={(e) => patchActive({ gstin: e.target.value })} placeholder={`${active.stateCode}ABCDE1234F1Z5`} className={cls(errors.gstin)} />
+              </Field>
+            </div>
+            {!locked ? (
+              <p className="text-[11px] text-slate-400">
+                GSTIN must start with {active.stateCode} (the {active.stateName} GST code).
+              </p>
+            ) : null}
+            <Field label="Address" required error={errors.address}>
+              <textarea value={active.address} onChange={(e) => patchActive({ address: e.target.value })} rows={3} placeholder="Full address — street, area, city, state, pincode" className={cls(errors.address)} />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="PAN" required error={errors.pan}><input value={active.pan} onChange={(e) => patchActive({ pan: e.target.value })} placeholder="ABCDE1234F" className={cls(errors.pan)} /></Field>
+              <Field label="CIN"><input value={active.cin} onChange={(e) => patchActive({ cin: e.target.value })} placeholder="U12345KA… (optional)" className={inputCls} /></Field>
+              <Field label="Bank name" required error={errors.bankName}><input value={active.bankName} onChange={(e) => patchActive({ bankName: e.target.value })} placeholder="Axis Bank" className={cls(errors.bankName)} /></Field>
+              <Field label="A/c No." required error={errors.bankAccount}><input value={active.bankAccount} onChange={(e) => patchActive({ bankAccount: e.target.value })} placeholder="Account number" className={cls(errors.bankAccount)} /></Field>
+              <Field label="IFSC" required error={errors.bankIfsc}><input value={active.bankIfsc} onChange={(e) => patchActive({ bankIfsc: e.target.value })} placeholder="UTIB0000009" className={cls(errors.bankIfsc)} /></Field>
+              <Field label="Branch" required error={errors.bankBranch}><input value={active.bankBranch} onChange={(e) => patchActive({ bankBranch: e.target.value })} placeholder="Branch" className={cls(errors.bankBranch)} /></Field>
+            </div>
+            {!locked ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={saveActive}
+                  disabled={saving}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-indigo-600 px-3 text-[12.5px] font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                  Save {active.stateName}
+                </button>
+              </div>
+            ) : null}
+          </fieldset>
+        ) : (
+          <p className="rounded-md border border-dashed border-slate-200 px-4 py-6 text-center text-[12.5px] text-slate-500 dark:border-[#2A2A2A] dark:text-[#A1A1AA]">
+            {locked
+              ? 'No seller details yet. The workspace owner adds them here.'
+              : 'Add a state above to set up seller & bank details.'}
+          </p>
+        )}
+      </SettingsSection>
+    </SettingsCard>
   );
 }
 
@@ -253,7 +256,7 @@ function Field({
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-[12px] font-medium text-slate-600 dark:text-[#A1A1AA]">
+      <span className="text-[13px] font-medium text-slate-800 dark:text-[#FAFAFA]">
         {label}
         {required ? <span className="text-rose-500"> *</span> : null}
       </span>

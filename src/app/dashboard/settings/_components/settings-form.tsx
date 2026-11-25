@@ -61,6 +61,20 @@ export function SettingsSection({
   );
 }
 
+/** The white card every settings block sits in (SettingsForm uses it too). */
+export function SettingsCard({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        'space-y-3 rounded-lg border border-slate-200 bg-white p-4 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 /**
  * Form wrapper with dirty-tracking + Save button. Children render
  * the actual input rows; on Save we collect form data and pass to
@@ -104,9 +118,7 @@ export function SettingsForm<T extends Record<string, unknown>>({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 dark:border-[#1F1F1F] dark:bg-[#0A0A0A]">
-        {children}
-      </div>
+      <SettingsCard>{children}</SettingsCard>
       <div className="flex items-center justify-end gap-3">
         {savedAt && Date.now() - savedAt < 5000 ? (
           <span
