@@ -3,7 +3,6 @@
 import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
@@ -92,7 +91,6 @@ export function QuoteEditor({
   /** Seller profiles (Invoice settings) this draft can be issued from; [] when not editable. */
   sellerChoices: QuoteSellerChoice[];
 }) {
-  const router = useRouter();
   const quote = renderInput.quote;
   const body = renderInput.body;
   const editable = quote.status === 'draft' && canManage;
@@ -134,7 +132,6 @@ export function QuoteEditor({
       setFormError(null);
       setSaved(snapshotOf(sent));
       toast.success('Quote saved');
-      router.refresh();
     });
   }
 

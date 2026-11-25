@@ -54,6 +54,15 @@ export type QuoteActionResult<T extends object = Record<never, never>> =
 const QUOTES_PATH = '/dashboard/quotes';
 const TEMPLATES_PATH = '/dashboard/settings/quote-templates';
 const dealPath = (dealId: string) => `/dashboard/deals/${dealId}`;
+/**
+ * Revalidate the quotes list and the quote's own page. Revalidating the page
+ * the user is on sends it back refreshed in the action response, so the
+ * client needs no router.refresh() (a second round trip; slow INP).
+ */
+function revalidateQuote(id: string): void {
+  revalidatePath(QUOTES_PATH);
+  revalidatePath(`${QUOTES_PATH}/${id}`);
+}
 /** Revalidate the deal page when the quote is linked to one. */
 function revalidateDeal(dealId: string | null | undefined): void {
   if (dealId) revalidatePath(dealPath(dealId));
@@ -157,6 +166,7 @@ export async function saveQuoteTemplateAction(raw: unknown): Promise<QuoteAction
   return gated(['manageQuoteTemplates'], async ({ tenantId, userId }) => {
     const { id } = await saveQuoteTemplate(tenantId, userId, parsed.data);
     revalidatePath(TEMPLATES_PATH);
+    revalidatePath(`${TEMPLATES_PATH}/${id}`);
     return { ok: true, id };
   });
 }
@@ -235,8 +245,7 @@ export async function setQuoteDealAction(id: string, dealId: string | null): Pro
   return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
     await requireQuoteAccess(tenantId, id, role, userId);
     const { previousDealId } = await setQuoteDeal(tenantId, userId, id, dealId, dealScopeFor(role, userId));
-    revalidatePath(QUOTES_PATH);
-    revalidatePath(`${QUOTES_PATH}/${id}`);
+    revalidateQuote(id);
     revalidateDeal(previousDealId);
     revalidateDeal(dealId);
     return { ok: true };
@@ -253,7 +262,7 @@ export async function updateQuoteDraftAction(
   return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
     await requireQuoteAccess(tenantId, id, role, userId);
     const quote = await updateQuoteDraft(tenantId, userId, id, parsed.data);
-    revalidatePath(QUOTES_PATH);
+    revalidateQuote(id);
     revalidateDeal(quote.dealId);
     return { ok: true, quote };
   });
@@ -265,7 +274,7 @@ export async function reapplyTemplateAction(id: string, templateId?: string): Pr
   return gated(['manageQuotes'], async ({ tenantId, userId, role }) => {
     await requireQuoteAccess(tenantId, id, role, userId);
     await reapplyTemplate(tenantId, userId, id, templateId);
-    revalidatePath(QUOTES_PATH);
+    revalidateQuote(id);
     return { ok: true };
   });
 }
@@ -291,7 +300,7 @@ export async function setDealAmountFromQuoteAction(id: string): Promise<QuoteAct
   return gated(['manageQuotes', 'manageDeals'], async ({ tenantId, userId, role }) => {
     await requireQuoteAccess(tenantId, id, role, userId);
     await setDealAmountFromQuote(tenantId, userId, id);
-    revalidatePath(QUOTES_PATH);
+    revalidateQuote(id);
     const q = await getQuote(tenantId, id);
     revalidateDeal(q?.dealId);
     return { ok: true };
@@ -345,7 +354,7 @@ export async function markQuoteSentAction(id: string): Promise<QuoteActionResult
       }
       return { ok: false, error: failure.error };
     }
-    revalidatePath(QUOTES_PATH);
+    revalidateQuote(id);
     const q = await getQuote(tenantId, id);
     revalidateDeal(q?.dealId);
     return { ok: true, documentId };
