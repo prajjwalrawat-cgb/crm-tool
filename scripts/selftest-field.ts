@@ -242,6 +242,12 @@ async function main() {
       check('resolveShortUrl goo.gl -> google maps returns Location', (await mk(302, good).resolveShortUrl('https://goo.gl/x')) === good);
       check('resolveShortUrl maps.app.goo.gl ok', (await mk(301, good).resolveShortUrl('https://maps.app.goo.gl/abc')) === good);
       check('resolveShortUrl google.com/maps input ok', (await mk(302, good).resolveShortUrl('https://www.google.com/maps/x')) === good);
+      for (const bad of ['https://www.google.evl.cd/maps', 'https://www.google.xyz/maps', 'https://goo.gl.evil.com/x', 'https://user@goo.gl@evil.com/x', 'https://www.google.com.evil.com/maps']) {
+        const before = calls;
+        check(`resolveShortUrl rejects ${bad} without fetching`, (await mk(302, good).resolveShortUrl(bad)) === null && calls === before, calls);
+      }
+      check('resolveShortUrl Location on look-alike TLD returns null', (await mk(302, 'https://www.google.ab.cd/maps/x').resolveShortUrl('https://goo.gl/x')) === null);
+      check('resolveShortUrl google.co.in/maps input ok', (await mk(302, good).resolveShortUrl('https://www.google.co.in/maps/x')) === good);
       check('resolveShortUrl google.com non-maps path rejected', (await mk(302, good).resolveShortUrl('https://www.google.com/search')) === null);
     }
   }

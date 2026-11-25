@@ -14,8 +14,15 @@ export interface MapsProvider {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 const SHORT_HOSTS = new Set(['goo.gl', 'maps.app.goo.gl', 'g.co']);
-const GOOGLE_HOST = /^(?:(?:www|maps)\.)?google\.[a-z]{2,3}(?:\.[a-z]{2})?$/;
-const isGoogleHost = (h: string) => h === 'google.com' || GOOGLE_HOST.test(h);
+const GOOGLE_HOSTS = new Set([
+  'google.com',
+  'www.google.com',
+  'maps.google.com',
+  'google.co.in',
+  'www.google.co.in',
+  'maps.google.co.in',
+]);
+const isGoogleHost = (h: string) => GOOGLE_HOSTS.has(h);
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 function parseHttps(url: string): URL | null {
