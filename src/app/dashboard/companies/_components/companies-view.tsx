@@ -260,6 +260,14 @@ export function CompaniesView({
       normalizedName: null,
       mergedIntoId: null,
       dedupOverride: false,
+      address: null,
+      city: null,
+      state: null,
+      postalCode: null,
+      lat: null,
+      lng: null,
+      geocodeStatus: null,
+      checkinRadiusM: null,
       // A company that does not exist yet has no deals, no contacts and no
       // history. Zeroes here are the truth, not a placeholder — and they
       // render as em dashes, so the optimistic row looks the way the real

@@ -1,7 +1,9 @@
 import { relations } from 'drizzle-orm';
 import {
   boolean,
+  doublePrecision,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -11,6 +13,7 @@ import {
 
 import { contacts } from './contacts';
 import { deals } from './deals';
+import { geocodeStatus } from './enums';
 import { tenants } from './tenants';
 
 export const companies = pgTable(
@@ -52,6 +55,19 @@ export const companies = pgTable(
     mergedIntoId: uuid('merged_into_id'),
     /** True when created despite a surfaced duplicate warning ("Create anyway"). */
     dedupOverride: boolean('dedup_override').notNull().default(false),
+    /** Field Meetings (0081): site address; a meeting's address defaults to this. */
+    address: text('address'),
+    city: text('city'),
+    state: text('state'),
+    postalCode: text('postal_code'),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    geocodeStatus: geocodeStatus('geocode_status'),
+    /**
+     * Optional per-company check-in radius in metres (50-5000, CHECK in SQL).
+     * Overrides the tenant default when set, e.g. for large industrial sites.
+     */
+    checkinRadiusM: integer('checkin_radius_m'),
   },
   (t) => [
     index('companies_tenant_id_idx').on(t.tenantId),

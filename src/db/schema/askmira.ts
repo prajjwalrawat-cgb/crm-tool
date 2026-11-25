@@ -1,5 +1,6 @@
 import { pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
+import { identityMatchMethod } from './enums';
 import { tenants } from './tenants';
 import { users } from './users';
 
@@ -54,6 +55,9 @@ export const askmiraPeople = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     askmiraUserId: text('askmira_user_id'),
+    /** Field Meetings (0081): the AskMira employee id and how it was matched. */
+    askmiraEmployeeId: text('askmira_employee_id'),
+    matchMethod: identityMatchMethod('match_method'),
     linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
     suspendedAt: timestamp('suspended_at', { withTimezone: true }),
   },
