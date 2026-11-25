@@ -71,7 +71,7 @@ postgres-js, Inngest 4, zod 4, React Query 5, Tailwind. Tests: `scripts/selftest
   (values exactly as in the design doc "Schema" section).
 
 - [ ] **Step 1: Write the SQL** exactly per the design's Schema section: enums (DO/EXCEPTION wrapped); `companies` add
-  `address, city, state, postal_code, lat, lng, geocode_status`; tables `meetings` (incl. `title`, `notes`,
+  `address, city, state, postal_code, lat, lng, geocode_status`, `checkin_radius_m integer NULL CHECK (checkin_radius_m IS NULL OR checkin_radius_m BETWEEN 50 AND 5000)` (per-company radius override); tables `meetings` (incl. `title`, `notes`,
   `checked_in_at`, `checked_out_at`, `created_by`, `virtual_url`, `cancelled_at`, `cancel_reason`,
   `CHECK (end_at > start_at)`, unique `(tenant_id, source, external_event_id)`, indexes
   `(tenant_id, owner_id, start_at)`, `(tenant_id, start_at)`, `(tenant_id, deal_id)`), `meeting_checkins`
@@ -225,10 +225,10 @@ postgres-js, Inngest 4, zod 4, React Query 5, Tailwind. Tests: `scripts/selftest
     notes? }` (address/coords default from company; geocode when address given and no copied coords);
     `updateMeeting(actor, id, patch: Partial<CreateMeetingInput>)` (re-geocode only when address changed and
     `geocode_status !== 'manual'`); `cancelMeeting(actor, id, reason?: string)`; `markEnRoute(actor, id)`;
-    `pinMeetingSite(actor, id, input: string)` and `pinCompanySite(actor, companyId, input: string)` (require
+    `pinMeetingSite(actor, id, input: string)` and `pinCompanySite(actor, companyId, input: string, radiusM?: number | null)` (require
     `pinFieldSites`; use `parseSiteInput`, resolve short URLs, set `geocode_status='manual'`).
   - `checkins.ts`: `checkIn(actor, id, pos: { lat; lng; accuracyM; overrideReason?: string }): Promise<{ checkin:
-    MeetingCheckin; verified: boolean; distanceM: number | null }>` — owner only; locks the meeting row
+    MeetingCheckin; verified: boolean; distanceM: number | null }>` — owner only; radius = company `checkin_radius_m` ?? tenant radius; locks the meeting row
     (`FOR UPDATE`); outside radius without override → inserts `accepted=false` row **in its own committed
     transaction**, then throws `FieldError('outside_radius')` carrying `{ distanceM, radiusM }`; no site →
     accepted, `verified=false`, `override_reason='site_not_geocoded'`;
@@ -266,7 +266,7 @@ postgres-js, Inngest 4, zod 4, React Query 5, Tailwind. Tests: `scripts/selftest
     `invalid_transition`; virtual planned → `mom_logged`.
   - `scoping`: r1 `getDay` sees only own; m sees r1+r2+self, not r3; o sees all; r1 `createMeeting` with
     `ownerId r2` → `forbidden`; m creating for r1 ok; tenant B actor never sees tenant A rows (RLS).
-  - `rep cannot pin`; `manager pins via link → manual`; `address edit keeps manual pin`.
+  - `rep cannot pin`; `manager pins via link → manual`; `address edit keeps manual pin`; `company radius 800 overrides tenant 300` (check-in 500 m away from a company with `checkin_radius_m 800` → verified).
   - `day view uses tenant-local day` — meeting at 2026-11-26 00:30 IST appears for `date '2026-11-26'` only.
   - `acceptance: KPI distinct deal` — 3 meetings on one deal → `pipelineMinor` equals that deal once.
 - [ ] **Step 2: Run, expect FAIL.**

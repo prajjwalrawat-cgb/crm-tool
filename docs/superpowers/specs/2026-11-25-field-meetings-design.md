@@ -96,7 +96,10 @@ negative)`, `calendar_provider (google, microsoft)`, `location_provider (askmira
 (sso, email, manual)`.
 
 **companies** — add `address text, city text, state text, postal_code text, lat double precision, lng double precision,
-geocode_status geocode_status`. Company edit form gets an address block. Meeting address defaults to this.
+geocode_status geocode_status`, `checkin_radius_m integer NULL CHECK (50..5000)`. Company edit form gets an address
+block. Meeting address defaults to this. `checkin_radius_m` is an optional per-company override of the tenant radius
+for large industrial sites (user decision 2026-11-25, answering the developer brief's open product question); set by
+managers/admins next to the site pin (`pinFieldSites`).
 
 **meetings** — spec columns, plus (my calls):
 - `title text not null` (UI needs a label; calendar events have one),
@@ -178,6 +181,7 @@ comes from geofences in PR 3. Logging a MOM on a physical meeting that is still 
 "Check out & log MOM" (two transitions, one transaction) (my call).
 
 ### Check-in / check-out / walk-in
+- Effective radius = the meeting's company `checkin_radius_m` if set, else tenant `checkin_radius_m`.
 - `POST /api/field/meetings/:id/checkin {lat, lng, accuracy, override_reason?}`: haversine to site.
   - Site has coordinates and distance ≤ `checkin_radius_m` → accepted, `verified=true`.
   - Outside radius, no override → **rejected (422)**, attempt row saved with `accepted=false`.
