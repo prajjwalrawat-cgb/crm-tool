@@ -7,6 +7,16 @@ import { computeKpis } from '../src/lib/field/kpis';
 import { FieldError } from '../src/lib/field/types';
 import { GoogleProvider } from '../src/lib/field/maps/google';
 import { EstimateProvider } from '../src/lib/field/maps/estimate';
+import { ZodError } from 'zod';
+import {
+  fieldErrorResponse,
+  parseCheckInBody,
+  parseCreateBody,
+  parseDayQuery,
+  parseOutcomeBody,
+  parseUpdateBody,
+  setFieldErrorReporter,
+} from '../src/app/api/field/_lib/http';
 import type { MeetingStatus } from '../src/db/schema/enums';
 
 /**
@@ -265,6 +275,52 @@ async function main() {
       check('resolveShortUrl google.co.in/maps input ok', (await mk(302, good).resolveShortUrl('https://www.google.co.in/maps/x')) === good);
       check('resolveShortUrl google.com non-maps path rejected', (await mk(302, good).resolveShortUrl('https://www.google.com/search')) === null);
     }
+  }
+
+  // ---- HTTP layer (pure): error mapping + body parsing ----
+  {
+    const origErr = console.error;
+    console.error = () => {};
+    const j = async (e: unknown) => {
+      const r = fieldErrorResponse(e);
+      return { status: r.status, body: (await r.json()) as Record<string, unknown>, cache: r.headers.get('Cache-Control') };
+    };
+    const rad = await j(new FieldError('outside_radius', 'Too far', { distanceM: 500, radiusM: 200 }));
+    check('http outside_radius 422 with code/distanceM/radiusM', rad.status === 422 && rad.body.code === 'outside_radius' && rad.body.distanceM === 500 && rad.body.radiusM === 200 && rad.cache === 'no-store', rad);
+    check('http invalid_transition 409', (await j(new FieldError('invalid_transition', 'x'))).status === 409);
+    check('http not_found 404', (await j(new FieldError('not_found', 'x'))).status === 404);
+    check('http forbidden 403', (await j(new FieldError('forbidden', 'x'))).status === 403);
+    const val = await j(new FieldError('validation', 'bad'));
+    check('http validation 400', val.status === 400 && val.body.code === 'validation' && val.body.error === 'bad', val);
+    let zerr: unknown;
+    try { parseCheckInBody({ lat: 91, lng: 0, accuracyM: 5 }); } catch (e) { zerr = e; }
+    const zr = await j(zerr);
+    check('http ZodError 400 with issues', zerr instanceof ZodError && zr.status === 400 && zr.body.code === 'validation' && Array.isArray(zr.body.issues), zr);
+    let reported: unknown = null;
+    setFieldErrorReporter((e) => { reported = e; });
+    const unk = await j(new Error('secret db password leaked'));
+    check('http unknown 500 no leak', unk.status === 500 && unk.body.error === 'Something went wrong.' && !JSON.stringify(unk.body).includes('secret') && reported instanceof Error, unk);
+    console.error = origErr;
+
+    const throwsZod = (fn: () => unknown) => { try { fn(); return false; } catch (e) { return e instanceof ZodError; } };
+    check('parseCheckInBody ok', parseCheckInBody({ lat: 28.5, lng: 77.3, accuracyM: 12, overrideReason: 'gate' }).overrideReason === 'gate');
+    check('parseCheckInBody rejects lat 91', throwsZod(() => parseCheckInBody({ lat: 91, lng: 0, accuracyM: 5 })));
+    check('parseCheckInBody rejects missing accuracyM', throwsZod(() => parseCheckInBody({ lat: 1, lng: 1 })));
+    check('parseCheckInBody rejects string lat', throwsZod(() => parseCheckInBody({ lat: '1', lng: 1, accuracyM: 5 })));
+    check('parseCheckInBody rejects non-object', throwsZod(() => parseCheckInBody(null)));
+    check('parseDayQuery bad date', throwsZod(() => parseDayQuery(new URLSearchParams('date=bad'))));
+    check('parseDayQuery missing date', throwsZod(() => parseDayQuery(new URLSearchParams(''))));
+    const dq = parseDayQuery(new URLSearchParams('date=2026-11-25&repId=user_1&atRiskOnly=true'));
+    check('parseDayQuery ok', dq.date === '2026-11-25' && dq.repId === 'user_1' && dq.atRiskOnly === true, dq);
+    const cm = parseCreateBody({ title: 'T', type: 'physical', startAt: '2026-11-25T10:00:00Z', endAt: '2026-11-25T11:00:00+05:30', ownerId: 'user_2', dealId: null });
+    check('parseCreateBody dates -> Date', cm.startAt instanceof Date && cm.endAt instanceof Date && cm.dealId === null, cm);
+    check('parseCreateBody rejects bad date', throwsZod(() => parseCreateBody({ title: 'T', type: 'virtual', startAt: 'nope', endAt: 'nope' })));
+    check('parseCreateBody rejects non-uuid dealId', throwsZod(() => parseCreateBody({ title: 'T', type: 'virtual', startAt: '2026-11-25T10:00:00Z', endAt: '2026-11-25T11:00:00Z', dealId: 'x' })));
+    const up = parseUpdateBody({ title: 'New' });
+    check('parseUpdateBody leaves absent keys absent', Object.keys(up).join() === 'title', up);
+    const oc = parseOutcomeBody({ momText: 'm', nextSteps: [{ action: 'a', dueDate: null }], checkOutAt: { lat: 1, lng: 2, accuracyM: 3 } });
+    check('parseOutcomeBody ok', oc.momText === 'm' && oc.checkOutAt?.accuracyM === 3, oc);
+    check('parseOutcomeBody rejects bad sentiment', throwsZod(() => parseOutcomeBody({ momText: 'm', sentiment: 'happy' })));
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
