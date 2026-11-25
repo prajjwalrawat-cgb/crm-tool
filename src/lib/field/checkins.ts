@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
 
 import { companies, meetingCheckins, meetings, type Meeting, type MeetingCheckin } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
@@ -56,7 +56,7 @@ async function effectiveRadius(tx: Tx, tenantId: string, companyId: string | nul
   return (await getFieldSettings(tx, tenantId)).checkinRadiusM;
 }
 
-const setMeeting = (tx: Tx, m: Meeting, values: Partial<typeof meetings.$inferInsert>) =>
+const setMeeting = (tx: Tx, m: Meeting, values: { [K in keyof typeof meetings.$inferInsert]?: (typeof meetings.$inferInsert)[K] | SQL }) =>
   tx
     .update(meetings)
     .set(values)
@@ -113,7 +113,12 @@ export function checkIn(
         .insert(meetingCheckins)
         .values({ ...base, accepted: true, verified, overrideReason })
         .returning();
-      const [row] = await setMeeting(tx, cur, { status: 'checked_in', checkedInAt: now, updatedAt: now });
+      const [row] = await setMeeting(tx, cur, {
+        status: 'checked_in',
+        checkedInAt: now,
+        atRiskReasons: sql`array_remove(${meetings.atRiskReasons}, 'no_checkin')`,
+        updatedAt: now,
+      });
       await publishMeetingUpdated(tx, row!);
       return { rejected: false, checkin: checkin!, verified, distanceM };
     });

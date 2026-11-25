@@ -602,7 +602,7 @@ async function main() {
     const D = await mk('rd');
     extraTenants.push(C, D);
     const uid = (n: string) => `zz_field_${n}_${stamp}`;
-    const U = { cm: uid('cm'), c1: uid('c1'), c2: uid('c2'), c3: uid('c3'), c4: uid('c4'), c5: uid('c5'), c6: uid('c6'), d1: uid('d1') };
+    const U = { cm: uid('cm'), c1: uid('c1'), c2: uid('c2'), c3: uid('c3'), c4: uid('c4'), c5: uid('c5'), c6: uid('c6'), c7: uid('c7'), c8: uid('c8'), d1: uid('d1') };
     await db.insert(s.users).values(
       Object.entries(U).map(([k, id]) => ({ id, email: `${id}@example.test`, firstName: k.toUpperCase(), lastName: 'Scan' })),
     );
@@ -614,11 +614,15 @@ async function main() {
       { tenantId: C, userId: U.c4, role: 'member' as const, reportsToUserId: U.cm },
       { tenantId: C, userId: U.c5, role: 'member' as const, reportsToUserId: U.cm },
       { tenantId: C, userId: U.c6, role: 'member' as const, reportsToUserId: U.cm },
+      { tenantId: C, userId: U.c7, role: 'member' as const, reportsToUserId: U.cm },
+      { tenantId: C, userId: U.c8, role: 'member' as const, reportsToUserId: U.cm },
       { tenantId: D, userId: U.d1, role: 'member' as const },
     ]);
     const act = (tenantId: string, userId: string, role: FieldActor['role']): FieldActor => ({ tenantId, userId, role });
     const N = new Date('2026-12-10T05:00:00Z'); // 10:30 IST, inside 09:00-19:00
     const min = (n: number) => new Date(N.getTime() + n * 60_000);
+    let driveCalls = 0;
+    let driveMin = 25;
     const maps: MapsProvider = {
       name: 'fake',
       async geocode() {
@@ -628,7 +632,8 @@ async function main() {
         return 'x';
       },
       async driveMinutes() {
-        return { minutes: 25, estimate: false };
+        driveCalls++;
+        return { minutes: driveMin, estimate: false };
       },
       async resolveShortUrl() {
         return null;
@@ -745,6 +750,7 @@ async function main() {
     check('k5 flagged before check-in', j(await reasons(C, k5.id)) === '["no_checkin"]', await reasons(C, k5.id));
     const nk5a = (await notifsFor(C, k5.id)).length;
     await CI.checkIn(act(C, U.c5, 'member'), k5.id, { ...S1, accuracyM: 5 }, deps);
+    check('checkIn clears stored no_checkin immediately', j(await reasons(C, k5.id)) === '[]', await reasons(C, k5.id));
     await RS.scanTenantRisks(C, scanDeps);
     check('flag clears after check-in', j(await reasons(C, k5.id)) === '[]', await reasons(C, k5.id));
     await db.execute(sql`UPDATE meetings SET status = 'planned', checked_in_at = NULL WHERE id = ${k5.id}`);
@@ -760,6 +766,28 @@ async function main() {
     const nk6 = (await notifsFor(C, k6.id)).length;
     await RS.scanTenantRisks(C, scanDeps);
     check('mom_missing cleared by outcome', j(await reasons(C, k6.id)) === '[]' && (await notifsFor(C, k6.id)).length === nk6, await reasons(C, k6.id));
+
+    // travel_gap is frozen once the later meeting started: no re-pricing, no flip, no re-notify
+    const pP = await ins({ tenantId: C, ownerId: U.c7, title: 'ZZ pp', start: -400, end: -370, site: S1 });
+    const pQ = await ins({ tenantId: C, ownerId: U.c7, title: 'ZZ pq', start: -340, end: -310, site: S2 });
+    await db.execute(sql`UPDATE meetings SET at_risk_reasons = '{travel_gap}' WHERE id = ${pQ.id}`);
+    // cross-day pair: late yesterday (22:50 IST) -> early today (11:00 IST, still ahead)
+    await ins({ tenantId: C, ownerId: U.c8, title: 'ZZ xa', start: -700, end: -680, site: S1 });
+    await ins({ tenantId: C, ownerId: U.c8, title: 'ZZ xb', start: 30, end: 60, site: S2 });
+    const callsBefore = driveCalls;
+    driveMin = 5; // would clear the flag if the past pair were re-priced
+    const tgNotifs = async () =>
+      (await notifsFor(C, pQ.id)).filter((n) => (n.metadata as { reason?: string }).reason === 'travel_gap').length;
+    const nPQ = await tgNotifs();
+    await RS.scanTenantRisks(C, scanDeps);
+    driveMin = 25;
+    await RS.scanTenantRisks(C, scanDeps);
+    check(
+      'past travel_gap pair is frozen (no drive call, no flip, no re-notify)',
+      driveCalls === callsBefore && (await reasons(C, pQ.id)).includes('travel_gap') && j(await reasons(C, pP.id)).includes('travel_gap') === false && (await tgNotifs()) === nPQ,
+      { calls: driveCalls - callsBefore, q: await reasons(C, pQ.id) },
+    );
+    check('cross-day pair makes no drive call', driveCalls === callsBefore, driveCalls - callsBefore);
 
     // cross-tenant: scanning C never touched D
     check(

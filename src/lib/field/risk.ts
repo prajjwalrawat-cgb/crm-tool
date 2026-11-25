@@ -31,6 +31,7 @@ export async function computeRisks(
   now: Date,
   s: { graceMin: number; momDueHours: number },
   drive: DriveFn,
+  opts: { skipDrive?: (next: RiskMeeting) => boolean } = {},
 ): Promise<Map<string, MeetingRisk>> {
   const out = new Map<string, MeetingRisk>();
   const flags = new Map<string, Set<RiskReason>>();
@@ -73,6 +74,8 @@ export async function computeRisks(
       const prev = physical[i - 1];
       const next = physical[i];
       const gapMin = Math.round((next.startAt.getTime() - prev.endAt.getTime()) / MIN);
+      // Caller-frozen pair (e.g. the later meeting already started): no drive lookup, no flag.
+      if (opts.skipDrive?.(next)) continue;
       const d = await drive(prev.site!, next.site!, prev.endAt);
       const r = out.get(next.id)!;
       r.estDriveMin = d.minutes;
