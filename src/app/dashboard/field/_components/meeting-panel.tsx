@@ -8,6 +8,8 @@ import {
   Loader2,
   MapPin,
   MapPinned,
+  Ban,
+  Pencil,
   User,
   Video,
   X,
@@ -25,7 +27,9 @@ import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
 import { fieldApi } from '../_lib/api';
 import { formatTimeInTz } from '../_lib/datetime';
 import { STATUS_LABEL, STATUS_TONE, riskLabel } from '../_lib/labels';
+import { canCancelMeeting, canEditMeeting } from '../_lib/meeting-edit';
 import { useTenantTz } from '../_lib/tz-context';
+import { CancelMeetingSheet, EditMeetingSheet } from './meeting-actions';
 
 /** A site can be pinned until the rep checks in (mirrors the service rule). */
 const PINNABLE = new Set<MeetingStatus>(['planned', 'en_route', 'arrived']);
@@ -54,36 +58,47 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /**
  * Side panel for one meeting on the manager board: links, check-in trail
- * (every attempt), MOM, risks in plain words, and "Pin site" before check-in.
+ * (every attempt), MOM, risks in plain words, "Pin site" before check-in,
+ * and Edit / Cancel meeting for writers (gated by status like the service).
  * Non-modal: the board stays usable, Escape or the close button dismiss it.
  */
 export function MeetingPanel({
   meeting: m,
   repName,
+  canWrite,
+  ownersInScope,
   onClose,
   onChanged,
 }: {
   meeting: DayMeeting;
   repName: string;
+  /** False for viewers: no edit, cancel or pin. */
+  canWrite: boolean;
+  ownersInScope: Array<{ id: string; name: string }>;
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const [sheet, setSheet] = useState<null | 'edit' | 'cancel'>(null);
   const tz = useTenantTz();
   const ids = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const time = (d: Date | string) => formatTimeInTz(d, tz);
   const physical = m.type === 'physical';
-  const canPin = physical && PINNABLE.has(m.status);
+  const canPin = canWrite && physical && PINNABLE.has(m.status);
+  const canEdit = canWrite && canEditMeeting(m.status);
+  const canCancel = canWrite && canCancelMeeting(m.status);
 
   useEffect(() => {
     closeRef.current?.focus();
   }, [m.id]);
 
   useEffect(() => {
+    // While a sheet is open, Escape closes the sheet only.
+    if (sheet) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, sheet]);
 
   return (
     <aside
@@ -246,7 +261,44 @@ export function MeetingPanel({
         </Section>
 
         {canPin ? <PinSite meetingId={m.id} onPinned={onChanged} /> : null}
+
+        {canEdit || canCancel ? (
+          <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-[#1F1F1F]">
+            {canEdit ? (
+              <Button onClick={() => setSheet('edit')}>
+                <Pencil className="h-4 w-4" aria-hidden /> Edit
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button variant="danger" onClick={() => setSheet('cancel')}>
+                <Ban className="h-4 w-4" aria-hidden /> Cancel meeting
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
+
+      {sheet === 'edit' ? (
+        <EditMeetingSheet
+          meeting={m}
+          ownersInScope={ownersInScope}
+          onClose={() => setSheet(null)}
+          onSaved={() => {
+            setSheet(null);
+            onChanged();
+          }}
+        />
+      ) : null}
+      {sheet === 'cancel' ? (
+        <CancelMeetingSheet
+          meeting={m}
+          onClose={() => setSheet(null)}
+          onDone={() => {
+            setSheet(null);
+            onChanged();
+          }}
+        />
+      ) : null}
     </aside>
   );
 }

@@ -51,6 +51,7 @@ export function DayBoard({
   focusId,
   pipelineLabel,
   canManageReporting,
+  canWrite = true,
 }: {
   day: DayView;
   today: string;
@@ -63,6 +64,8 @@ export function DayBoard({
   pipelineLabel: string;
   /** Owner/admin (manageMembers): can set up reporting lines themselves; picks the banner copy. */
   canManageReporting: boolean;
+  /** False for viewers (the page gates on viewFieldTeam, which viewers lack today). */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const tz = useTenantTz();
@@ -322,7 +325,15 @@ export function DayBoard({
       </p>
 
       {selected && !creating ? (
-        <MeetingPanel key={selected.meeting.id} meeting={selected.meeting} repName={selected.repName} onClose={closePanel} onChanged={refresh} />
+        <MeetingPanel
+          key={selected.meeting.id}
+          meeting={selected.meeting}
+          repName={selected.repName}
+          canWrite={canWrite}
+          ownersInScope={ownersInScope}
+          onClose={closePanel}
+          onChanged={refresh}
+        />
       ) : null}
 
       {creating ? (

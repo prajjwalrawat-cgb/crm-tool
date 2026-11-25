@@ -136,7 +136,14 @@ export function MyDayView({
         <ol className="space-y-3">
           {meetings.map((m) => (
             <li key={m.id}>
-              <MeetingCard meeting={m} canWrite={canWrite} highlighted={m.id === highlightId} onChanged={refresh} />
+              <MeetingCard
+                meeting={m}
+                userId={userId}
+                ownersInScope={ownersInScope}
+                canWrite={canWrite}
+                highlighted={m.id === highlightId}
+                onChanged={refresh}
+              />
             </li>
           ))}
         </ol>

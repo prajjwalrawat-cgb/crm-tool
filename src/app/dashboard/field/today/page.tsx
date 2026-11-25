@@ -62,6 +62,7 @@ export default async function FieldTodayPage({ searchParams }: { searchParams: S
           focusId={focusId}
           pipelineLabel={formatCompactTenantCurrency(day.kpis.pipelineMinor, org)}
           canManageReporting={can(membership.role, 'manageMembers')}
+          canWrite={membership.role !== 'viewer'}
         />
       </TenantTzProvider>
     );

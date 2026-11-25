@@ -1,6 +1,18 @@
 'use client';
 
-import { AlertTriangle, Building2, Briefcase, CheckCircle2, MapPin, Navigation, NotebookPen, User, Video } from 'lucide-react';
+import {
+  AlertTriangle,
+  Ban,
+  Building2,
+  Briefcase,
+  CheckCircle2,
+  MapPin,
+  Navigation,
+  NotebookPen,
+  Pencil,
+  User,
+  Video,
+} from 'lucide-react';
 import { useState } from 'react';
 
 import type { DayMeeting } from '@/lib/field/day';
@@ -13,31 +25,41 @@ import { STATUS_LABEL, STATUS_TONE, riskLabel } from '../_lib/labels';
 import { directionsUrl } from '../_lib/maps-link';
 import { useTenantTz } from '../_lib/tz-context';
 import { CheckinButton } from './checkin-button';
+import { CancelMeetingSheet, EditMeetingSheet } from './meeting-actions';
 import { MomDialog } from './mom-dialog';
 
 const PRE_CHECKIN = new Set(['planned', 'en_route', 'arrived']);
+/** The rep edits or cancels their own meeting until they set off for it. */
+const REP_EDITABLE = new Set(['planned', 'en_route']);
 const SAFE_LINK = /^https?:\/\//i;
 
 const actionCls = 'min-h-11 flex-1 px-4 text-[14px]';
 
 /**
  * One meeting on the rep's day: time, status and risk chips, links, the
- * check-in trail, and the next action for its status. Read-only when
- * `canWrite` is false (viewers).
+ * check-in trail, and the next action for its status. The owner can edit or
+ * cancel a planned / en-route meeting. Read-only when `canWrite` is false (viewers).
  */
 export function MeetingCard({
   meeting: m,
+  userId,
+  ownersInScope,
   canWrite,
   highlighted,
   onChanged,
 }: {
   meeting: DayMeeting;
+  /** The signed-in user. */
+  userId: string;
+  ownersInScope: Array<{ id: string; name: string }>;
   canWrite: boolean;
   highlighted: boolean;
   onChanged: () => void;
 }) {
   const tz = useTenantTz();
   const [mom, setMom] = useState<null | { checkOut: boolean }>(null);
+  const [sheet, setSheet] = useState<null | 'edit' | 'cancel'>(null);
+  const canManage = canWrite && m.ownerId === userId && REP_EDITABLE.has(m.status);
   const time = (d: Date | string) => formatTimeInTz(d, tz);
 
   const physical = m.type === 'physical';
@@ -208,6 +230,17 @@ export function MeetingCard({
               <NotebookPen className="h-4 w-4" aria-hidden /> Edit MOM
             </Button>
           ) : null}
+
+          {canManage ? (
+            <div className="flex w-full justify-end gap-1">
+              <Button variant="ghost" onClick={() => setSheet('edit')} className="min-h-10 px-3">
+                <Pencil className="h-4 w-4" aria-hidden /> Edit
+              </Button>
+              <Button variant="ghost" onClick={() => setSheet('cancel')} className="min-h-10 px-3 text-rose-700 dark:text-rose-300">
+                <Ban className="h-4 w-4" aria-hidden /> Cancel meeting
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : m.cancelReason ? (
         <p className="mt-2 text-[12px] text-slate-500 dark:text-[#A1A1AA]">Cancelled: {m.cancelReason}</p>
@@ -216,12 +249,35 @@ export function MeetingCard({
       {mom ? (
         <MomDialog
           meetingId={m.id}
+          userId={userId}
           meetingTitle={m.title}
           existing={m.outcome ? { momText: m.outcome.momText, sentiment: m.outcome.sentiment, nextSteps: m.outcome.nextSteps } : null}
           checkOut={mom.checkOut}
           onClose={() => setMom(null)}
           onSaved={() => {
             setMom(null);
+            onChanged();
+          }}
+        />
+      ) : null}
+
+      {sheet === 'edit' ? (
+        <EditMeetingSheet
+          meeting={m}
+          ownersInScope={ownersInScope}
+          onClose={() => setSheet(null)}
+          onSaved={() => {
+            setSheet(null);
+            onChanged();
+          }}
+        />
+      ) : null}
+      {sheet === 'cancel' ? (
+        <CancelMeetingSheet
+          meeting={m}
+          onClose={() => setSheet(null)}
+          onDone={() => {
+            setSheet(null);
             onChanged();
           }}
         />

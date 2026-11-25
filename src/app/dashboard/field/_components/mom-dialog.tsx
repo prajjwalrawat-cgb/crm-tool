@@ -25,6 +25,7 @@ const SENTIMENTS: Array<[MeetingSentiment, string]> = [
 ];
 
 const fieldCls = cn(inputCls, 'min-h-10 text-[14px] sm:text-[13px]');
+/** Per user and meeting (`<userId>:<meetingId>`): a shared device never shows one rep another's draft. */
 const draftKey = (id: string) => `field:mom-draft:${id}`;
 
 function loadDraft(id: string): Draft | null {
@@ -53,6 +54,7 @@ function clearDraft(id: string) {
  */
 export function MomDialog({
   meetingId,
+  userId,
   meetingTitle,
   existing,
   checkOut,
@@ -60,6 +62,8 @@ export function MomDialog({
   onSaved,
 }: {
   meetingId: string;
+  /** The signed-in user; scopes the local draft. */
+  userId: string;
   meetingTitle: string;
   existing: { momText: string | null; sentiment: MeetingSentiment | null; nextSteps: MeetingNextStep[] } | null;
   checkOut: boolean;
@@ -67,23 +71,24 @@ export function MomDialog({
   onSaved: () => void;
 }) {
   const ids = useId();
+  const draftId = `${userId}:${meetingId}`;
   const [saved] = useState<Draft>(() => ({
     momText: existing?.momText ?? '',
     sentiment: existing?.sentiment ?? null,
     steps: (existing?.nextSteps ?? []).map((s) => ({ action: s.text, dueDate: s.dueDate ?? '' })),
   }));
-  const [draft, setDraft] = useState<Draft>(() => loadDraft(meetingId) ?? saved);
+  const [draft, setDraft] = useState<Draft>(() => loadDraft(draftId) ?? saved);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const position = usePosition((pos) => void send(pos));
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(draftKey(meetingId), JSON.stringify(draft));
+      window.localStorage.setItem(draftKey(draftId), JSON.stringify(draft));
     } catch {
       // Storage blocked (private mode): the form still works without a draft.
     }
-  }, [draft, meetingId]);
+  }, [draft, draftId]);
 
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setStep = (i: number, patch: Partial<Step>) =>
@@ -104,7 +109,7 @@ export function MomDialog({
     });
     setBusy(false);
     if (!res.ok) return setError(`${res.error} Your text is kept — tap save to retry.`);
-    clearDraft(meetingId);
+    clearDraft(draftId);
     toast.success(checkOut ? 'Checked out and MOM saved' : 'MOM saved');
     onSaved();
   }
@@ -120,7 +125,7 @@ export function MomDialog({
   const close = () => {
     // Nothing typed, or nothing changed from the saved MOM: no draft to keep.
     const empty = !draft.momText.trim() && draft.steps.every((s) => !s.action.trim());
-    if (empty || JSON.stringify(draft) === JSON.stringify(saved)) clearDraft(meetingId);
+    if (empty || JSON.stringify(draft) === JSON.stringify(saved)) clearDraft(draftId);
     onClose();
   };
 

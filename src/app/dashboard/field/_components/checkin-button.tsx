@@ -17,6 +17,8 @@ type CheckResult = { verified: boolean; distanceM: number | null };
 type Stage =
   | { kind: 'idle' }
   | { kind: 'sending' }
+  /** Saved: stays disabled until the parent re-renders (router.refresh swaps the card). */
+  | { kind: 'done' }
   | { kind: 'override'; pos: GeoPosition; distanceM: number; radiusM: number }
   | { kind: 'failed'; pos: GeoPosition; message: string; overrideReason?: string };
 
@@ -50,7 +52,7 @@ export function CheckinButton({
       body: { lat: pos.lat, lng: pos.lng, accuracyM: pos.accuracyM, ...(overrideReason ? { overrideReason } : {}) },
     });
     if (res.ok) {
-      setStage({ kind: 'idle' });
+      setStage({ kind: 'done' });
       setReason('');
       const note = res.data.verified ? '' : ' (not verified)';
       toast.success(kind === 'in' ? `Checked in${note}` : `Checked out${note}`);
@@ -70,6 +72,7 @@ export function CheckinButton({
   }
 
   const busy = position.state.kind === 'locating' || stage.kind === 'sending';
+  const done = stage.kind === 'done';
   const Icon = kind === 'in' ? LogIn : LogOut;
 
   return (
@@ -78,7 +81,7 @@ export function CheckinButton({
         <>
           <Button
             variant={primary ? 'primary' : 'secondary'}
-            disabled={busy}
+            disabled={busy || done}
             onClick={() => {
               setStage({ kind: 'idle' });
               void position.locate();
@@ -86,7 +89,15 @@ export function CheckinButton({
             className="min-h-11 w-full px-4 text-[14px]"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Icon className="h-4 w-4" aria-hidden />}
-            {stage.kind === 'sending' ? 'Saving…' : kind === 'in' ? 'Check in' : 'Check out'}
+            {stage.kind === 'sending'
+              ? 'Saving…'
+              : done
+                ? kind === 'in'
+                  ? 'Checked in'
+                  : 'Checked out'
+                : kind === 'in'
+                  ? 'Check in'
+                  : 'Check out'}
           </Button>
           {position.state.kind === 'idle' && stage.kind === 'idle' ? (
             <p className="text-center text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
