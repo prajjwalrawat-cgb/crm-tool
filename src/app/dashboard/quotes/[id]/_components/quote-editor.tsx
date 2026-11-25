@@ -88,7 +88,7 @@ export function QuoteEditor({
   offerings: OfferingChoice[];
   /** Reps: the deal picker lists only their own and unassigned deals. */
   limitedToOwnDeals: boolean;
-  /** Seller profiles (Invoice settings) this draft can be issued from; [] when not editable. */
+  /** Seller profiles (Settings → Organization) this draft can be issued from; [] when not editable. */
   sellerChoices: QuoteSellerChoice[];
 }) {
   const quote = renderInput.quote;
@@ -346,7 +346,7 @@ function SellerField({
         ))}
       </select>
       <span className="block text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
-        GSTIN, address and bank details printed on the quote. Edit them in Invoice settings.
+        GSTIN, address and bank details printed on the quote. The owner edits them in Settings → Organization.
       </span>
       <FieldErrors messages={errors} />
     </label>
