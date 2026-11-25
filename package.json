@@ -50,6 +50,7 @@
     "selftest:transcription-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-transcription-db.ts",
     "stt:eval": "tsx scripts/stt-eval.ts",
     "selftest:ai-suggestions-db": "tsx --require ./scripts/_shim-server-only.cjs scripts/selftest-ai-suggestions-db.ts",
+    "seed:field": "tsx --require ./scripts/_shim-server-only.cjs scripts/seed-field-meetings.ts",
     "seed:prospects": "tsx --require ./scripts/_shim-server-only.cjs scripts/seed-prospects.ts",
     "seed:ai-suggestions-demo": "tsx --require ./scripts/_shim-server-only.cjs scripts/seed-ai-suggestions-demo.ts",
     "selftest:askmira-lead-choices": "tsx scripts/selftest-askmira-lead-choices.ts",

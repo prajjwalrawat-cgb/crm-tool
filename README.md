@@ -120,6 +120,38 @@ Run with the API key blanked, for example `ANTHROPIC_API_KEY= pnpm selftest:pros
 - There is no prospect delete yet.
 - The `pnpm selftest` chain stops at the existing `selftest-forecast` failure, so the prospect tests at the end of the chain do not run there. Run them one by one.
 
+## Field meetings
+
+Planned and walk-in customer visits, browser check-in against a site, risk flags (no check-in, tight travel, overlap, missing notes) and a manager day board. Design notes: `docs/field-meetings/ARCHITECTURE.md`.
+
+### Environment
+
+| Variable | Used for | Status |
+|---|---|---|
+| `MAPS_API_KEY` | Google Maps Platform. Geocoding API (company and meeting addresses) is used now. Distance Matrix API (travel-gap drive times) is also used when the key is set. Directions is for PR 2. | Optional. Without it addresses stay "Not located yet" (never guessed coordinates), drive times are straight-line estimates and are marked as estimates. Manual site pins work either way. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar sync | PR 2, not read yet |
+| `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_TENANT` | Outlook calendar sync | PR 2, not read yet |
+| `ASKMIRA_*` (base URL, service token, webhook secret) | Ask Mira location provider. Stored per workspace in `tenant_field_settings`, not env. | PR 3, not read yet |
+
+Enable the Geocoding and Distance Matrix APIs on the key and restrict it to the server's IP addresses.
+
+### Settings and permissions
+
+- Settings, Field meetings (owner and admin): check-in radius, no-check-in grace, notes-due hours, tracking hours.
+- Company form: the address block is open to anyone who can edit the company. The site pin and per-company check-in radius need `pinFieldSites` (owner, admin, manager).
+
+### Seed data
+
+```
+pnpm seed:field [--reset]
+```
+
+Creates two workspaces, `field-askmira` and `field-solo`, each with a manager and three reps (password `Test@12345`, for example `mgr@field-solo.test`, `rep1@field-solo.test`), three pinned sites in Noida, Gurugram and Okhla, and three meetings per rep for today, then runs the risk scan so the board shows an overlap (rep 1), a travel gap (rep 2) and a missed check-in (rep 3). Meeting times are relative to when it runs, so use `--reset` to refresh them. It never calls Google or Claude, and refuses to run unless `DATABASE_URL` contains `:15434` or `SEED_ALLOW_REMOTE=1` is set.
+
+### Tests
+
+`pnpm selftest:field` (pure) and `pnpm selftest:field-db` (needs the test database, never production).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

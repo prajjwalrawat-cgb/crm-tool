@@ -42,7 +42,7 @@ import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import { RelativeTime } from '@/lib/dates/relative-time';
 import { DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/schema';
 import type { PageSize } from '@/lib/pagination/page-size';
-import { canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
+import { can, canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
@@ -565,6 +565,7 @@ export function CompaniesView({
         error={editError}
         fieldErrors={editFieldErrors}
         canDelete={canDelete}
+        canPin={can(currentRole, 'pinFieldSites')}
       />
     </div>
   );

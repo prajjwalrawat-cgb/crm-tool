@@ -23,7 +23,13 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
+import { getMapsProvider } from '@/lib/field/maps';
+import { geocodeStore } from '@/lib/field/maps/cached';
+import { pinCompanySite } from '@/lib/field/meetings';
+import { fetchPre, lookupPre } from '@/lib/field/site';
+import { FieldError } from '@/lib/field/types';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { can } from '@/lib/rbac';
 import { serializeCompany } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 import { normalizeCompanyName } from '@/lib/dedup/normalize';
@@ -172,6 +178,15 @@ export async function createCompanyAction(
 
 /* -------- UPDATE -------- */
 
+const ADDRESS_FIELDS = ['address', 'city', 'state', 'postalCode'] as const;
+type AddressField = (typeof ADDRESS_FIELDS)[number];
+
+/** The single line sent to the geocoder: street, city, state, postal code. */
+function geocodeLine(a: Record<AddressField, string | null>): string | null {
+  const line = [a.address, a.city, a.state, a.postalCode].filter((p) => p && p.trim()).join(', ');
+  return line || null;
+}
+
 export async function updateCompanyAction(
   formData: FormData,
 ): Promise<UpdateCompanyResult> {
@@ -207,7 +222,96 @@ export async function updateCompanyAction(
         };
       }
 
+      // Field Meetings: address block (anyone who can edit) and site pin /
+      // radius (pinFieldSites only). The form only sends these when it shows them.
+      const textOrNull = (key: string, max: number): string | null | undefined => {
+        if (!formData.has(key)) return undefined;
+        const v = String(formData.get(key) ?? '').trim();
+        return v ? v.slice(0, max) : null;
+      };
+      const addressIn: Partial<Record<AddressField, string | null>> = {};
+      for (const f of ADDRESS_FIELDS) {
+        const v = textOrNull(f, f === 'address' ? 500 : 120);
+        if (v !== undefined) addressIn[f] = v;
+      }
+      const canPin = can(membership.role, 'pinFieldSites');
+      const pinText = canPin ? String(formData.get('sitePin') ?? '').trim() : '';
+      let radius: number | null | undefined;
+      if (canPin && formData.has('checkinRadiusM')) {
+        const raw = String(formData.get('checkinRadiusM') ?? '').trim();
+        radius = raw === '' ? null : Number(raw);
+        if (radius !== null && (!Number.isInteger(radius) || radius < 50 || radius > 5000)) {
+          return {
+            ok: false,
+            message: 'Please fix the highlighted fields.',
+            fieldErrors: { checkinRadiusM: ['Whole number from 50 to 5000 metres, or blank for the workspace default.'] },
+          };
+        }
+      }
+
+      // 1. Pin first (network for short links happens inside, outside our write transaction).
+      //    A manual pin makes the address edit below keep its coordinates.
+      if (pinText) {
+        try {
+          await pinCompanySite(
+            { tenantId: tenant.id, userId: membership.userId, role: membership.role },
+            parsed.data.id,
+            pinText,
+            radius,
+          );
+        } catch (e) {
+          if (e instanceof FieldError) {
+            return {
+              ok: false,
+              message: 'Please fix the highlighted fields.',
+              fieldErrors: { sitePin: [e.message] },
+            };
+          }
+          throw e;
+        }
+      }
+
+      // 2. Plan the geocode (read tx -> network -> write tx), never a network call under the write.
+      const maps = getMapsProvider();
+      const plan = await tenantTransaction(async (tx) => {
+        const [cur] = await tx
+          .select()
+          .from(companies)
+          .where(and(eq(companies.id, parsed.data.id), eq(companies.tenantId, tenant.id), isNull(companies.deletedAt)))
+          .limit(1);
+        if (!cur) return null;
+        const next = {
+          address: addressIn.address !== undefined ? addressIn.address : cur.address,
+          city: addressIn.city !== undefined ? addressIn.city : cur.city,
+          state: addressIn.state !== undefined ? addressIn.state : cur.state,
+          postalCode: addressIn.postalCode !== undefined ? addressIn.postalCode : cur.postalCode,
+        };
+        const changed = ADDRESS_FIELDS.some((f) => addressIn[f] !== undefined && addressIn[f] !== cur[f]);
+        // Re-locate on an address change, and retry companies that still have no point
+        // (e.g. saved before a MAPS_API_KEY existed). Manual pins are never overwritten.
+        const regeocode = cur.geocodeStatus !== 'manual' && (changed || (cur.lat === null && geocodeLine(next) !== null));
+        const target = regeocode ? geocodeLine(next) : null;
+        return { next, regeocode, target, cached: await lookupPre(tx, tenant.id, target) };
+      });
+      if (!plan) return { ok: false, message: 'Company not found in this tenant.' };
+      const pre = await fetchPre(plan.target, plan.cached, maps);
+
       const updated = await tenantTransaction(async (tx) => {
+        const site: Partial<typeof companies.$inferInsert> = { ...plan.next };
+        if (plan.regeocode) {
+          if (!plan.target) {
+            // Address cleared: nothing to locate.
+            Object.assign(site, { lat: null, lng: null, geocodeStatus: null });
+          } else if (pre && pre.result.status === 'ok' && pre.result.point) {
+            if (pre.store) await geocodeStore(tx, tenant.id, pre.address, pre.result, maps.name);
+            Object.assign(site, { lat: pre.result.point.lat, lng: pre.result.point.lng, geocodeStatus: 'ok' });
+          } else {
+            const failed = pre?.result.status === 'failed';
+            if (pre?.store && failed) await geocodeStore(tx, tenant.id, pre.address, pre.result, maps.name);
+            Object.assign(site, { lat: null, lng: null, geocodeStatus: failed ? 'failed' : 'pending' });
+          }
+        }
+        if (radius !== undefined && !pinText) site.checkinRadiusM = radius;
         const [row] = await tx
           .update(companies)
           .set({
@@ -216,6 +320,7 @@ export async function updateCompanyAction(
             industry: parsed.data.industry,
             updatedBy: membership.userId,
             customFields: cf.values,
+            ...site,
           })
           .where(
             and(
