@@ -270,7 +270,12 @@ export type RealtimeEvent =
       leadId: string | null;
       endedAt: string | null;
       needsDisposition: boolean;
-    };
+    }
+  /* ----- field meetings (0081) -----
+   *
+   * "Something about this meeting changed"; clients re-fetch the day view.
+   */
+  | { type: 'meeting.updated'; tenantId: string; meetingId: string; ownerId: string };
 
 export type EventKind = RealtimeEvent['type'];
 
