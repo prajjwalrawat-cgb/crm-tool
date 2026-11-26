@@ -20,6 +20,8 @@ import { getOrgSettings } from '@/lib/org-settings/queries';
 import { narrowToOwner } from '@/lib/reports/manager/scope';
 
 import { checkinWindow } from './checkin-window';
+import { lateBy } from './late';
+import { toPickerCompany, type PickerCompany } from './picker-link';
 import { computeKpis } from './kpis';
 import { asActor, mapsOf, nowOf, type FieldDeps } from './internal';
 import { estimateDriveMinutes } from './geo';
@@ -31,9 +33,19 @@ import { getFieldSettings } from './settings';
 import { FieldError, type FieldActor, type RiskReason } from './types';
 
 export type DayMeeting = Meeting & {
-  deal: { id: string; name: string; amountMinor: number; currency: string; stage: DealStage } | null;
-  contact: { id: string; name: string } | null;
-  company: { id: string; name: string } | null;
+  deal: {
+    id: string;
+    name: string;
+    amountMinor: number;
+    currency: string;
+    stage: DealStage;
+    companyId: string | null;
+  } | null;
+  contact: { id: string; name: string; companyId: string | null } | null;
+  /** With its site (line, status, point) so the edit form can prefill and explain the address. */
+  company: PickerCompany | null;
+  /** Minutes late of the first accepted check-in (lateBy), null when on time or not checked in. */
+  lateMin: number | null;
   checkins: MeetingCheckin[];
   outcome: MeetingOutcome | null;
   risk: MeetingRisk;
@@ -139,11 +151,20 @@ export function getDay(
           dealAmountMinor: deals.amountMinor,
           dealCurrency: deals.currency,
           dealStage: deals.stage,
+          dealCompanyId: deals.companyId,
           contactId: contacts.id,
           contactFirst: contacts.firstName,
           contactLast: contacts.lastName,
+          contactCompanyId: contacts.companyId,
           companyId: companies.id,
           companyName: companies.name,
+          companyAddress: companies.address,
+          companyCity: companies.city,
+          companyState: companies.state,
+          companyPostalCode: companies.postalCode,
+          companyLat: companies.lat,
+          companyLng: companies.lng,
+          companyGeocodeStatus: companies.geocodeStatus,
         })
         .from(meetings)
         .leftJoin(deals, eq(deals.id, meetings.dealId))
@@ -239,6 +260,8 @@ export function getDay(
 
     const all: DayMeeting[] = rows.map((r) => {
       const win = checkinWindow(r.meeting, settings);
+      const mine = checkinsBy.get(r.meeting.id) ?? [];
+      const firstIn = mine.find((c) => c.kind === 'in' && c.accepted);
       return {
       ...r.meeting,
       deal:
@@ -249,12 +272,33 @@ export function getDay(
               amountMinor: r.dealAmountMinor!,
               currency: r.dealCurrency!,
               stage: r.dealStage!,
+              companyId: r.dealCompanyId,
             }
           : null,
       contact:
-        r.contactId !== null ? { id: r.contactId, name: fullName(r.contactFirst, r.contactLast) || 'Unnamed contact' } : null,
-      company: r.companyId !== null ? { id: r.companyId, name: r.companyName! } : null,
-      checkins: checkinsBy.get(r.meeting.id) ?? [],
+        r.contactId !== null
+          ? {
+              id: r.contactId,
+              name: fullName(r.contactFirst, r.contactLast) || 'Unnamed contact',
+              companyId: r.contactCompanyId,
+            }
+          : null,
+      company:
+        r.companyId !== null
+          ? toPickerCompany({
+              id: r.companyId,
+              name: r.companyName!,
+              address: r.companyAddress,
+              city: r.companyCity,
+              state: r.companyState,
+              postalCode: r.companyPostalCode,
+              lat: r.companyLat,
+              lng: r.companyLng,
+              geocodeStatus: r.companyGeocodeStatus,
+            })
+          : null,
+      lateMin: lateBy(r.meeting, firstIn?.capturedAt, settings.graceMin),
+      checkins: mine,
       outcome: outcomeBy.get(r.meeting.id) ?? null,
       risk: risks.get(r.meeting.id)!,
       checkinOpensAt: win.opensAt.toISOString(),

@@ -4,6 +4,7 @@ import type { Company } from '@/db/schema';
 import type { GeocodeStatus } from '@/db/schema/enums';
 
 import { parseSiteInput } from './geo';
+import { companyGeocodeLine, isCompanyAddress } from './site-line';
 import type { Tx } from './internal';
 import { geocodeLookup, geocodeStore } from './maps/cached';
 import type { GeocodeResult, MapsProvider } from './maps';
@@ -16,7 +17,20 @@ import { FieldError, type LatLng } from './types';
  *   plan (read tx: cache lookup) → fetch (no tx) → siteFor (write tx: store + apply)
  */
 
-export type Site = { address: string | null; lat: number | null; lng: number | null; geocodeStatus: GeocodeStatus };
+/**
+ * Where a meeting's point comes from (meetings.site_source): the company's site,
+ * the meeting's own typed address, a manager's pin, or the rep's walk-in position.
+ */
+export type SiteSource = 'company' | 'address' | 'pin' | 'walk_in';
+
+export type Site = {
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  geocodeStatus: GeocodeStatus;
+  /** Null for no site (virtual, or physical with neither address nor company). */
+  siteSource: SiteSource | null;
+};
 
 /** A geocode verdict obtained before the write transaction. `store` = fresh from the provider. */
 export type PreGeocode = { address: string; result: GeocodeResult; store: boolean } | null;
@@ -24,24 +38,7 @@ export type PreGeocode = { address: string; result: GeocodeResult; store: boolea
 const companyHasPoint = (c: Company | null): c is Company & { lat: number; lng: number } =>
   !!c && c.lat !== null && c.lng !== null;
 
-type CompanyAddress = Pick<Company, 'address' | 'city' | 'state' | 'postalCode'>;
-
-/**
- * The single line sent to the geocoder for a company, and the address a meeting
- * inherits from it: street, city, state, postal code. Null when all are blank.
- */
-export function companyGeocodeLine(c: CompanyAddress | null | undefined): string | null {
-  if (!c) return null;
-  const line = [c.address, c.city, c.state, c.postalCode]
-    .map((p) => p?.trim())
-    .filter(Boolean)
-    .join(', ');
-  return line || null;
-}
-
-/** The meeting's address is the company's own (full line, or the street line older rows carry). */
-const isCompanyAddress = (addr: string | null, c: Company) =>
-  addr === null || addr === companyGeocodeLine(c) || addr === c.address;
+export { companyGeocodeLine, isCompanyAddress };
 
 /** The address siteFor would geocode, or null when it copies the company site or has no address. */
 export function geocodeTarget(address: string | null, company: Company | null): string | null {
@@ -91,9 +88,9 @@ export async function companySiteFromPre(
   return { lat: null, lng: null, geocodeStatus: failed ? 'failed' : 'pending' };
 }
 
-function fromResult(address: string, r: GeocodeResult): Site {
-  if (r.status === 'ok' && r.point) return { address, lat: r.point.lat, lng: r.point.lng, geocodeStatus: 'ok' };
-  return { address, lat: null, lng: null, geocodeStatus: r.status === 'pending' ? 'pending' : 'failed' };
+function fromResult(address: string, r: GeocodeResult, siteSource: SiteSource): Site {
+  if (r.status === 'ok' && r.point) return { address, lat: r.point.lat, lng: r.point.lng, geocodeStatus: 'ok', siteSource };
+  return { address, lat: null, lng: null, geocodeStatus: r.status === 'pending' ? 'pending' : 'failed', siteSource };
 }
 
 /**
@@ -111,17 +108,26 @@ export async function siteFor(
   now: () => Date,
 ): Promise<Site> {
   const addr = address ?? companyGeocodeLine(company);
-  if (companyHasPoint(company) && isCompanyAddress(addr, company)) {
-    return { address: addr, lat: company.lat, lng: company.lng, geocodeStatus: company.geocodeStatus ?? 'ok' };
+  const inherited = isCompanyAddress(addr, company);
+  if (companyHasPoint(company) && inherited) {
+    return {
+      address: addr,
+      lat: company.lat,
+      lng: company.lng,
+      geocodeStatus: company.geocodeStatus ?? 'ok',
+      siteSource: 'company',
+    };
   }
-  if (!addr) return { address: null, lat: null, lng: null, geocodeStatus: 'pending' };
+  // The company's line without a company point yet is still the company's site (geocoded below).
+  const source: SiteSource = inherited ? 'company' : 'address';
+  if (!addr) return { address: null, lat: null, lng: null, geocodeStatus: 'pending', siteSource: company ? 'company' : null };
   if (pre && pre.address === addr) {
     if (pre.store) await geocodeStore(tx, tenantId, addr, pre.result, providerName, { now });
-    return fromResult(addr, pre.result);
+    return fromResult(addr, pre.result, source);
   }
   // The row changed between planning and locking: use the cache, never the network, under the lock.
   const hit = await geocodeLookup(tx, tenantId, addr);
-  return hit ? fromResult(addr, hit) : { address: addr, lat: null, lng: null, geocodeStatus: 'pending' };
+  return hit ? fromResult(addr, hit, source) : { address: addr, lat: null, lng: null, geocodeStatus: 'pending', siteSource: source };
 }
 
 /** A Google Maps link (short links resolved server-side) or "lat, lng" → a point. */

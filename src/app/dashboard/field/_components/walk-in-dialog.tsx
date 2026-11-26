@@ -4,6 +4,7 @@ import { Loader2, MapPinned } from 'lucide-react';
 import { useId, useState } from 'react';
 import { toast } from 'sonner';
 
+import { applyPick, type Links, type PickerKind } from '@/lib/field/picker-link';
 import { cn } from '@/lib/utils';
 
 import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
@@ -24,9 +25,15 @@ const fieldCls = cn(inputCls, 'min-h-10 text-[14px] sm:text-[13px]');
 export function WalkInDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (meetingId: string) => void }) {
   const ids = useId();
   const [title, setTitle] = useState('');
-  const [company, setCompany] = useState<EntityChoice | null>(null);
-  const [deal, setDeal] = useState<EntityChoice | null>(null);
-  const [contact, setContact] = useState<EntityChoice | null>(null);
+  const [links, setLinks] = useState<Links>({ deal: null, company: null, contact: null });
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const { company, deal, contact } = links;
+  // Same linking rules as the meeting form (applyPick).
+  const pickLink = (kind: PickerKind) => (item: EntityChoice | null) => {
+    const r = applyPick(links, kind, item);
+    setLinks(r.links);
+    setLinkNotice(r.notice);
+  };
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<{ pos: GeoPosition; message: string } | null>(null);
@@ -92,9 +99,28 @@ export function WalkInDialog({ onClose, onSaved }: { onClose: () => void; onSave
           disabled={working}
         />
       </div>
-      <EntitySearchSelect kind="company" label="Company (optional)" value={company} onChange={setCompany} disabled={working} />
-      <EntitySearchSelect kind="deal" label="Deal (optional)" value={deal} onChange={setDeal} disabled={working} />
-      <EntitySearchSelect kind="contact" label="Contact (optional)" value={contact} onChange={setContact} disabled={working} />
+      <EntitySearchSelect kind="company" label="Company (optional)" value={company} onChange={pickLink('company')} disabled={working} />
+      <EntitySearchSelect
+        kind="deal"
+        label="Deal (optional)"
+        value={deal}
+        onChange={pickLink('deal')}
+        companyId={company?.id ?? null}
+        disabled={working}
+      />
+      <EntitySearchSelect
+        kind="contact"
+        label="Contact (optional)"
+        value={contact}
+        onChange={pickLink('contact')}
+        companyId={company?.id ?? null}
+        disabled={working}
+      />
+      {linkNotice ? (
+        <p role="status" className="-mt-2 text-[12px] text-indigo-700 dark:text-indigo-300">
+          {linkNotice}
+        </p>
+      ) : null}
       <div className="space-y-1">
         <label htmlFor={`${ids}-notes`} className="block text-[12px] font-medium text-slate-700 dark:text-[#D4D4D8]">
           Notes (optional)

@@ -264,6 +264,7 @@ export function walkIn(actor: FieldActor, input: WalkInInput, deps?: FieldDeps):
           lat: p.lat,
           lng: p.lng,
           geocodeStatus: 'manual',
+          siteSource: 'walk_in',
           notes,
           source: 'walk_in',
           status: 'checked_in',

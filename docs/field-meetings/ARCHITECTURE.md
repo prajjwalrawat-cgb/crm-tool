@@ -34,6 +34,7 @@ Rules worth knowing:
 - `markEnRoute` is idempotent: en_route, arrived and checked_in are no-ops.
 - `saveOutcome` moves a meeting to `mom_logged`. It can check out in the same transaction when the meeting is still `checked_in`. Editing an existing MOM replaces it without another transition.
 - What a status lets you change on a meeting (`buildUpdate` in `meetings.ts`): planned and en_route, anything; arrived, checked_in and checked_out, title, notes and deal/company/contact links; mom_logged, notes only; cancelled, nothing.
+- "Needs a deal": `needs_linking` is true whenever a meeting has no deal. `createMeeting` sets it for a manual meeting created without a deal (walk-ins already did); an edit that links a deal clears it, one that removes the deal sets it again. The My day card and the manager panel show a "Needs a deal" chip; the board block's aria-label says "needs a deal".
 - Only the meeting owner can check in, check out, mark en route or log the MOM. Managers act for reps through create/update/cancel/pin only.
 - UI for edit and cancel (`meeting-actions.tsx`, gates in `_lib/meeting-edit.ts` mirror the rules above): the rep's My day card offers Edit and Cancel meeting on the owner's planned and en_route meetings; the manager board panel offers Edit on any non-cancelled in-scope meeting (fields the status no longer allows are read-only) and Cancel on planned, en_route and arrived. Viewers see neither. Edit sends only changed fields (PATCH); server errors are shown as-is, a 409 with a "refresh and try again" hint.
 
@@ -88,8 +89,9 @@ A second load within the cache TTL makes no provider calls.
    - Outside the radius with an override reason: accepted, `verified = false`, reason stored.
    - Site has no coordinates: accepted, `verified = false`, `override_reason = 'site_not_geocoded'`, distance null.
 6. GPS accuracy is stored with the attempt but does not change the verdict.
-7. Check-out records a `kind = 'out'` row with the same distance and verified computation, and is never rejected. On check-out with a linked deal, one `meeting_logged` activity is recorded on the deal, carrying the check-in's verdict.
-8. Walk-in: one transaction creates the meeting (`source = 'walk_in'`, start now, 30 minutes, address from reverse geocode, site = the rep's position, `geocode_status = 'manual'`) and a verified check-in. `needs_linking` is set when there is no deal. The reverse geocode happens before any insert, so a provider failure leaves nothing behind.
+7. Late check-in: `lateBy(meeting, firstAcceptedCheckinAt, graceMin)` in `late.ts` (pure) gives the minutes from `start_at` to the first accepted `kind = 'in'` check-in when it came after start + `no_checkin_grace_min`; null when on time (start + grace exactly is on time), not checked in, a walk-in, or virtual. `getDay` exposes it as `DayMeeting.lateMin`. The rep card and the manager panel (header chip and the check-in trail) show "Late check-in · N min late" with a clock icon; the board block's aria-label says "late check-in, N min late". No schema change.
+8. Check-out records a `kind = 'out'` row with the same distance and verified computation, and is never rejected. On check-out with a linked deal, one `meeting_logged` activity is recorded on the deal, carrying the check-in's verdict.
+9. Walk-in: one transaction creates the meeting (`source = 'walk_in'`, start now, 30 minutes, address from reverse geocode, site = the rep's position, `geocode_status = 'manual'`, `site_source = 'walk_in'`) and a verified check-in. `needs_linking` is set when there is no deal. The reverse geocode happens before any insert, so a provider failure leaves nothing behind.
 
 ## 4. MapsProvider contract
 
@@ -124,7 +126,24 @@ Where a meeting's coordinates come from (`site.ts`, `siteFor`):
 
 "The company's address" is one line everywhere: `companyGeocodeLine(company)` in `site.ts` = address, city, state, postal code. The company form geocodes that line and a meeting with a blank address inherits it (and geocodes it when the company has no point). A meeting address equal to the street line alone (older rows) also counts as the company's.
 
-Re-siting on edit (`updateMeeting`, planned / en_route, not manual): an address change geocodes the new address. A company change or clear, or a type change to physical, re-sites too: a meeting whose address was inherited from the old company (blank, or that company's line) follows the new company, or has no site when the company was cleared; a meeting with its own address keeps it and geocodes it. The old company's point is never kept.
+### Site source and the rep-entered marker
+
+`meetings.site_source` (CHECK `company | address | pin | walk_in`, null for virtual meetings and for a physical meeting with neither address nor company) records where the point comes from, and `meetings.site_rep_entered` whether the meeting's own address was typed by someone without `pinFieldSites` (a rep). Every site change sets them:
+
+| Change | site_source | site_rep_entered |
+|---|---|---|
+| Address blank or equal to the company's line (`isCompanyAddress`), create or edit | company | false |
+| Own typed address (geocoded before the write transaction; `pending` without a key) | address | actor lacks `pinFieldSites` |
+| Manager pin (`pinMeetingSite`) | pin | false |
+| Walk-in | walk_in | false |
+| Company pin or company re-geocode propagation | company | false |
+| Type changed to virtual | null | false |
+
+An address equal to the company's line always uses the company's site, manual pins and coordinates included, with no geocoding (so it works with no Maps key); the company's line without a company point yet is still `company` and is geocoded. The comparison is `isCompanyAddress` in `site-line.ts` (trimmed equality with the full line, or the street line older rows carry), shared by the server and the meeting form. Migration 0081 backfills physical rows that have no `site_source` (idempotent: only `site_source IS NULL`): walk-ins, then inherited addresses whose point is not their own pin, then other manual points as `pin`, then own addresses (rep-entered when the creator is a member or viewer).
+
+The manager board block (icon + "rep-entered address" text, and in its aria-label) and the panel (chip, and "The rep typed this address; check-ins are verified against it.") mark `site_rep_entered`. A manager pin clears it. The rep card and the panel say "Site not located: check-ins here are unverified." for a physical meeting with no coordinates, so the manager knows to pin.
+
+Re-siting on edit (`updateMeeting`, planned / en_route, not the meeting's own point, i.e. `site_source` not `pin` or `walk_in`; a point copied from a pinned company is not the meeting's own, so editing such a meeting's address re-sites it): an address change geocodes the new address. A company change or clear, or a type change to physical, re-sites too: a meeting whose address was inherited from the old company (blank, or that company's line) follows the new company, or has no site when the company was cleared; a meeting with its own address keeps it and geocodes it. The old company's point is never kept.
 
 Pins:
 
@@ -132,16 +151,22 @@ Pins:
 - Only owner, admin and manager (`pinFieldSites`) can pin. Reps can never set or move a site.
 - Meeting pin (`pinMeetingSite`): sets the point and `geocode_status = 'manual'`. Allowed while the meeting is planned, en_route or arrived. Virtual meetings cannot be pinned.
 - Add and Edit company share one site block (`site-address-fieldset.tsx`): address, city, state and postal code for anyone who can create companies; Site pin and Check-in radius only with `pinFieldSites` (the actions ignore those fields from anyone else). Add company resolves a pin before any write (a bad pin creates nothing), otherwise geocodes `companyGeocodeLine` before the insert (`lookupPre` / `fetchPre`, then `companySiteFromPre` inside the insert transaction: `pending` without `MAPS_API_KEY`, never invented coordinates), and applies a pin and its radius through `pinCompanySite` once the company exists. Edit company uses the same `readSiteForm` and `companySiteFromPre`.
-- Company pin (`pinCompanySite`, used by the company forms): sets `lat`, `lng`, `geocode_status = 'manual'` and optionally the per-company `checkin_radius_m` (undefined keeps it, null clears it). It then moves that company's physical meetings that have not started (planned, en_route, arrived) to the new point, except meetings that carry their own manual pin, and fills a blank meeting address from the company's.
+- Company pin (`pinCompanySite`, used by the company forms): sets `lat`, `lng`, `geocode_status = 'manual'` and optionally the per-company `checkin_radius_m` (undefined keeps it, null clears it). It then moves that company's physical meetings that have not started (planned, en_route, arrived) to the new point when they use the company's site (`site_source` `company` or unclassified): never a meeting's own pin, its own typed address, or a walk-in. It fills a blank meeting address from the company's.
 - Company address edits (address, city, state, postal code) re-geocode unless the company is `manual`. A company that still has no point is retried on its next save. A successful re-geocode (`propagateCompanyPoint`, same write transaction) gives the new point to that company's not-started physical meetings that have no site yet (`lat IS NULL`), no manual pin, and an inherited address (blank, or the company's old or new line); their address becomes the new line. Meetings that already have a site, or carry their own address, are not moved: only a pin moves sited meetings. A company with a manual pin keeps it when its address changes.
 - Geocode status in words on the company form: ok "Located", manual "Pinned manually", pending "Not located yet", failed "Couldn't locate".
+
+### Meeting form pickers
+
+Deal, company and contact in the meeting form (New meeting, Edit, and the walk-in dialog) are searchable dropdowns (`entity-search-select.tsx`) over `GET /api/field/pickers?kind=deal|company|contact&q=&companyId=` (`listPickerOptions` in `pickers.ts`, zod `parsePickerQuery`). Focus or click opens the list with up to 20 records, most recently updated first; typing filters (250 ms debounce, ILIKE with wildcards escaped). `companyId` narrows deals and contacts. Visibility is the CRM's own rule, `ownerOrUnassignedRestriction` in `src/lib/personas/index.ts`, shared with the companies, contacts and deals list pages and `/api/search`: members and viewers see records they own plus unassigned ones; managers, admins and owners see the tenant. Deal rows show amount and stage, company rows the city, contact rows the company. Deal and contact rows carry their company with its site (`PickerCompany`: line, status, located).
+
+Linking (`applyPick` in `picker-link.ts`, pure): picking a deal fills its company (replacing a different one, with a short notice) and its contact; picking a company clears a contact or deal that belongs to another company; picking a contact fills an empty company. A new company fills the address box with its line (only while the place can still change), with a status line under it: "Checked against: company site (pinned / located / not located yet)". An address that no longer equals the company's line shows "This meeting will be checked against this address instead of the company site." and a "Use company site" button that restores the line (`siteCheck`). The server applies the same rule (above). The service's `checkLinks` checks links exist in the tenant; it does not re-apply the owner visibility rule.
 
 ## 6. Data minimisation: what location is stored, and where
 
 | Table | What | Notes |
 |---|---|---|
 | `meeting_checkins` | rep lat/lng, accuracy, distance from site, verified, accepted, reject reason, override reason, `location_source` | Only at check-in and check-out, one row per attempt. PR 1 always writes `'browser'`. Allowed in every provider mode: it is derived check-in data. The walk-in dialog shows "Your location is saved with this check-in" before the browser prompt. |
-| `meetings` | site address, lat/lng, `geocode_status` | The place of the meeting, not a person's position. |
+| `meetings` | site address, lat/lng, `geocode_status`, `site_source`, `site_rep_entered` | The place of the meeting, not a person's position. |
 | `companies` | address block, lat/lng, `geocode_status`, optional `checkin_radius_m` | A place. |
 | `geocode_cache`, `drive_time_cache` | address to point; point pair to minutes | Per tenant. No user id. |
 | `location_pings` | continuous rep trail | Exists, partitioned, and is NOT written in PR 1. Native provider only; forbidden for Ask Mira workspaces (enforced in PR 3). |

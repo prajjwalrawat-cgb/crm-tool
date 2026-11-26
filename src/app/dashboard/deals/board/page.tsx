@@ -4,7 +4,7 @@ import { listDealCompanyOptions, listDealsForBoard } from '@/lib/deals/queries';
 import { resolveStageProbabilities } from '@/lib/deals/stage-probability';
 import { requireMembership } from '@/lib/membership';
 import { getOrgSettings } from '@/lib/org-settings/queries';
-import { personaOf } from '@/lib/personas';
+import { ownerOrUnassignedRestriction } from '@/lib/personas';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import { DealViewTabs } from '../_components/deal-view-tabs';
@@ -23,9 +23,8 @@ export default async function DealsBoardPage({
 }) {
   return await withTenantSession(async ({ tenant, userId }) => {
     const membership = await requireMembership();
-    const persona = personaOf(membership.role);
     const restrictToOwnerOrUnassigned =
-      persona === 'sales' ? userId : undefined;
+      ownerOrUnassignedRestriction(membership.role, userId);
     const sp = await searchParams;
     const filters = parseDealFilters(sp);
     const [summary, companyOptions, teammates, settings] = await Promise.all([

@@ -66,6 +66,14 @@ export const meetings = pgTable(
     lat: doublePrecision('lat'),
     lng: doublePrecision('lng'),
     geocodeStatus: geocodeStatus('geocode_status').notNull().default('pending'),
+    /**
+     * Where the point comes from: 'company' (inherited), 'address' (the meeting's own
+     * typed address), 'pin' (a manager's pin), 'walk_in' (the rep's position). Null = no site.
+     * CHECK meetings_site_source_check in the SQL.
+     */
+    siteSource: text('site_source').$type<'company' | 'address' | 'pin' | 'walk_in'>(),
+    /** The own address was typed by someone who cannot pin sites (a rep). */
+    siteRepEntered: boolean('site_rep_entered').notNull().default(false),
     /** Meet / Teams link for virtual meetings. */
     virtualUrl: text('virtual_url'),
     status: meetingStatus('status').notNull().default('planned'),
@@ -92,6 +100,10 @@ export const meetings = pgTable(
   },
   (t) => [
     // The SQL also has CHECK (end_at > start_at) as meetings_end_after_start_check.
+    check(
+      'meetings_site_source_check',
+      sql`${t.siteSource} IN ('company', 'address', 'pin', 'walk_in')`,
+    ),
     uniqueIndex('meetings_tenant_source_external_unique').on(
       t.tenantId,
       t.source,

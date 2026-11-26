@@ -652,6 +652,170 @@ async function main() {
     const inBig = await CI.checkIn(r1, mBig.id, { ...north(500), accuracyM: 10 }, deps);
     check('company radius 800 overrides tenant 300', inBig.verified, inBig);
 
+    // --- meeting form pickers (/api/field/pickers service): the CRM visibility rule
+    {
+      const PK = await import('../src/lib/field/pickers');
+      const old = (min: number) => new Date(fixedNow.getTime() - min * 60_000);
+      const [own1, own2, open1] = await db
+        .insert(s.companies)
+        .values([
+          { tenantId: A, name: 'ZZ Pick R1 Co', city: 'Noida', ownerId: U.r1, updatedAt: old(30) },
+          { tenantId: A, name: 'ZZ Pick R2 Co', city: 'Delhi', ownerId: U.r2, updatedAt: old(1) },
+          { tenantId: A, name: 'ZZ Pick Open Co', city: 'Gurugram', updatedAt: old(10) },
+        ])
+        .returning();
+      const [kOwn, kOther, kOpenOther] = await db
+        .insert(s.contacts)
+        .values([
+          { tenantId: A, firstName: 'ZZ Pick', lastName: 'Own', ownerId: U.r1, companyId: own1!.id },
+          { tenantId: A, firstName: 'ZZ Pick', lastName: 'Other', ownerId: U.r2, companyId: own1!.id },
+          { tenantId: A, firstName: 'ZZ Pick', lastName: 'Elsewhere', companyId: open1!.id },
+        ])
+        .returning();
+      const [dOwn, dOther] = await db
+        .insert(s.deals)
+        .values([
+          { tenantId: A, name: 'ZZ Pick deal own', amountMinor: 1_234_500, currency: 'INR', stage: 'proposal', expectedCloseDate: '2027-01-31', ownerId: U.r1, companyId: own1!.id, contactId: kOwn!.id },
+          { tenantId: A, name: 'ZZ Pick deal other', amountMinor: 100, currency: 'INR', ownerId: U.r2, companyId: own1!.id },
+        ])
+        .returning();
+      const ids = (r: { items: Array<{ id: string }> }) => r.items.map((x) => x.id);
+      const rc = await PK.listPickerOptions(r1, { kind: 'company', q: 'ZZ Pick' });
+      check(
+        'pickers: rep sees own + unassigned companies, not another rep\'s, recent first',
+        JSON.stringify(ids(rc)) === JSON.stringify([open1!.id, own1!.id]),
+        rc.items.map((x) => x.label),
+      );
+      check('pickers: company result shows city', rc.items[0]!.sublabel === 'Gurugram', rc.items[0]);
+      const mc = await PK.listPickerOptions(m, { kind: 'company', q: 'ZZ Pick' });
+      check('pickers: manager sees the tenant (recent first)', JSON.stringify(ids(mc)) === JSON.stringify([own2!.id, open1!.id, own1!.id]), mc.items.map((x) => x.label));
+      const bc = await PK.listPickerOptions(b1, { kind: 'company', q: 'ZZ Pick' });
+      check('pickers: other tenant sees none', bc.items.length === 0, bc.items.length);
+      const rd = await PK.listPickerOptions(r1, { kind: 'deal', q: 'ZZ Pick' });
+      check(
+        'pickers: rep sees own deals only, with amount + stage, company and contact',
+        JSON.stringify(ids(rd)) === JSON.stringify([dOwn!.id]) &&
+          /12,345/.test(rd.items[0]!.sublabel ?? '') &&
+          /Proposal/.test(rd.items[0]!.sublabel ?? '') &&
+          rd.items[0]!.company?.id === own1!.id &&
+          rd.items[0]!.contact?.id === kOwn!.id,
+        rd.items,
+      );
+      check('pickers: manager sees both deals', ids(await PK.listPickerOptions(m, { kind: 'deal', q: 'ZZ Pick' })).includes(dOther!.id));
+      const rk = await PK.listPickerOptions(r1, { kind: 'contact', q: 'zz pick', companyId: own1!.id });
+      check(
+        'pickers: contacts filtered by company and visibility, showing the company',
+        JSON.stringify(ids(rk)) === JSON.stringify([kOwn!.id]) && rk.items[0]!.sublabel === 'ZZ Pick R1 Co',
+        rk.items,
+      );
+      const rkAll = await PK.listPickerOptions(r1, { kind: 'contact', q: 'ZZ Pick' });
+      check('pickers: without companyId, contacts from any visible company', ids(rkAll).includes(kOpenOther!.id) && !ids(rkAll).includes(kOther!.id), ids(rkAll));
+      const rdCo = await PK.listPickerOptions(m, { kind: 'deal', companyId: open1!.id });
+      check('pickers: deals filtered by companyId', rdCo.items.length === 0, rdCo.items.length);
+      await db.insert(s.companies).values(
+        Array.from({ length: 25 }, (_, i) => ({ tenantId: A, name: `ZZ Bulk ${i}`, updatedAt: old(100 + i) })),
+      );
+      const bulk = await PK.listPickerOptions(r1, { kind: 'company' });
+      const labels = bulk.items.map((x) => x.label);
+      check(
+        'pickers: no query lists at most 20, most recent first (oldest cut)',
+        bulk.items.length === 20 &&
+          labels.indexOf('ZZ Pick Open Co') < labels.indexOf('ZZ Pick R1 Co') &&
+          labels.indexOf('ZZ Pick R1 Co') < labels.indexOf('ZZ Bulk 0') &&
+          !labels.includes('ZZ Bulk 24') &&
+          !labels.includes('ZZ Pick R2 Co'),
+        {
+        n: bulk.items.length,
+        labels,
+      },
+      );
+      check('pickers: q escapes LIKE wildcards', (await PK.listPickerOptions(m, { kind: 'company', q: '%' })).items.length === 0);
+    }
+
+    // --- needs a deal, site source and the rep-entered marker
+    {
+      const noKey = { now: () => fixedNow }; // no maps override: MAPS_API_KEY is '' → estimate provider
+      const nd = await mk(r1, {});
+      check('create without a deal → needs_linking', nd.needsLinking === true, nd.needsLinking);
+      const withDeal = await M.updateMeeting(r1, nd.id, { dealId: deal1!.id }, deps);
+      check('edit adding a deal clears needs_linking', withDeal.needsLinking === false, withDeal.needsLinking);
+      const dropped = await M.updateMeeting(r1, nd.id, { dealId: null }, deps);
+      check('edit removing the deal sets needs_linking again', dropped.needsLinking === true);
+      const wd = await mk(r1, { dealId: deal1!.id });
+      check('create with a deal → no needs_linking', wd.needsLinking === false);
+
+      const [pinCo] = await db
+        .insert(s.companies)
+        .values({ tenantId: A, name: 'ZZ Pinned Co', address: 'Pin Rd', city: 'Noida', state: 'UP', postalCode: '201301', lat: 28.44, lng: 77.44, geocodeStatus: 'manual' })
+        .returning();
+      const line = 'Pin Rd, Noida, UP, 201301';
+      const inh = await M.createMeeting(
+        r1,
+        { title: 'ZZ inherit', type: 'physical', startAt: hours(30), endAt: hours(30.5), companyId: pinCo!.id, address: line },
+        noKey,
+      );
+      check(
+        'address = company line, pinned company, no Maps key → company point, site_source company',
+        inh.lat === 28.44 && inh.lng === 77.44 && inh.geocodeStatus === 'manual' && inh.siteSource === 'company' && inh.siteRepEntered === false,
+        inh,
+      );
+      const blankInh = await M.createMeeting(r1, { title: 'ZZ inherit blank', type: 'physical', startAt: hours(31), endAt: hours(31.5), companyId: pinCo!.id }, noKey);
+      check('blank address inherits the company site', blankInh.lat === 28.44 && blankInh.address === line && blankInh.siteSource === 'company', blankInh);
+
+      const repOwn = await M.createMeeting(
+        r1,
+        { title: 'ZZ rep own', type: 'physical', startAt: hours(32), endAt: hours(32.5), companyId: pinCo!.id, address: 'Gate 4, Sector 63' },
+        noKey,
+      );
+      check(
+        'rep typing a different address → site_source address, rep-entered, geocode pending',
+        repOwn.siteSource === 'address' && repOwn.siteRepEntered === true && repOwn.geocodeStatus === 'pending' && repOwn.lat === null,
+        repOwn,
+      );
+      const mgrOwn = await M.createMeeting(
+        m,
+        { title: 'ZZ mgr own', type: 'physical', startAt: hours(33), endAt: hours(33.5), companyId: pinCo!.id, address: 'Gate 5, Sector 63', ownerId: U.r1 },
+        noKey,
+      );
+      check('manager typing a different address → not rep-entered', mgrOwn.siteSource === 'address' && mgrOwn.siteRepEntered === false, mgrOwn);
+      const repEdit = await M.updateMeeting(r1, inh.id, { address: 'Gate 6, Sector 63' }, noKey);
+      check(
+        'rep editing an inherited (pinned-company) address re-sites it as rep-entered',
+        repEdit.siteSource === 'address' && repEdit.siteRepEntered === true && repEdit.lat === null && repEdit.geocodeStatus === 'pending',
+        repEdit,
+      );
+      const back = await M.updateMeeting(r1, inh.id, { address: line }, noKey);
+      check('restoring the company line uses the company site again', back.siteSource === 'company' && back.lat === 28.44 && !back.siteRepEntered, back);
+      const pinnedMtg = await M.pinMeetingSite(m, repOwn.id, '28.61, 77.21', deps);
+      check('manager pin clears the marker (site_source pin)', pinnedMtg.siteSource === 'pin' && pinnedMtg.siteRepEntered === false, pinnedMtg);
+      await M.pinCompanySite(m, pinCo!.id, '28.45, 77.45', undefined, deps);
+      const [a1, a2, a3] = [await meetingRow(blankInh.id), await meetingRow(mgrOwn.id), await meetingRow(repOwn.id)];
+      check(
+        'company pin moves company-site meetings only (not own address, not own pin)',
+        a1.lat === 28.45 && a1.siteSource === 'company' && a2.lat === null && a2.siteSource === 'address' && a3.lat === 28.61 && a3.siteSource === 'pin',
+        { a1: [a1.lat, a1.siteSource], a2: [a2.lat, a2.siteSource], a3: [a3.lat, a3.siteSource] },
+      );
+      const virt = await M.updateMeeting(r1, mgrOwn.id, { type: 'virtual' }, deps);
+      check('becoming virtual clears the site source', virt.siteSource === null && virt.siteRepEntered === false, virt);
+      const wk = await CI.walkIn(r1, { ...S, accuracyM: 5, title: 'ZZ walk-in source' }, deps);
+      check('walk-in → site_source walk_in', wk.siteSource === 'walk_in' && wk.needsLinking === true && !wk.siteRepEntered, wk);
+
+      // late check-in on the day view; walk-ins are never late
+      const lateM = await M.createMeeting(r1, { title: 'ZZ late check-in', type: 'physical', startAt: hours(-1), endAt: hours(-0.5), companyId: siteCo!.id }, deps);
+      await CI.checkIn(r1, lateM.id, { ...S, accuracyM: 5 }, deps);
+      const day = await DY.getDay(r1, { date: '2026-12-02' }, deps);
+      const all = day.reps.flatMap((r) => r.meetings);
+      const lateRow = all.find((x) => x.id === lateM.id);
+      const wkRow = all.find((x) => x.id === wk.id);
+      check('day view: lateMin 60 for a check-in an hour after start', lateRow?.lateMin === 60, lateRow?.lateMin);
+      check('day view: walk-in never late', wkRow?.lateMin === null, wkRow?.lateMin);
+      check(
+        'day view exposes site_source / site_rep_entered and company site',
+        lateRow?.siteSource === 'company' && lateRow?.siteRepEntered === false && lateRow?.company?.located === true && lateRow?.company?.siteLine === 'Site Rd, Noida',
+        { s: lateRow?.siteSource, c: lateRow?.company },
+      );
+    }
+
     // --- tenant-local day
     const late = await M.createMeeting(
       r2,

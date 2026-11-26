@@ -122,6 +122,18 @@ const daySchema = z.object({
   atRiskOnly: z.boolean().optional(),
 });
 
+const pickerSchema = z.object({
+  kind: z.enum(['deal', 'company', 'contact']),
+  q: z.string().max(200).optional(),
+  companyId: uuid.optional(),
+});
+
+export const parsePickerQuery = (q: URLSearchParams) =>
+  pickerSchema.parse({
+    kind: q.get('kind') ?? undefined,
+    q: q.get('q') ?? undefined,
+    companyId: q.get('companyId') || undefined,
+  });
 export const parseCreateBody = (json: unknown) => createSchema.parse(json);
 export const parseUpdateBody = (json: unknown) => updateSchema.parse(json);
 export const parseCancelBody = (json: unknown) => cancelSchema.parse(json ?? {});

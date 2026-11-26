@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import { companies, contacts, deals, meetings, type Company, type Meeting, type NewMeeting } from '@/db/schema';
 import type { MeetingStatus } from '@/db/schema/enums';
@@ -33,6 +33,7 @@ import {
   companyGeocodeLine,
   fetchPre,
   geocodeTarget,
+  isCompanyAddress,
   lookupPre,
   resolvePin,
   siteFor,
@@ -125,6 +126,19 @@ async function loadCompany(tx: Tx, tenantId: string, id: string | null): Promise
   return c ?? null;
 }
 
+/**
+ * A typed address the actor cannot pin is "rep-entered": check-ins are verified
+ * against it, and the manager board marks it so someone can confirm or pin it.
+ */
+const repEntered = (actor: FieldActor, site: Pick<Site, 'siteSource'>): boolean =>
+  site.siteSource === 'address' && !can(actor.role, 'pinFieldSites');
+
+/** Site columns a re-site writes, including the source marker. */
+const siteColumns = (actor: FieldActor, site: Site): Partial<NewMeeting> => ({
+  ...site,
+  siteRepEntered: repEntered(actor, site),
+});
+
 const setMeeting = (tx: Tx, m: Meeting, values: Partial<NewMeeting>) =>
   tx
     .update(meetings)
@@ -162,7 +176,7 @@ export function createMeeting(actor: FieldActor, input: CreateMeetingInput, deps
       const site: Site =
         type === 'physical'
           ? await siteFor(tx, actor.tenantId, address, company, pre, maps.name, now)
-          : { address, lat: null, lng: null, geocodeStatus: 'pending' };
+          : { address, lat: null, lng: null, geocodeStatus: 'pending', siteSource: null };
       const [row] = await tx
         .insert(meetings)
         .values({
@@ -175,11 +189,13 @@ export function createMeeting(actor: FieldActor, input: CreateMeetingInput, deps
           dealId: input.dealId ?? null,
           companyId: input.companyId ?? null,
           contactId: input.contactId ?? null,
-          ...site,
+          ...siteColumns(actor, site),
           virtualUrl,
           notes,
           source: 'manual',
           status: 'planned',
+          // A meeting without a deal waits in the "needs a deal" queue; linking one via Edit clears it.
+          needsLinking: !input.dealId,
           createdBy: actor.userId,
         })
         .returning();
@@ -270,6 +286,11 @@ function buildUpdate(cur: Meeting, patch: Partial<CreateMeetingInput>): UpdatePl
     const n = optText(patch.notes, 'Notes');
     if (n !== cur.notes) set.notes = n;
   }
+  if (set.dealId !== undefined) set.needsLinking = set.dealId === null;
+  if (set.type === 'virtual') {
+    set.siteSource = null;
+    set.siteRepEntered = false;
+  }
 
   if (structural.length > 0 && !PRE_VISIT.has(cur.status)) {
     throw new FieldError('invalid_transition', `Cannot change ${structural.join(', ')} once the visit has started`, {
@@ -285,7 +306,11 @@ function buildUpdate(cur: Meeting, patch: Partial<CreateMeetingInput>): UpdatePl
   }
 
   const type = set.type ?? cur.type;
-  const sitable = PRE_VISIT.has(cur.status) && cur.geocodeStatus !== 'manual' && type === 'physical';
+  // A meeting's own pin (or walk-in position) is never re-sited by an edit. A point copied from a
+  // pinned company is not the meeting's pin: editing the address re-sites it.
+  const ownPoint =
+    cur.siteSource === 'pin' || cur.siteSource === 'walk_in' || (cur.siteSource === null && cur.geocodeStatus === 'manual');
+  const sitable = PRE_VISIT.has(cur.status) && !ownPoint && type === 'physical';
   let resite: UpdatePlan['resite'] = null;
   if (address !== undefined) {
     // A manual pin (or a virtual meeting) keeps its coordinates; only the label changes.
@@ -313,7 +338,7 @@ async function resiteInput(
   const company = await loadCompany(tx, tenantId, resite.companyId);
   if (resite.address !== undefined) return { address: resite.address, company };
   const old = cur.companyId === resite.companyId ? company : await loadCompany(tx, tenantId, cur.companyId);
-  const inherited = !cur.address || (!!old && (cur.address === companyGeocodeLine(old) || cur.address === old.address));
+  const inherited = !cur.address || isCompanyAddress(cur.address, old);
   return { address: inherited ? null : cur.address, company };
 }
 
@@ -349,7 +374,7 @@ export function updateMeeting(
       await checkLinks(tx, actor.tenantId, { dealId: set.dealId, contactId: set.contactId, companyId: set.companyId });
       if (resite) {
         const input = await resiteInput(tx, actor.tenantId, cur, resite);
-        Object.assign(set, await siteFor(tx, actor.tenantId, input.address, input.company, pre, maps.name, now));
+        Object.assign(set, siteColumns(actor, await siteFor(tx, actor.tenantId, input.address, input.company, pre, maps.name, now)));
       }
       if (Object.keys(set).length === 0) return cur;
       const [row] = await setMeeting(tx, cur, { ...set, updatedAt: now() });
@@ -415,6 +440,9 @@ export function pinMeetingSite(actor: FieldActor, id: string, input: string, dep
         lat: point.lat,
         lng: point.lng,
         geocodeStatus: 'manual',
+        // A manager's pin: the rep-entered marker is cleared.
+        siteSource: 'pin',
+        siteRepEntered: false,
         updatedAt: nowOf(deps),
       });
       await publishMeetingUpdated(tx, row!);
@@ -422,6 +450,12 @@ export function pinMeetingSite(actor: FieldActor, id: string, input: string, dep
     });
   });
 }
+
+/**
+ * Meetings that use their company's site (site_source 'company', or not classified).
+ * A meeting's own pin, its own typed address and a walk-in position never follow the company.
+ */
+const inheritsCompanySite = or(isNull(meetings.siteSource), eq(meetings.siteSource, 'company'))!;
 
 /**
  * A company's address re-geocode succeeded (non-manual): give its new point to its
@@ -448,6 +482,8 @@ export async function propagateCompanyPoint(
       lng: company.lng,
       geocodeStatus: 'ok',
       address: companyGeocodeLine(company),
+      siteSource: 'company',
+      siteRepEntered: false,
       updatedAt: now,
     })
     .where(
@@ -457,7 +493,7 @@ export async function propagateCompanyPoint(
         eq(meetings.type, 'physical'),
         inArray(meetings.status, [...PINNABLE]),
         isNull(meetings.lat),
-        ne(meetings.geocodeStatus, 'manual'),
+        inheritsCompanySite,
         inherited,
       ),
     )
@@ -469,7 +505,8 @@ export async function propagateCompanyPoint(
 /**
  * Pin a company site; `radiusM` undefined keeps the override, null clears it.
  * The pin also moves that company's physical meetings that have not started
- * (planned / en_route / arrived), except meetings with their own manual pin.
+ * (planned / en_route / arrived) and use the company's site (inheritsCompanySite):
+ * never a meeting's own pin, its own typed address, or a walk-in.
  */
 export function pinCompanySite(
   actor: FieldActor,
@@ -510,6 +547,8 @@ export function pinCompanySite(
           lng: point.lng,
           geocodeStatus: 'manual',
           address: sql`COALESCE(NULLIF(${meetings.address}, ''), ${companyGeocodeLine(row)}::text)`,
+          siteSource: 'company',
+          siteRepEntered: false,
           updatedAt: now,
         })
         .where(
@@ -518,7 +557,7 @@ export function pinCompanySite(
             eq(meetings.companyId, row.id),
             eq(meetings.type, 'physical'),
             inArray(meetings.status, [...PINNABLE]),
-            ne(meetings.geocodeStatus, 'manual'),
+            inheritsCompanySite,
           ),
         )
         .returning({ id: meetings.id, tenantId: meetings.tenantId, ownerId: meetings.ownerId });

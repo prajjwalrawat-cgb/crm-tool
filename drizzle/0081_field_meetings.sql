@@ -357,6 +357,58 @@ ALTER TABLE "tenant_field_settings"
   ADD COLUMN IF NOT EXISTS "checkin_closes_after_min" integer NOT NULL DEFAULT 240;
 --> statement-breakpoint
 
+-- Where a meeting's site comes from, and whether a rep typed its address. Added
+-- after the table first shipped to the test DB, so guarded for replays.
+ALTER TABLE "meetings"
+  ADD COLUMN IF NOT EXISTS "site_source" text,
+  ADD COLUMN IF NOT EXISTS "site_rep_entered" boolean NOT NULL DEFAULT false;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'meetings_site_source_check' AND conrelid = '"meetings"'::regclass) THEN
+    ALTER TABLE "meetings" ADD CONSTRAINT "meetings_site_source_check" CHECK ("site_source" IN ('company', 'address', 'pin', 'walk_in'));
+  END IF;
+END $$;
+--> statement-breakpoint
+
+-- Backfill physical meetings not classified yet (idempotent: only site_source IS NULL).
+--   walk-in                                                        -> walk_in
+--   inherited address (blank, company line, or street line) and not
+--   the meeting's own pin (manual only when it equals the company's) -> company
+--   any other manual point                                         -> pin
+--   own address                                                    -> address (rep-entered when its creator cannot pin)
+WITH cls AS (
+  SELECT m.id,
+    CASE
+      WHEN m.source = 'walk_in' THEN 'walk_in'
+      WHEN c.id IS NOT NULL
+        AND (NULLIF(btrim(m.address), '') IS NULL
+             OR btrim(m.address) = concat_ws(', ', NULLIF(btrim(c.address), ''), NULLIF(btrim(c.city), ''),
+                                             NULLIF(btrim(c.state), ''), NULLIF(btrim(c.postal_code), ''))
+             OR btrim(m.address) = btrim(c.address))
+        AND (m.geocode_status <> 'manual'
+             OR (c.geocode_status = 'manual' AND m.lat IS NOT DISTINCT FROM c.lat AND m.lng IS NOT DISTINCT FROM c.lng))
+        THEN 'company'
+      WHEN m.geocode_status = 'manual' THEN 'pin'
+      WHEN NULLIF(btrim(m.address), '') IS NOT NULL THEN 'address'
+    END AS src
+  FROM "meetings" m
+  LEFT JOIN "companies" c ON c.id = m.company_id AND c.tenant_id = m.tenant_id
+  WHERE m.type = 'physical' AND m.site_source IS NULL
+)
+UPDATE "meetings" m
+SET site_source = cls.src,
+    site_rep_entered = (
+      cls.src = 'address'
+      AND EXISTS (
+        SELECT 1 FROM "memberships" ms
+        WHERE ms.tenant_id = m.tenant_id AND ms.user_id = m.created_by AND ms.role IN ('member', 'viewer')
+      )
+    )
+FROM cls
+WHERE cls.id = m.id AND cls.src IS NOT NULL;
+--> statement-breakpoint
+
 -- Sanity bounds on tenant_field_settings (guarded the same way).
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_checkin_radius_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN

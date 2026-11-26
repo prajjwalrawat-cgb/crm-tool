@@ -5,9 +5,12 @@ import {
   Briefcase,
   Building2,
   CheckCircle2,
+  Clock,
   Loader2,
   MapPin,
   MapPinned,
+  MapPinOff,
+  PenLine,
   Ban,
   Pencil,
   User,
@@ -91,6 +94,9 @@ export function MeetingPanel({
   const canPin = canWrite && physical && PINNABLE.has(m.status);
   const canEdit = canWrite && canEditMeeting(m.status);
   const canCancel = canWrite && canCancelMeeting(m.status);
+  const siteMissing = physical && (m.lat === null || m.lng === null);
+  const firstInId = m.checkins.find((c) => c.kind === 'in' && c.accepted)?.id ?? null;
+  const chipCls = 'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium';
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -120,9 +126,24 @@ export function MeetingPanel({
           <h2 id={`${ids}-title`} className="mt-0.5 break-words text-[16px] font-semibold text-slate-900 dark:text-[#FAFAFA]">
             {m.title}
           </h2>
-          <span className={cn('mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11.5px] font-medium', STATUS_TONE[m.status])}>
-            {STATUS_LABEL[m.status]}
-          </span>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className={cn(chipCls, STATUS_TONE[m.status])}>{STATUS_LABEL[m.status]}</span>
+            {m.needsLinking && m.status !== 'cancelled' ? (
+              <span className={cn(chipCls, 'bg-slate-100 text-slate-700 dark:bg-[#1F1F1F] dark:text-[#D4D4D8]')}>
+                <Briefcase className="h-3 w-3" aria-hidden /> Needs a deal
+              </span>
+            ) : null}
+            {m.lateMin !== null ? (
+              <span className={cn(chipCls, 'bg-orange-50 text-orange-800 dark:bg-orange-500/10 dark:text-orange-300')}>
+                <Clock className="h-3 w-3" aria-hidden /> Late check-in · {m.lateMin} min late
+              </span>
+            ) : null}
+            {physical && m.siteRepEntered ? (
+              <span className={cn(chipCls, 'bg-violet-50 text-violet-800 dark:bg-violet-500/10 dark:text-violet-300')}>
+                <PenLine className="h-3 w-3" aria-hidden /> Rep-entered address
+              </span>
+            ) : null}
+          </div>
         </div>
         <button
           ref={closeRef}
@@ -188,11 +209,23 @@ export function MeetingPanel({
                 <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
                 <dd className="min-w-0 break-words">
                   {m.address?.trim() || 'No address'}
-                  <span className="block text-[12px] text-slate-500 dark:text-[#A1A1AA]">
-                    {m.lat !== null && m.lng !== null
-                      ? `Pinned at ${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}${m.geocodeStatus === 'manual' ? ' (set by hand)' : ''}`
-                      : 'Site not located yet'}
-                  </span>
+                  {m.lat !== null && m.lng !== null ? (
+                    <span className="block text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+                      {`Pinned at ${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}${m.geocodeStatus === 'manual' ? ' (set by hand)' : ''}`}
+                    </span>
+                  ) : null}
+                  {siteMissing ? (
+                    <span className="mt-0.5 flex items-start gap-1 text-[12px] text-amber-800 dark:text-amber-300">
+                      <MapPinOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Site not located: check-ins here are unverified.{canPin ? ' Pin the site below.' : ''}
+                    </span>
+                  ) : null}
+                  {m.siteRepEntered ? (
+                    <span className="mt-0.5 flex items-start gap-1 text-[12px] text-violet-800 dark:text-violet-300">
+                      <PenLine className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Rep-entered address. The rep typed this address; check-ins are verified against it.
+                    </span>
+                  ) : null}
                 </dd>
               </div>
             ) : (
@@ -228,6 +261,11 @@ export function MeetingPanel({
                         {verificationText(c)}
                         {c.accuracyM !== null ? ` · GPS ±${Math.round(c.accuracyM)} m` : ''}
                       </p>
+                      {c.id === firstInId && m.lateMin !== null ? (
+                        <p className="flex items-center gap-1 text-[12px] font-medium text-orange-800 dark:text-orange-300">
+                          <Clock className="h-3 w-3" aria-hidden /> Late check-in · {m.lateMin} min late
+                        </p>
+                      ) : null}
                     </div>
                   </li>
                 ))}

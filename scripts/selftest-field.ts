@@ -14,6 +14,7 @@ import {
   parseCreateBody,
   parseDayQuery,
   parseOutcomeBody,
+  parsePickerQuery,
   parseUpdateBody,
   setFieldErrorReporter,
 } from '../src/app/api/field/_lib/http';
@@ -24,6 +25,9 @@ import { geoErrorMessage, isLowAccuracy } from '../src/app/dashboard/field/_lib/
 import { MIN_BLOCK_PCT, blockColor, blockGeometry, layoutLane, type LaneItem } from '../src/app/dashboard/field/_lib/timeline';
 import { checkinWindow, checkinWindowState } from '../src/lib/field/checkin-window';
 import { checkinGateLabel } from '../src/app/dashboard/field/_lib/checkin-gate';
+import { applyPick, sameAsCompany, siteCheck, toPickerCompany, type Links, type PickerChoice } from '../src/lib/field/picker-link';
+import { companyGeocodeLine, isCompanyAddress } from '../src/lib/field/site-line';
+import { lateBy } from '../src/lib/field/late';
 import { canCancelMeeting, canEditMeeting, editErrorText, editGates, meetingPatch, type MeetingFormValues } from '../src/app/dashboard/field/_lib/meeting-edit';
 
 /**
@@ -556,6 +560,101 @@ async function main() {
     check('gate label after: closed at 4:30 pm', checkinGateLabel(def.opensAt, def.closesAt, at(400), tz) === 'Check-in closed at 4:30 pm', checkinGateLabel(def.opensAt, def.closesAt, at(400), tz));
     check('gate label inside: null', checkinGateLabel(def.opensAt, def.closesAt, at(0), tz) === null);
     check('gate label missing window: null', checkinGateLabel(undefined, undefined, at(0), tz) === null);
+  }
+
+  // --- meeting form pickers: linking (applyPick) and address vs company site
+  {
+    const co = (id: string, name: string, over: Partial<Parameters<typeof toPickerCompany>[0]> = {}) =>
+      toPickerCompany({ id, name, address: `${name} Rd`, city: 'Noida', state: 'UP', postalCode: '201301', lat: 28.5, lng: 77.3, geocodeStatus: 'manual', ...over });
+    const A = co('a', 'Acme');
+    const B = co('b', 'Bolt', { lat: null, lng: null, geocodeStatus: 'pending' });
+    const companyA: PickerChoice = { id: 'a', label: 'Acme', companyId: 'a', company: A };
+    const companyB: PickerChoice = { id: 'b', label: 'Bolt', companyId: 'b', company: B };
+    const contactA: PickerChoice = { id: 'ka', label: 'Kim', companyId: 'a', company: A };
+    const contactB: PickerChoice = { id: 'kb', label: 'Bo', companyId: 'b', company: B };
+    const dealB: PickerChoice = { id: 'db', label: 'Bolt deal', companyId: 'b', company: B, contact: contactB };
+    const dealA: PickerChoice = { id: 'da', label: 'Acme deal', companyId: 'a', company: A, contact: null };
+    const none: Links = { deal: null, company: null, contact: null };
+
+    const r1 = applyPick(none, 'deal', dealB);
+    check(
+      'pick deal fills its company and contact',
+      r1.links.company?.id === 'b' && r1.links.contact?.id === 'kb' && r1.companyChanged && r1.notice === null,
+      r1,
+    );
+    const r2 = applyPick({ deal: null, company: companyA, contact: contactA }, 'deal', dealB);
+    check(
+      'pick deal replaces a different company, with a notice',
+      r2.links.company?.id === 'b' && r2.links.contact?.id === 'kb' && r2.companyChanged && /Company changed to Bolt/.test(r2.notice ?? ''),
+      r2,
+    );
+    const r3 = applyPick({ deal: null, company: null, contact: contactB }, 'deal', dealA);
+    check('pick deal without contact clears a contact from another company', r3.links.contact === null && r3.links.company?.id === 'a', r3);
+    const r4 = applyPick({ deal: dealB, company: companyB, contact: contactB }, 'company', companyA);
+    check(
+      'pick company clears a foreign contact and deal',
+      r4.links.company?.id === 'a' && r4.links.contact === null && r4.links.deal === null && r4.companyChanged && !!r4.notice,
+      r4,
+    );
+    const r5 = applyPick({ deal: dealA, company: null, contact: contactA }, 'company', companyA);
+    check('pick company keeps its own contact and deal', r5.links.deal?.id === 'da' && r5.links.contact?.id === 'ka' && r5.notice === null, r5);
+    const r6 = applyPick(none, 'contact', contactA);
+    check('pick contact fills an empty company', r6.links.company?.id === 'a' && r6.companyChanged, r6);
+    const r7 = applyPick({ ...none, company: companyB }, 'contact', contactA);
+    check('pick contact keeps a chosen company', r7.links.company?.id === 'b' && !r7.companyChanged, r7);
+    const r8 = applyPick({ deal: dealA, company: companyA, contact: contactA }, 'company', null);
+    check('clear company keeps deal and contact, flags the change', r8.links.company === null && r8.links.deal?.id === 'da' && r8.companyChanged, r8);
+    const r9 = applyPick({ deal: dealA, company: companyA, contact: null }, 'deal', null);
+    check('clear deal changes nothing else', r9.links.company?.id === 'a' && !r9.companyChanged, r9);
+
+    const block = { address: 'Acme Rd', city: 'Noida', state: 'UP', postalCode: '201301' };
+    const line = companyGeocodeLine(block)!;
+    check('company line', line === 'Acme Rd, Noida, UP, 201301', line);
+    check(
+      'isCompanyAddress: blank, full line (trimmed), street line yes; other no; no company no',
+      isCompanyAddress(null, block) &&
+        isCompanyAddress('  ', block) &&
+        isCompanyAddress(` ${line} `, block) &&
+        isCompanyAddress('Acme Rd', block) &&
+        !isCompanyAddress('Acme Rd, Gate 2', block) &&
+        !isCompanyAddress('x', null),
+    );
+    check('sameAsCompany mirrors isCompanyAddress', sameAsCompany(line, A) && sameAsCompany('', A) && !sameAsCompany('Gate 2', A));
+    check('siteCheck pinned company', siteCheck(line, A).text === 'Checked against: company site (pinned)', siteCheck(line, A));
+    check(
+      'siteCheck located / not located yet',
+      siteCheck('', { ...A, geocodeStatus: 'ok' }).text === 'Checked against: company site (located)' &&
+        siteCheck(B.siteLine!, B).text === 'Checked against: company site (not located yet)',
+    );
+    const own = siteCheck('Gate 2, Sector 63', A);
+    check('siteCheck own address', own.kind === 'own' && own.text === 'This meeting will be checked against this address instead of the company site.', own);
+    check('siteCheck without company: nothing to say', siteCheck('Gate 2', null).kind === 'none');
+
+    check('parsePickerQuery ok', parsePickerQuery(new URLSearchParams('kind=deal&q=ac')).kind === 'deal');
+    const bad = (qs: string) => {
+      try {
+        parsePickerQuery(new URLSearchParams(qs));
+        return false;
+      } catch (e) {
+        return e instanceof ZodError;
+      }
+    };
+    check('parsePickerQuery rejects bad kind / companyId', bad('kind=task') && bad('kind=deal&companyId=nope') && bad(''));
+  }
+
+  // --- late check-in (lateBy)
+  {
+    const start = new Date('2026-12-02T05:00:00Z');
+    const at = (min: number) => new Date(start.getTime() + min * 60_000);
+    const m = { type: 'physical' as const, source: 'manual', startAt: start };
+    check('lateBy inside grace → null', lateBy(m, at(10), 15) === null);
+    check('lateBy start+16, grace 15 → 16', lateBy(m, at(16), 15) === 16, lateBy(m, at(16), 15));
+    check('lateBy exactly start+grace → null', lateBy(m, at(15), 15) === null);
+    check('lateBy early → null', lateBy(m, at(-30), 15) === null);
+    check('lateBy walk-in → null', lateBy({ ...m, source: 'walk_in' }, at(90), 15) === null);
+    check('lateBy virtual → null', lateBy({ ...m, type: 'virtual' }, at(90), 15) === null);
+    check('lateBy not checked in → null', lateBy(m, null, 15) === null);
+    check('lateBy ISO strings, grace 0', lateBy({ ...m, startAt: start.toISOString() }, at(1).toISOString(), 0) === 1);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

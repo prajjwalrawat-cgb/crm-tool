@@ -1,45 +1,52 @@
 'use client';
 
-import { Loader2, Search, X } from 'lucide-react';
+import { ChevronDown, Loader2, Search, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
-import type { SearchHit, SearchResponse } from '@/lib/search/types';
+import type { PickerChoice, PickerKind, PickerResponse } from '@/lib/field/picker-link';
 import { cn } from '@/lib/utils';
 
 import { inputCls } from '../../settings/lead-capture/_components/ui';
 
-export type EntityKind = 'deal' | 'company' | 'contact';
-export type EntityChoice = { id: string; label: string; sublabel?: string | null };
+export type EntityKind = PickerKind;
+export type EntityChoice = PickerChoice;
 
 const DEBOUNCE_MS = 250;
 const PLACEHOLDER: Record<EntityKind, string> = {
-  deal: 'Search deals…',
-  company: 'Search companies…',
-  contact: 'Search contacts…',
+  deal: 'Choose or search deals…',
+  company: 'Choose or search companies…',
+  contact: 'Choose or search contacts…',
 };
+const NOUN: Record<EntityKind, string> = { deal: 'deals', company: 'companies', contact: 'contacts' };
 
 /**
- * Compact search-as-you-type picker over /api/search (the command palette's
- * endpoint, same RBAC: reps see their own and unassigned records). Results
- * render inline under the input so nothing spills out of a bottom sheet.
+ * Searchable dropdown over /api/field/pickers. Focusing or clicking the box opens
+ * the list straight away with up to 20 records the user can see (the CRM's own
+ * visibility rule), most recently updated first; typing filters (debounced).
+ * `companyId` narrows deals and contacts to one company. Results render inline
+ * under the input so nothing spills out of a bottom sheet.
  */
 export function EntitySearchSelect({
   kind,
   label,
   value,
   onChange,
+  companyId,
   disabled,
 }: {
   kind: EntityKind;
   label: string;
   value: EntityChoice | null;
   onChange: (v: EntityChoice | null) => void;
+  /** Deals and contacts: only this company's. */
+  companyId?: string | null;
   disabled?: boolean;
 }) {
   const inputId = useId();
   const listId = useId();
   const [term, setTerm] = useState('');
-  const [result, setResult] = useState<{ term: string; hits: EntityChoice[]; error: string | null } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [result, setResult] = useState<{ key: string; hits: EntityChoice[]; error: string | null } | null>(null);
   const [active, setActive] = useState(0);
   const seq = useRef(0);
   const listRef = useRef<HTMLUListElement>(null);
@@ -53,28 +60,34 @@ export function EntitySearchSelect({
   };
 
   const q = term.trim();
+  const scopedCompany = kind === 'company' ? null : (companyId ?? null);
+  const key = `${q}|${scopedCompany ?? ''}`;
   useEffect(() => {
-    if (!q) return;
+    if (!open) return;
     const mine = ++seq.current;
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { cache: 'no-store' });
-        if (!res.ok) throw new Error(String(res.status));
-        const body = (await res.json()) as SearchResponse;
-        if (mine !== seq.current) return;
-        const hits = body.hits
-          .filter((h: SearchHit) => h.kind === kind)
-          .map((h) => ({ id: h.id, label: h.title, sublabel: h.subtitle }));
-        setResult({ term: q, hits, error: null });
-        setActive(0);
-      } catch {
-        if (mine !== seq.current) return;
-        setResult({ term: q, hits: [], error: 'Search failed. Check your connection.' });
-        setActive(0);
-      }
-    }, DEBOUNCE_MS);
+    const t = setTimeout(
+      async () => {
+        try {
+          const params = new URLSearchParams({ kind });
+          if (q) params.set('q', q);
+          if (scopedCompany) params.set('companyId', scopedCompany);
+          const res = await fetch(`/api/field/pickers?${params}`, { cache: 'no-store' });
+          if (!res.ok) throw new Error(String(res.status));
+          const body = (await res.json()) as PickerResponse;
+          if (mine !== seq.current) return;
+          setResult({ key, hits: body.items, error: null });
+          setActive(0);
+        } catch {
+          if (mine !== seq.current) return;
+          setResult({ key, hits: [], error: 'Could not load the list. Check your connection.' });
+          setActive(0);
+        }
+      },
+      // The first, unfiltered list opens immediately; typing is debounced.
+      q ? DEBOUNCE_MS : 0,
+    );
     return () => clearTimeout(t);
-  }, [q, kind]);
+  }, [open, q, kind, scopedCompany, key]);
 
   // Keep the keyboard-active option visible in the scrolling list.
   useEffect(() => {
@@ -110,23 +123,26 @@ export function EntitySearchSelect({
     );
   }
 
-  const loading = q !== '' && result?.term !== q;
-  const hits = q && result?.term === q ? result.hits : [];
-  const error = q && result?.term === q ? result.error : null;
+  const ready = result?.key === key;
+  const loading = open && !ready;
+  const hits = open && ready ? result.hits : [];
+  const error = open && ready ? result.error : null;
   const activeIndex = Math.min(active, hits.length - 1);
   const optionId = (i: number) => `${listId}-opt-${i}`;
 
   function pick(h: EntityChoice) {
     focusNext.current = 'chip';
-    onChange(h);
+    setOpen(false);
     setTerm('');
+    onChange(h);
   }
 
-  /** Combobox keys: ArrowUp/Down move the active option, Enter picks it, Escape closes the list. */
+  /** Combobox keys: ArrowDown opens / moves, ArrowUp moves, Enter picks, Escape closes the list. */
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'ArrowDown' && hits.length > 0) {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive(Math.min(activeIndex + 1, hits.length - 1));
+      if (!open) setOpen(true);
+      else if (hits.length > 0) setActive(Math.min(activeIndex + 1, hits.length - 1));
     } else if (e.key === 'ArrowUp' && hits.length > 0) {
       e.preventDefault();
       setActive(Math.max(activeIndex - 1, 0));
@@ -135,11 +151,12 @@ export function EntitySearchSelect({
       e.preventDefault();
       const h = hits[activeIndex];
       if (h) pick(h);
-    } else if (e.key === 'Escape' && term) {
+    } else if (e.key === 'Escape' && (open || term)) {
       // Close the list without also closing the sheet.
       e.preventDefault();
       e.stopPropagation();
       e.nativeEvent.stopImmediatePropagation();
+      setOpen(false);
       setTerm('');
     }
   }
@@ -155,24 +172,33 @@ export function EntitySearchSelect({
           id={inputId}
           ref={takeFocus('input')}
           role="combobox"
-          aria-expanded={q !== ''}
+          aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={hits[activeIndex] ? optionId(activeIndex) : undefined}
+          aria-activedescendant={open && hits[activeIndex] ? optionId(activeIndex) : undefined}
+          autoComplete="off"
           disabled={disabled}
           value={term}
           placeholder={PLACEHOLDER[kind]}
-          onChange={(e) => setTerm(e.target.value)}
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onChange={(e) => {
+            setTerm(e.target.value);
+            setOpen(true);
+          }}
           onKeyDown={onKeyDown}
-          className={cn(inputCls, 'min-h-10 pl-9 text-[14px] sm:text-[13px]')}
+          className={cn(inputCls, 'min-h-10 pl-9 pr-9 text-[14px] sm:text-[13px]')}
         />
         {loading ? (
           <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" aria-hidden />
-        ) : null}
+        ) : (
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
+        )}
       </div>
-      {q ? (
+      {open ? (
         <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-[#2A2A2A]">
-          <ul ref={listRef} id={listId} role="listbox" aria-label={label} className="max-h-48 overflow-y-auto">
+          <ul ref={listRef} id={listId} role="listbox" aria-label={label} className="max-h-56 overflow-y-auto">
             {hits.map((h, i) => (
               <li
                 key={h.id}
@@ -180,7 +206,7 @@ export function EntitySearchSelect({
                 role="option"
                 aria-selected={i === activeIndex}
                 onMouseEnter={() => setActive(i)}
-                // Keep focus in the input so the keyboard and the active option stay in sync.
+                // Keep focus in the input so the keyboard and the active option stay in sync (and blur doesn't close the list).
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(h)}
                 className={cn(
@@ -199,10 +225,12 @@ export function EntitySearchSelect({
           <p role="status" className="empty:hidden">
             {!loading && error ? <span className="block px-3 py-3 text-[12.5px] text-rose-600">{error}</span> : null}
             {!loading && !error && hits.length === 0 ? (
-              <span className="block px-3 py-3 text-[12.5px] text-slate-500 dark:text-[#A1A1AA]">No matches for “{q}”.</span>
+              <span className="block px-3 py-3 text-[12.5px] text-slate-500 dark:text-[#A1A1AA]">
+                {q ? `No matches for “${q}”.` : scopedCompany ? `No ${NOUN[kind]} for this company.` : `No ${NOUN[kind]} yet.`}
+              </span>
             ) : null}
             {loading && hits.length === 0 ? (
-              <span className="block px-3 py-3 text-[12.5px] text-slate-500 dark:text-[#A1A1AA]">Searching…</span>
+              <span className="block px-3 py-3 text-[12.5px] text-slate-500 dark:text-[#A1A1AA]">Loading…</span>
             ) : null}
           </p>
         </div>

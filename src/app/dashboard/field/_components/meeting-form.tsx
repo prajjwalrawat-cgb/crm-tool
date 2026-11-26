@@ -1,10 +1,11 @@
 'use client';
 
-import { Loader2, MapPin, Video } from 'lucide-react';
+import { Info, Loader2, MapPin, RotateCcw, Video } from 'lucide-react';
 import { useId, useState } from 'react';
 
 import type { MeetingStatus } from '@/db/schema/enums';
 import type { DayMeeting } from '@/lib/field/day';
+import { applyPick, siteCheck, type Links, type PickerKind } from '@/lib/field/picker-link';
 import { cn } from '@/lib/utils';
 
 import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
@@ -40,7 +41,15 @@ function plusMinutes(local: string, minutes: number, tz: string): string | null 
   return iso ? isoToZonedInput(new Date(new Date(iso).getTime() + minutes * 60_000), tz) : null;
 }
 
-const choice = (x: { id: string; name: string } | null): EntityChoice | null => (x ? { id: x.id, label: x.name } : null);
+/** The meeting's current links as picker choices (with company ids, so linking rules work in Edit too). */
+function linksOf(m: DayMeeting | undefined): Links {
+  if (!m) return { deal: null, company: null, contact: null };
+  return {
+    deal: m.deal ? { id: m.deal.id, label: m.deal.name, companyId: m.deal.companyId } : null,
+    company: m.company ? { id: m.company.id, label: m.company.name, sublabel: m.company.city, companyId: m.company.id, company: m.company } : null,
+    contact: m.contact ? { id: m.contact.id, label: m.contact.name, companyId: m.contact.companyId } : null,
+  };
+}
 
 /** Form values for an existing meeting, in tenant-local wall clock. */
 function valuesOf(m: DayMeeting, tz: string): MeetingFormValues {
@@ -96,9 +105,9 @@ export function MeetingForm({
     () => initial?.endTime ?? (plusMinutes(initialStart, 60, tz) ?? initialStart).slice(11, 16),
   );
   const [ownerId, setOwnerId] = useState(initial?.ownerId ?? defaultOwnerId);
-  const [deal, setDeal] = useState<EntityChoice | null>(() => choice(meeting?.deal ?? null));
-  const [company, setCompany] = useState<EntityChoice | null>(() => choice(meeting?.company ?? null));
-  const [contact, setContact] = useState<EntityChoice | null>(() => choice(meeting?.contact ?? null));
+  const [links, setLinks] = useState<Links>(() => linksOf(meeting));
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const { deal, company, contact } = links;
   const [address, setAddress] = useState(initial?.address ?? '');
   const [virtualUrl, setVirtualUrl] = useState(initial?.virtualUrl ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
@@ -106,6 +115,22 @@ export function MeetingForm({
   const [error, setError] = useState<string | null>(null);
   const lockStructural = busy || !gates.structural;
   const lockDetails = busy || !gates.details;
+  const siteCompany = company?.company ?? null;
+  const check = type === 'physical' ? siteCheck(address, siteCompany) : null;
+
+  /**
+   * Linking rules (applyPick): a deal brings its company and contact, a company
+   * clears links that belong to another company, a contact fills an empty company.
+   * A new company fills the address box with its site line while the place can still change.
+   */
+  function pickLink(kind: PickerKind, item: EntityChoice | null) {
+    const r = applyPick(links, kind, item);
+    setLinks(r.links);
+    setLinkNotice(r.notice);
+    if (r.companyChanged && gates.structural && r.links.company?.company) {
+      setAddress(r.links.company.company.siteLine ?? '');
+    }
+  }
 
   /** Moving the start keeps the meeting length. */
   function changeStart(next: string) {
@@ -293,9 +318,35 @@ export function MeetingForm({
         </div>
       ) : null}
 
-      <EntitySearchSelect kind="deal" label="Deal (optional)" value={deal} onChange={setDeal} disabled={lockDetails} />
-      <EntitySearchSelect kind="company" label="Company (optional)" value={company} onChange={setCompany} disabled={lockDetails} />
-      <EntitySearchSelect kind="contact" label="Contact (optional)" value={contact} onChange={setContact} disabled={lockDetails} />
+      <EntitySearchSelect
+        kind="deal"
+        label="Deal (optional)"
+        value={deal}
+        onChange={(v) => pickLink('deal', v)}
+        companyId={company?.id ?? null}
+        disabled={lockDetails}
+      />
+      <EntitySearchSelect
+        kind="company"
+        label="Company (optional)"
+        value={company}
+        onChange={(v) => pickLink('company', v)}
+        disabled={lockDetails}
+      />
+      <EntitySearchSelect
+        kind="contact"
+        label="Contact (optional)"
+        value={contact}
+        onChange={(v) => pickLink('contact', v)}
+        companyId={company?.id ?? null}
+        disabled={lockDetails}
+      />
+      {linkNotice ? (
+        <p role="status" className="-mt-2 flex items-start gap-1.5 text-[12px] text-indigo-700 dark:text-indigo-300">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          {linkNotice}
+        </p>
+      ) : null}
 
       {type === 'physical' ? (
         <div className="space-y-1">
@@ -308,10 +359,33 @@ export function MeetingForm({
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
             maxLength={500}
-            placeholder={company ? `Leave blank to use ${company.label}'s address` : 'Street, area, city'}
+            placeholder={company ? `Leave blank to use ${company.label}'s site` : 'Street, area, city'}
             className={fieldCls}
             disabled={lockStructural}
+            aria-describedby={check?.text ? `${ids}-site` : undefined}
           />
+          {check?.kind === 'company' ? (
+            <p id={`${ids}-site`} className="flex items-start gap-1.5 text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              {check.text}
+            </p>
+          ) : check?.kind === 'own' ? (
+            <div id={`${ids}-site`} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-amber-800 dark:text-amber-300">
+              <span className="flex items-start gap-1.5">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                {check.text}
+              </span>
+              {!lockStructural && siteCompany ? (
+                <button
+                  type="button"
+                  onClick={() => setAddress(siteCompany.siteLine ?? '')}
+                  className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 font-medium text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Use company site
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="space-y-1">

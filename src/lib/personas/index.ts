@@ -43,3 +43,17 @@ export const PERSONA_LABELS: Record<Persona, string> = {
   manager: 'Manager',
   admin: 'Administrator',
 };
+
+/**
+ * The CRM's record-visibility rule for deals, companies and contacts: the sales
+ * persona (member, viewer) sees records they own plus unassigned ones; managers,
+ * admins and owners see the whole tenant. Returns the owner id to restrict to, or
+ * undefined for no restriction. Used by the list pages, /api/search and the Field
+ * meeting pickers so every surface shows the same records.
+ */
+export function ownerOrUnassignedRestriction(
+  role: MembershipRole | null | undefined,
+  userId: string,
+): string | undefined {
+  return personaOf(role) === 'sales' ? userId : undefined;
+}

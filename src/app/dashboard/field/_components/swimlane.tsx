@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, PenLine } from 'lucide-react';
 
 import type { DayMeeting } from '@/lib/field/day';
 import { cn } from '@/lib/utils';
@@ -30,7 +30,14 @@ export const hourPct = (h: number) => ((h - DAY_START_HOUR) / (DAY_END_HOUR - DA
 function blockLabel(rep: string, m: DayMeeting, tz: string): string {
   const time = `${formatTimeInTz(m.startAt, tz)} to ${formatTimeInTz(m.endAt, tz)}`;
   const risks = m.risk.reasons.length > 0 ? `At risk: ${m.risk.reasons.map((r) => riskLabel(r, m.risk)).join('; ')}` : 'No risks';
-  return `${rep}: ${m.title}, ${time}, ${STATUS_LABEL[m.status]}${m.type === 'virtual' ? ', virtual' : ''}. ${risks}.`;
+  const notes = [
+    m.needsLinking && m.status !== 'cancelled' ? 'needs a deal' : null,
+    m.lateMin !== null ? `late check-in, ${m.lateMin} min late` : null,
+    m.type === 'physical' && (m.lat === null || m.lng === null) && m.status !== 'cancelled' ? 'site not located' : null,
+    m.type === 'physical' && m.siteRepEntered ? 'rep-entered address' : null,
+  ].filter(Boolean);
+  const extra = notes.length ? ` ${notes.join('; ')}.` : '';
+  return `${rep}: ${m.title}, ${time}, ${STATUS_LABEL[m.status]}${m.type === 'virtual' ? ', virtual' : ''}. ${risks}.${extra}`;
 }
 
 /**
@@ -129,6 +136,12 @@ export function Swimlane({
                     <span className="block truncate tabular-nums opacity-80">
                       {formatTimeInTz(m.startAt, tz)}
                       {m.type === 'virtual' ? ' · virtual' : ''}
+                      {m.type === 'physical' && m.siteRepEntered ? (
+                        <>
+                          {' · '}
+                          <PenLine className="inline h-3 w-3 align-[-2px]" aria-hidden /> rep-entered address
+                        </>
+                      ) : null}
                     </span>
                   </span>
                   {g.clippedEnd ? <ChevronRight className="h-3 w-3 shrink-0" aria-hidden /> : null}

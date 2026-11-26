@@ -8,7 +8,7 @@ import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { requireMembership } from '@/lib/membership';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
-import { personaOf } from '@/lib/personas';
+import { ownerOrUnassignedRestriction } from '@/lib/personas';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import { CompaniesView } from './_components/companies-view';
@@ -38,9 +38,8 @@ export default async function CompaniesPage({
     const { sort, dir } = parseCompanySort(sp);
 
     const membership = await requireMembership();
-    const persona = personaOf(membership.role);
     const restrictToOwnerOrUnassigned =
-      persona === 'sales' ? userId : undefined;
+      ownerOrUnassignedRestriction(membership.role, userId);
 
     const [page, teammates, customFieldDefs, settings] = await Promise.all([
       listCompanies(tenant.id, {

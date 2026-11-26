@@ -6,7 +6,9 @@ import {
   Building2,
   Briefcase,
   CheckCircle2,
+  Clock,
   MapPin,
+  MapPinOff,
   Navigation,
   NotebookPen,
   Pencil,
@@ -68,6 +70,8 @@ export function MeetingCard({
   const lastIn = [...m.checkins].reverse().find((c) => c.kind === 'in' && c.accepted);
   const lastOut = [...m.checkins].reverse().find((c) => c.kind === 'out');
   const cancelled = m.status === 'cancelled';
+  const siteMissing = physical && (m.lat === null || m.lng === null);
+  const chipCls = 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium';
 
   function navigate() {
     // Fire-and-forget: the Maps app opens either way. keepalive lets it land after the tab is backgrounded.
@@ -97,6 +101,21 @@ export function MeetingCard({
           {STATUS_LABEL[m.status]}
         </span>
       </header>
+
+      {!cancelled && (m.needsLinking || m.lateMin !== null) ? (
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Notes">
+          {m.needsLinking ? (
+            <li className={cn(chipCls, 'bg-slate-100 text-slate-700 dark:bg-[#1F1F1F] dark:text-[#D4D4D8]')}>
+              <Briefcase className="h-3 w-3" aria-hidden /> Needs a deal
+            </li>
+          ) : null}
+          {m.lateMin !== null ? (
+            <li className={cn(chipCls, 'bg-orange-50 text-orange-800 dark:bg-orange-500/10 dark:text-orange-300')}>
+              <Clock className="h-3 w-3" aria-hidden /> Late check-in · {m.lateMin} min late
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
 
       {m.risk.reasons.length > 0 && !cancelled ? (
         <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Risks">
@@ -133,18 +152,20 @@ export function MeetingCard({
             <Briefcase className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
             <dd className="min-w-0 truncate">{m.deal.name}</dd>
           </div>
-        ) : m.needsLinking ? (
-          <div className="flex items-center gap-2 text-[12px] text-slate-500 dark:text-[#A1A1AA]">
-            <dt className="sr-only">Deal</dt>
-            <Briefcase className="h-4 w-4 shrink-0 text-slate-300" aria-hidden />
-            <dd>Not linked to a deal yet</dd>
-          </div>
         ) : null}
         {physical ? (
           <div className="flex items-start gap-2">
             <dt className="sr-only">Address</dt>
             <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-            <dd className="min-w-0 break-words">{m.address?.trim() || 'No address yet'}</dd>
+            <dd className="min-w-0 break-words">
+              {m.address?.trim() || 'No address yet'}
+              {siteMissing && !cancelled ? (
+                <span className="mt-0.5 flex items-start gap-1 text-[12px] text-amber-800 dark:text-amber-300">
+                  <MapPinOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Site not located: check-ins here are unverified.
+                </span>
+              ) : null}
+            </dd>
           </div>
         ) : (
           <div className="flex items-center gap-2">
