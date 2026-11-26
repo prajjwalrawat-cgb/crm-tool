@@ -68,6 +68,29 @@ export async function fetchPre(target: string | null, cached: PreGeocode, maps: 
   }
 }
 
+/**
+ * A company's point and status from a pre-fetched verdict for its geocode line,
+ * inside the write transaction (stores fresh provider verdicts; never the
+ * network). Null target = no address: no point. `pending` (no key, timeout)
+ * leaves the point empty; coordinates are never invented.
+ */
+export async function companySiteFromPre(
+  tx: Tx,
+  tenantId: string,
+  target: string | null,
+  pre: PreGeocode,
+  providerName: string,
+): Promise<{ lat: number | null; lng: number | null; geocodeStatus: GeocodeStatus | null }> {
+  if (!target) return { lat: null, lng: null, geocodeStatus: null };
+  if (pre && pre.result.status === 'ok' && pre.result.point) {
+    if (pre.store) await geocodeStore(tx, tenantId, pre.address, pre.result, providerName);
+    return { lat: pre.result.point.lat, lng: pre.result.point.lng, geocodeStatus: 'ok' };
+  }
+  const failed = pre?.result.status === 'failed';
+  if (pre?.store && failed) await geocodeStore(tx, tenantId, pre.address, pre.result, providerName);
+  return { lat: null, lng: null, geocodeStatus: failed ? 'failed' : 'pending' };
+}
+
 function fromResult(address: string, r: GeocodeResult): Site {
   if (r.status === 'ok' && r.point) return { address, lat: r.point.lat, lng: r.point.lng, geocodeStatus: 'ok' };
   return { address, lat: null, lng: null, geocodeStatus: r.status === 'pending' ? 'pending' : 'failed' };

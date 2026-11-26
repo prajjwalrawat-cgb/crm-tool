@@ -24,10 +24,9 @@ import {
   tenantTransaction,
 } from '@/lib/db-context';
 import { getMapsProvider } from '@/lib/field/maps';
-import { geocodeStore } from '@/lib/field/maps/cached';
 import { pinCompanySite, propagateCompanyPoint } from '@/lib/field/meetings';
-import { companyGeocodeLine, fetchPre, lookupPre } from '@/lib/field/site';
-import { FieldError } from '@/lib/field/types';
+import { companyGeocodeLine, companySiteFromPre, fetchPre, lookupPre, resolvePin } from '@/lib/field/site';
+import { FieldError, type LatLng } from '@/lib/field/types';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
 import { can } from '@/lib/rbac';
 import { serializeCompany } from '@/lib/realtime/payloads';
@@ -65,6 +64,65 @@ export type UpdateCompanyResult = CreateCompanyResult;
 export type SimpleResult =
   | { ok: true }
   | { ok: false; message: string };
+
+/* -------- SITE FIELDS (create + edit) -------- */
+
+const ADDRESS_FIELDS = ['address', 'city', 'state', 'postalCode'] as const;
+type AddressField = (typeof ADDRESS_FIELDS)[number];
+
+type SiteForm =
+  | {
+      ok: true;
+      /** Only the address fields the form sent (blank = null). */
+      address: Partial<Record<AddressField, string | null>>;
+      /** Site pin text; always '' without `pinFieldSites`, so a rep's crafted field is ignored. */
+      pinText: string;
+      /** undefined = not sent or not allowed; null = clear to the workspace default. */
+      radius: number | null | undefined;
+    }
+  | { ok: false; result: { ok: false; message: string; fieldErrors: Record<string, string[]> } };
+
+/**
+ * Field Meetings site block from the company form (create and edit): address
+ * for anyone who can create / edit companies, site pin and check-in radius for
+ * `pinFieldSites` only. The form only sends these when it shows them.
+ */
+function readSiteForm(formData: FormData, role: Parameters<typeof can>[0]): SiteForm {
+  const textOrNull = (key: string, max: number): string | null | undefined => {
+    if (!formData.has(key)) return undefined;
+    const v = String(formData.get(key) ?? '').trim();
+    return v ? v.slice(0, max) : null;
+  };
+  const address: Partial<Record<AddressField, string | null>> = {};
+  for (const f of ADDRESS_FIELDS) {
+    const v = textOrNull(f, f === 'address' ? 500 : 120);
+    if (v !== undefined) address[f] = v;
+  }
+  const canPin = can(role, 'pinFieldSites');
+  const pinText = canPin ? String(formData.get('sitePin') ?? '').trim() : '';
+  let radius: number | null | undefined;
+  if (canPin && formData.has('checkinRadiusM')) {
+    const raw = String(formData.get('checkinRadiusM') ?? '').trim();
+    radius = raw === '' ? null : Number(raw);
+    if (radius !== null && (!Number.isInteger(radius) || radius < 50 || radius > 5000)) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: { checkinRadiusM: ['Whole number from 50 to 5000 metres, or blank for the workspace default.'] },
+        },
+      };
+    }
+  }
+  return { ok: true, address, pinText, radius };
+}
+
+const pinError = (e: FieldError) => ({
+  ok: false as const,
+  message: 'Please fix the highlighted fields.',
+  fieldErrors: { sitePin: [e.message] },
+});
 
 /* -------- CREATE -------- */
 
@@ -107,7 +165,29 @@ export async function createCompanyAction(
       // past a surfaced duplicate warning (Module 5).
       const dedupOverride = formData.get('dedupOverride') === '1';
 
-      const created = await tenantTransaction(async (tx) => {
+      // Field Meetings site: every network call (pin short link, geocode) runs
+      // before the write transaction. A pin wins over the address lookup.
+      const siteForm = readSiteForm(formData, membership.role);
+      if (!siteForm.ok) return siteForm.result;
+      const maps = getMapsProvider();
+      let pinPoint: LatLng | null = null;
+      if (siteForm.pinText) {
+        try {
+          pinPoint = await resolvePin(siteForm.pinText, maps);
+        } catch (e) {
+          if (e instanceof FieldError) return pinError(e);
+          throw e;
+        }
+      }
+      const a = siteForm.address;
+      const target = pinPoint
+        ? null
+        : companyGeocodeLine({ address: a.address ?? null, city: a.city ?? null, state: a.state ?? null, postalCode: a.postalCode ?? null });
+      const cached = target ? await tenantTransaction((tx) => lookupPre(tx, tenant.id, target)) : null;
+      const pre = await fetchPre(target, cached, maps);
+
+      const inserted = await tenantTransaction(async (tx) => {
+        const site = target ? await companySiteFromPre(tx, tenant.id, target, pre, maps.name) : {};
         const [row] = await tx
           .insert(companies)
           .values({
@@ -120,6 +200,9 @@ export async function createCompanyAction(
             customFields: cf.values,
             normalizedName: normalizeCompanyName(parsed.data.name),
             dedupOverride,
+            ...siteForm.address,
+            ...site,
+            ...(siteForm.radius !== undefined && !pinPoint ? { checkinRadiusM: siteForm.radius } : {}),
           })
           .returning();
         if (!row) return null;
@@ -149,7 +232,18 @@ export async function createCompanyAction(
         return row;
       });
 
-      if (!created) return { ok: false, message: 'Failed to create company.' };
+      if (!inserted) return { ok: false, message: 'Failed to create company.' };
+
+      // The pin (already resolved to a point, so no network here) and its radius
+      // go through the one company-pin path once the company exists.
+      const created = pinPoint
+        ? await pinCompanySite(
+            { tenantId: tenant.id, userId: membership.userId, role: membership.role },
+            inserted.id,
+            `${pinPoint.lat}, ${pinPoint.lng}`,
+            siteForm.radius,
+          )
+        : inserted;
 
       // Workflow events ship after commit. The mutation has already
       // succeeded; if the inngest send fails we log and move on (see
@@ -177,9 +271,6 @@ export async function createCompanyAction(
 }
 
 /* -------- UPDATE -------- */
-
-const ADDRESS_FIELDS = ['address', 'city', 'state', 'postalCode'] as const;
-type AddressField = (typeof ADDRESS_FIELDS)[number];
 
 export async function updateCompanyAction(
   formData: FormData,
@@ -216,32 +307,9 @@ export async function updateCompanyAction(
         };
       }
 
-      // Field Meetings: address block (anyone who can edit) and site pin /
-      // radius (pinFieldSites only). The form only sends these when it shows them.
-      const textOrNull = (key: string, max: number): string | null | undefined => {
-        if (!formData.has(key)) return undefined;
-        const v = String(formData.get(key) ?? '').trim();
-        return v ? v.slice(0, max) : null;
-      };
-      const addressIn: Partial<Record<AddressField, string | null>> = {};
-      for (const f of ADDRESS_FIELDS) {
-        const v = textOrNull(f, f === 'address' ? 500 : 120);
-        if (v !== undefined) addressIn[f] = v;
-      }
-      const canPin = can(membership.role, 'pinFieldSites');
-      const pinText = canPin ? String(formData.get('sitePin') ?? '').trim() : '';
-      let radius: number | null | undefined;
-      if (canPin && formData.has('checkinRadiusM')) {
-        const raw = String(formData.get('checkinRadiusM') ?? '').trim();
-        radius = raw === '' ? null : Number(raw);
-        if (radius !== null && (!Number.isInteger(radius) || radius < 50 || radius > 5000)) {
-          return {
-            ok: false,
-            message: 'Please fix the highlighted fields.',
-            fieldErrors: { checkinRadiusM: ['Whole number from 50 to 5000 metres, or blank for the workspace default.'] },
-          };
-        }
-      }
+      const siteForm = readSiteForm(formData, membership.role);
+      if (!siteForm.ok) return siteForm.result;
+      const { address: addressIn, pinText, radius } = siteForm;
 
       // 1. Pin first (network for short links happens inside, outside our write transaction).
       //    A manual pin makes the address edit below keep its coordinates.
@@ -254,13 +322,7 @@ export async function updateCompanyAction(
             radius,
           );
         } catch (e) {
-          if (e instanceof FieldError) {
-            return {
-              ok: false,
-              message: 'Please fix the highlighted fields.',
-              fieldErrors: { sitePin: [e.message] },
-            };
-          }
+          if (e instanceof FieldError) return pinError(e);
           throw e;
         }
       }
@@ -294,19 +356,8 @@ export async function updateCompanyAction(
 
       const updated = await tenantTransaction(async (tx) => {
         const site: Partial<typeof companies.$inferInsert> = { ...plan.next };
-        if (plan.regeocode) {
-          if (!plan.target) {
-            // Address cleared: nothing to locate.
-            Object.assign(site, { lat: null, lng: null, geocodeStatus: null });
-          } else if (pre && pre.result.status === 'ok' && pre.result.point) {
-            if (pre.store) await geocodeStore(tx, tenant.id, pre.address, pre.result, maps.name);
-            Object.assign(site, { lat: pre.result.point.lat, lng: pre.result.point.lng, geocodeStatus: 'ok' });
-          } else {
-            const failed = pre?.result.status === 'failed';
-            if (pre?.store && failed) await geocodeStore(tx, tenant.id, pre.address, pre.result, maps.name);
-            Object.assign(site, { lat: null, lng: null, geocodeStatus: failed ? 'failed' : 'pending' });
-          }
-        }
+        // A null target (address cleared) leaves no point.
+        if (plan.regeocode) Object.assign(site, await companySiteFromPre(tx, tenant.id, plan.target, pre, maps.name));
         if (radius !== undefined && !pinText) site.checkinRadiusM = radius;
         const [row] = await tx
           .update(companies)

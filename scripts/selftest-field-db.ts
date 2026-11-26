@@ -822,6 +822,32 @@ async function main() {
       );
     }
 
+    // --- company site from a pre-fetched verdict (shared by the Add and Edit company actions)
+    {
+      const SITE = await import('../src/lib/field/site');
+      const line = SITE.companyGeocodeLine({ address: 'New Co Rd', city: 'Noida', state: 'UP', postalCode: '201301' });
+      check('company line joins address, city, state, postal code', line === 'New Co Rd, Noida, UP, 201301', line);
+      const est = getMapsProvider(); // no MAPS_API_KEY here: answers pending
+      const prePending = await SITE.fetchPre(line, await inT(A, (tx) => SITE.lookupPre(tx, A, line)), est);
+      const pending = await inT(A, (tx) => SITE.companySiteFromPre(tx, A, line, prePending, est.name));
+      const cachedAfterPending = await inT(A, (tx) => SITE.lookupPre(tx, A, line));
+      check(
+        'company site without a key: pending, no coordinates, nothing cached',
+        pending.geocodeStatus === 'pending' && pending.lat === null && pending.lng === null && cachedAfterPending === null,
+        { pending, cachedAfterPending },
+      );
+      const okMaps = fake({ async geocode() { return { status: 'ok', point: { lat: 28.44, lng: 77.44 } }; } });
+      const preOk = await SITE.fetchPre(line, null, okMaps);
+      const ok = await inT(A, (tx) => SITE.companySiteFromPre(tx, A, line, preOk, okMaps.name));
+      const cachedOk = await inT(A, (tx) => SITE.lookupPre(tx, A, line));
+      check(
+        'company site with a verdict: ok point, verdict cached for the next save',
+        ok.geocodeStatus === 'ok' && ok.lat === 28.44 && cachedOk?.result.status === 'ok',
+        { ok, cachedOk },
+      );
+      const none = await inT(A, (tx) => SITE.companySiteFromPre(tx, A, null, null, okMaps.name));
+      check('company site with no address: no point, no status', none.lat === null && none.geocodeStatus === null, none);
+    }
   }
 
   // ---------------------------------------------------------------- risk scan (Task 5)

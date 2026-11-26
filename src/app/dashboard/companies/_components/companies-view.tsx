@@ -465,6 +465,7 @@ export function CompaniesView({
                   teammates={teammates}
                   currentUserId={currentUserId}
                   customFieldDefs={customFieldDefs}
+                  canPin={can(currentRole, 'pinFieldSites')}
                 />
               )}
             </CreateDrawer>

@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { OwnerFormField } from '../../_components/owner-form-field';
 import { findSimilarCompaniesAction } from '../actions';
+import { SiteAddressFieldset } from './site-address-fieldset';
 
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
   return Object.fromEntries(
@@ -31,6 +32,8 @@ type Props = {
   teammates: Teammate[];
   currentUserId: string;
   customFieldDefs: CustomFieldDef[];
+  /** `pinFieldSites`: shows the site pin and check-in radius inputs. */
+  canPin?: boolean;
 };
 
 export function CreateCompanyForm({
@@ -42,6 +45,7 @@ export function CreateCompanyForm({
   teammates,
   currentUserId,
   customFieldDefs,
+  canPin = false,
 }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
   const [name, setName] = useState('');
@@ -153,6 +157,8 @@ export function CreateCompanyForm({
         currentUserId={currentUserId}
         errors={fieldErrors.ownerId}
       />
+
+      <SiteAddressFieldset company={null} canPin={canPin} fieldErrors={fieldErrors} />
 
       <CustomFieldInputs defs={customFieldDefs} errors={customErrors(fieldErrors)} />
 
