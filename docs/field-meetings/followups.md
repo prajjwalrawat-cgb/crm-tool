@@ -68,3 +68,4 @@ Deferred findings from the PR 1 task and branch reviews (2026-11-25). None block
 - Task 9: minor (deferred): raw zod issue text in settings errors
 - Task 9: minor (deferred): seed assumes Asia/Kolkata; needs >5.5h left in day
 - Final wave: started meeting's travel_gap chip shows no figures; Edit on midnight-spanning meetings rebuilds end on start date; Edit sheet closable by Escape mid-save; edit form shows old company's address until saved.
+- propagateCompanyPoint matches stored meeting addresses exactly in SQL, while isCompanyAddress normalises case/spacing — a meeting whose address differs from the company line only in case/spacing isn't moved when the company is later pinned/located. Fix: store the company line when matched by normalisation, or match normalised text in SQL.
