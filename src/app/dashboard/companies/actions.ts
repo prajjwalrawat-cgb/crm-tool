@@ -28,6 +28,7 @@ import { pinCompanySite, propagateCompanyPoint } from '@/lib/field/meetings';
 import { companyGeocodeLine, companySiteFromPre, fetchPre, lookupPre, resolvePin } from '@/lib/field/site';
 import { FieldError, type LatLng } from '@/lib/field/types';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { captureError } from '@/lib/observability';
 import { can } from '@/lib/rbac';
 import { serializeCompany } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
@@ -56,7 +57,8 @@ export async function findSimilarCompaniesAction(
 }
 
 export type CreateCompanyResult =
-  | { ok: true; company: Company }
+  /** `warning`: saved, but a follow-up step (e.g. the site pin) did not apply. */
+  | { ok: true; company: Company; warning?: string }
   | { ok: false; message: string; fieldErrors?: Record<string, string[]> };
 
 export type UpdateCompanyResult = CreateCompanyResult;
@@ -236,14 +238,23 @@ export async function createCompanyAction(
 
       // The pin (already resolved to a point, so no network here) and its radius
       // go through the one company-pin path once the company exists.
-      const created = pinPoint
-        ? await pinCompanySite(
+      // The company is already committed: a pin failure must not lose the
+      // follow-up events or invite a duplicate retry, so it becomes a warning.
+      let created = inserted;
+      let warning: string | undefined;
+      if (pinPoint) {
+        try {
+          created = await pinCompanySite(
             { tenantId: tenant.id, userId: membership.userId, role: membership.role },
             inserted.id,
             `${pinPoint.lat}, ${pinPoint.lng}`,
             siteForm.radius,
-          )
-        : inserted;
+          );
+        } catch (e) {
+          captureError(e, { category: 'companies.create_pin_failed', severity: 'medium' });
+          warning = "Company created, but the site pin couldn't be saved. Open it and pin the site again.";
+        }
+      }
 
       // Workflow events ship after commit. The mutation has already
       // succeeded; if the inngest send fails we log and move on (see
@@ -265,7 +276,7 @@ export async function createCompanyAction(
       revalidatePath('/dashboard/companies');
       revalidatePath('/dashboard/activity');
       revalidatePath('/dashboard');
-      return { ok: true, company: created };
+      return warning ? { ok: true, company: created, warning } : { ok: true, company: created };
     },
   );
 }

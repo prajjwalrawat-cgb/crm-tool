@@ -41,7 +41,11 @@ function distanceText(m: number): string {
 }
 
 function verificationText(c: DayMeeting['checkins'][number]): string {
-  if (!c.accepted) return c.rejectReason === 'outside_radius' ? 'Too far from the site' : 'Rejected';
+  if (!c.accepted) {
+    if (c.rejectReason === 'outside_radius') return 'Too far from the site';
+    if (c.rejectReason === 'outside_window') return 'Outside check-in window';
+    return 'Rejected';
+  }
   if (c.verified) return 'Verified at site';
   if (c.overrideReason === 'site_not_geocoded') return 'Site not located';
   return c.overrideReason ? `Override: ${c.overrideReason}` : 'Not verified';

@@ -284,6 +284,7 @@ export function CompaniesView({
         setCreateFieldErrors(result.fieldErrors ?? {});
       } else {
         setCreateResetKey((k) => k + 1);
+        if (result.warning) toast.warning(result.warning);
       }
     });
   }
