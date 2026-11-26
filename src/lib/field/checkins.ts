@@ -44,6 +44,15 @@ const WALK_IN_MINUTES = 30;
 const siteOf = (m: Meeting): LatLng | null => (m.lat !== null && m.lng !== null ? { lat: m.lat, lng: m.lng } : null);
 const round = (d: number | null) => (d === null ? null : Math.round(d));
 
+/**
+ * The radius a checked-in visit is judged by after check-in (Verify location,
+ * check-out): the one stored at check-in, so relinking the company later
+ * cannot widen it. Legacy rows without it fall back to the current radius.
+ */
+async function visitRadius(tx: Tx, m: Meeting): Promise<number> {
+  return m.checkinRadiusMUsed ?? (await effectiveRadius(tx, m.tenantId, m.companyId));
+}
+
 /** The meeting's company radius override, else the tenant radius. */
 async function effectiveRadius(tx: Tx, tenantId: string, companyId: string | null, tenantRadiusM?: number): Promise<number> {
   if (companyId) {
@@ -132,6 +141,7 @@ export function checkIn(
         status: 'checked_in',
         checkedInAt: now,
         atRiskReasons: sql`array_remove(${meetings.atRiskReasons}, 'no_checkin')`,
+        checkinRadiusMUsed: radiusM,
         ...(verified ? visitVerifiedBy('at_checkin', now) : {}),
         updatedAt: now,
       });
@@ -174,7 +184,7 @@ export async function checkOutTx(
   assertTransition(cur.status, 'checked_out', cur.type);
   const site = siteOf(cur);
   const distanceM = site ? haversineMeters(site, p) : null;
-  const verified = distanceM !== null && distanceM <= (await effectiveRadius(tx, actor.tenantId, cur.companyId));
+  const verified = distanceM !== null && distanceM <= (await visitRadius(tx, cur));
   // A check-out from inside the radius verifies a visit that was not verified yet.
   const verifiesVisit = verified && !cur.visitVerified;
   const [checkin] = await tx
@@ -258,8 +268,8 @@ export function verifyLocation(actor: FieldActor, id: string, pos: Position, dep
       if (cur.status !== 'checked_in') throw new FieldError('invalid_transition', 'Check in first; a visit is verified while you are checked in.');
       if (cur.visitVerified) throw new FieldError('invalid_transition', 'This visit is already verified.');
       const site = siteOf(cur);
-      if (!site) throw new FieldError('validation', 'The site has no location yet — ask your manager to pin it.');
-      const radiusM = await effectiveRadius(tx, actor.tenantId, cur.companyId);
+      if (!site) throw new FieldError('validation', "This visit's site has no location, so it can't be verified.");
+      const radiusM = await visitRadius(tx, cur);
       const distanceM = haversineMeters(site, p);
       const within = distanceM <= radiusM;
       const [checkin] = await tx
@@ -314,6 +324,7 @@ export function walkIn(actor: FieldActor, input: WalkInInput, deps?: FieldDeps):
 
     return tenantTransaction(async (tx) => {
       await checkLinks(tx, actor, input);
+      const radiusM = await effectiveRadius(tx, actor.tenantId, input.companyId ?? null);
       const address = await maps.reverseGeocode({ lat: p.lat, lng: p.lng });
       assertTransition('planned', 'checked_in', 'physical');
       const [meeting] = await tx
@@ -338,6 +349,7 @@ export function walkIn(actor: FieldActor, input: WalkInInput, deps?: FieldDeps):
           status: 'checked_in',
           checkedInAt: now,
           ...visitVerifiedBy('at_checkin', now),
+          checkinRadiusMUsed: radiusM,
           needsLinking: !input.dealId,
           createdBy: actor.userId,
         })

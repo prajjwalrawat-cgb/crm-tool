@@ -422,7 +422,10 @@ ALTER TYPE "checkin_kind" ADD VALUE IF NOT EXISTS 'verify';
 ALTER TABLE "meetings"
   ADD COLUMN IF NOT EXISTS "visit_verified" boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS "visit_verified_how" text,
-  ADD COLUMN IF NOT EXISTS "visit_verified_at" timestamptz;
+  ADD COLUMN IF NOT EXISTS "visit_verified_at" timestamptz,
+  -- The effective radius used at the accepted check-in; Verify location and
+  -- check-out use it, so relinking the company cannot widen it. Null on legacy rows.
+  ADD COLUMN IF NOT EXISTS "checkin_radius_m_used" integer;
 --> statement-breakpoint
 
 DO $$ BEGIN
@@ -445,6 +448,7 @@ FROM (
   ORDER BY tenant_id, meeting_id, captured_at
 ) c
 WHERE c.tenant_id = m.tenant_id AND c.meeting_id = m.id
+  AND m.type = 'physical'
   AND m.visit_verified = false AND m.visit_verified_how IS NULL;
 --> statement-breakpoint
 

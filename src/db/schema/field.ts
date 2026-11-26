@@ -97,6 +97,8 @@ export const meetings = pgTable(
      * (on_arrival), or by a check-out within the radius. How and when are null
      * while unverified (CHECK meetings_visit_verified_consistent_check).
      */
+    /** The effective radius used at the accepted check-in; later verification uses it. Null on legacy rows. */
+    checkinRadiusMUsed: integer('checkin_radius_m_used'),
     visitVerified: boolean('visit_verified').notNull().default(false),
     visitVerifiedHow: text('visit_verified_how').$type<VisitVerifiedHow>(),
     visitVerifiedAt: timestamp('visit_verified_at', { withTimezone: true }),
@@ -118,6 +120,10 @@ export const meetings = pgTable(
     check(
       'meetings_visit_verified_how_check',
       sql`${t.visitVerifiedHow} IN ('at_checkin', 'on_arrival', 'at_checkout')`,
+    ),
+    check(
+      'meetings_visit_verified_consistent_check',
+      sql`(${t.visitVerified} AND ${t.visitVerifiedHow} IS NOT NULL AND ${t.visitVerifiedAt} IS NOT NULL) OR (NOT ${t.visitVerified} AND ${t.visitVerifiedHow} IS NULL AND ${t.visitVerifiedAt} IS NULL)`,
     ),
     uniqueIndex('meetings_tenant_source_external_unique').on(
       t.tenantId,

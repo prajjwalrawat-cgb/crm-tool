@@ -660,7 +660,7 @@ async function main() {
       check(
         'verify with no site coordinates → validation',
         noSite?.code === 'validation' &&
-          noSite.message === 'The site has no location yet — ask your manager to pin it.' &&
+          noSite.message === "This visit's site has no location, so it can't be verified." &&
           (await verifyRows(vn.id)).length === 0,
         noSite?.message,
       );
@@ -675,6 +675,31 @@ async function main() {
       const v7far = await err(CI.verifyLocation(r1, v7.id, { ...north(1200), accuracyM: 5 }, deps));
       const v7ok = await CI.verifyLocation(r1, v7.id, { ...north(800), accuracyM: 5 }, deps);
       check('verify uses the company radius (1000 m)', v7far?.details?.radiusM === 1000 && v7ok.verified, { far: v7far?.details });
+
+      // (g2) relinking to a wider-radius company after check-in cannot widen verification
+      const [hugeCo] = await db
+        .insert(s.companies)
+        .values({ tenantId: A, name: 'ZZ Huge Co', address: 'Huge Rd', lat: S.lat, lng: S.lng, geocodeStatus: 'ok', checkinRadiusM: 5000 })
+        .returning();
+      const v8 = await mk(r1, { companyId: siteCo!.id });
+      await CI.checkIn(r1, v8.id, { ...north(500), accuracyM: 10, overrideReason: 'x' }, deps);
+      check('accepted check-in stores the radius used (300)', (await meetingRow(v8.id)).checkinRadiusMUsed === 300);
+      const relinked = await M.updateMeeting(r1, v8.id, { companyId: hugeCo!.id }, deps);
+      const v8far = await err(CI.verifyLocation(r1, v8.id, { ...north(1000), accuracyM: 5 }, deps));
+      check(
+        'relink to a 5000 m company: verify from 1 km → outside_radius (radius 300)',
+        relinked.companyId === hugeCo!.id && v8far?.code === 'outside_radius' && v8far.details?.radiusM === 300 && !(await meetingRow(v8.id)).visitVerified,
+        { co: relinked.companyId, code: v8far?.code, details: v8far?.details },
+      );
+      const v8out = await CI.checkOut(r1, v8.id, { ...north(1000), accuracyM: 5 }, deps);
+      check('relink to a 5000 m company: check-out from 1 km stays unverified', !v8out.verified && j(vis(await meetingRow(v8.id))) === j([false, null, null]));
+      const wkR = await meetingRow(w.id);
+      check('walk-in stores the radius used', wkR.checkinRadiusMUsed === 300, wkR.checkinRadiusMUsed);
+      // legacy row (no stored radius) falls back to the current radius
+      const v9 = await mk(r1, { companyId: wideCo!.id });
+      await CI.checkIn(r1, v9.id, { ...north(1500), accuracyM: 10, overrideReason: 'x' }, deps);
+      await db.execute(sql`UPDATE meetings SET checkin_radius_m_used = NULL WHERE id = ${v9.id}`);
+      check('legacy row without a stored radius uses the current one (1000 m)', (await CI.verifyLocation(r1, v9.id, { ...north(800), accuracyM: 5 }, deps)).verified);
 
       // (h) verify rows never count as check-ins: late label, live risk, checked-in KPI
       const gv = await M.createMeeting(
