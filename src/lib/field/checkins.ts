@@ -1,8 +1,8 @@
 import 'server-only';
 
-import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, eq, sql, type SQL } from 'drizzle-orm';
 
-import { companies, meetingCheckins, meetings, type Meeting, type MeetingCheckin } from '@/db/schema';
+import { companies, meetingCheckins, meetings, type Meeting, type MeetingCheckin, type VisitVerifiedHow } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { tenantTransaction } from '@/lib/db-context';
 
@@ -56,6 +56,10 @@ async function effectiveRadius(tx: Tx, tenantId: string, companyId: string | nul
   }
   return tenantRadiusM ?? (await getFieldSettings(tx, tenantId)).checkinRadiusM;
 }
+
+/** The meeting columns that record a verified visit (never unset once set). */
+const visitVerifiedBy = (how: VisitVerifiedHow, at: Date) =>
+  ({ visitVerified: true, visitVerifiedHow: how, visitVerifiedAt: at }) as const;
 
 const setMeeting = (tx: Tx, m: Meeting, values: { [K in keyof typeof meetings.$inferInsert]?: (typeof meetings.$inferInsert)[K] | SQL }) =>
   tx
@@ -128,6 +132,7 @@ export function checkIn(
         status: 'checked_in',
         checkedInAt: now,
         atRiskReasons: sql`array_remove(${meetings.atRiskReasons}, 'no_checkin')`,
+        ...(verified ? visitVerifiedBy('at_checkin', now) : {}),
         updatedAt: now,
       });
       await publishMeetingUpdated(tx, row!);
@@ -170,6 +175,8 @@ export async function checkOutTx(
   const site = siteOf(cur);
   const distanceM = site ? haversineMeters(site, p) : null;
   const verified = distanceM !== null && distanceM <= (await effectiveRadius(tx, actor.tenantId, cur.companyId));
+  // A check-out from inside the radius verifies a visit that was not verified yet.
+  const verifiesVisit = verified && !cur.visitVerified;
   const [checkin] = await tx
     .insert(meetingCheckins)
     .values({
@@ -187,30 +194,23 @@ export async function checkOutTx(
       capturedAt: now,
     })
     .returning();
-  const [row] = await setMeeting(tx, cur, { status: 'checked_out', checkedOutAt: now, updatedAt: now });
+  const [row] = await setMeeting(tx, cur, {
+    status: 'checked_out',
+    checkedOutAt: now,
+    ...(verifiesVisit ? visitVerifiedBy('at_checkout', now) : {}),
+    updatedAt: now,
+  });
 
   if (cur.dealId) {
-    // `verified` on the activity is the check-in's verdict (the visit), not the check-out's.
-    const [inRow] = await tx
-      .select({ verified: meetingCheckins.verified })
-      .from(meetingCheckins)
-      .where(
-        and(
-          eq(meetingCheckins.tenantId, actor.tenantId),
-          eq(meetingCheckins.meetingId, cur.id),
-          eq(meetingCheckins.kind, 'in'),
-          eq(meetingCheckins.accepted, true),
-        ),
-      )
-      .orderBy(desc(meetingCheckins.capturedAt))
-      .limit(1);
+    // `verified` on the activity is the visit's verdict as of this check-out
+    // (meetings.visit_verified, including a verification by this check-out).
     await recordActivity(tx, {
       tenantId: actor.tenantId,
       actorUserId: actor.userId,
       entityType: 'deal',
       entityId: cur.dealId,
       action: 'meeting_logged',
-      metadata: { meetingId: cur.id, verified: inRow?.verified ?? false },
+      metadata: { meetingId: cur.id, verified: row!.visitVerified },
     });
   }
   await publishMeetingUpdated(tx, row!);
@@ -227,6 +227,74 @@ export function checkOut(actor: FieldActor, id: string, pos: Position, deps?: Fi
       checkOutTx(tx, actor, await lockOwnedMeeting(tx, actor, scope, id), p, now),
     );
     return { checkin: r.checkin, verified: r.verified, distanceM: r.distanceM };
+  });
+}
+
+type VerifyTx =
+  | { rejected: true; distanceM: number; radiusM: number }
+  | { rejected: false; checkin: MeetingCheckin; distanceM: number };
+
+export type VerifyResult = { checkin: MeetingCheckin; verified: true; distanceM: number };
+
+/**
+ * "Verify location": a rep who checked in unverified (override reason) verifies
+ * the visit once on site. Owner only, physical, checked_in, not yet verified,
+ * site located. Every attempt is a `kind = 'verify'` row; inside the radius it is
+ * accepted and the meeting becomes verified 'on_arrival', outside it is committed
+ * as rejected ('outside_radius') and then thrown. No override, no time window,
+ * no status change.
+ */
+export function verifyLocation(actor: FieldActor, id: string, pos: Position, deps?: FieldDeps): Promise<VerifyResult> {
+  return asActor(actor, async () => {
+    const p = validatePosition(pos);
+    const now = nowOf(deps);
+    assertCanWrite(actor);
+    const scope = await fieldUserScope(actor); // before the tx: no second connection under the lock
+
+    // The row lock serialises double taps: the second caller sees visit_verified.
+    const res: VerifyTx = await tenantTransaction(async (tx) => {
+      const cur = await lockOwnedMeeting(tx, actor, scope, id);
+      if (cur.type !== 'physical') throw new FieldError('validation', 'Only an in-person visit can be verified.');
+      if (cur.status !== 'checked_in') throw new FieldError('invalid_transition', 'Check in first; a visit is verified while you are checked in.');
+      if (cur.visitVerified) throw new FieldError('invalid_transition', 'This visit is already verified.');
+      const site = siteOf(cur);
+      if (!site) throw new FieldError('validation', 'The site has no location yet — ask your manager to pin it.');
+      const radiusM = await effectiveRadius(tx, actor.tenantId, cur.companyId);
+      const distanceM = haversineMeters(site, p);
+      const within = distanceM <= radiusM;
+      const [checkin] = await tx
+        .insert(meetingCheckins)
+        .values({
+          tenantId: actor.tenantId,
+          meetingId: cur.id,
+          userId: actor.userId,
+          kind: 'verify',
+          lat: p.lat,
+          lng: p.lng,
+          accuracyM: p.accuracyM,
+          distanceFromSiteM: distanceM,
+          verified: within,
+          accepted: within,
+          rejectReason: within ? null : 'outside_radius',
+          locationSource: 'browser',
+          capturedAt: now,
+        })
+        .returning();
+      // Commit the rejected attempt; the error is thrown after the transaction.
+      if (!within) return { rejected: true, distanceM, radiusM };
+      const [row] = await setMeeting(tx, cur, { ...visitVerifiedBy('on_arrival', now), updatedAt: now });
+      await publishMeetingUpdated(tx, row!);
+      return { rejected: false, checkin: checkin!, distanceM };
+    });
+
+    if (res.rejected) {
+      const d = Math.round(res.distanceM);
+      throw new FieldError('outside_radius', `You are ${d} m from the site; verifying needs ${res.radiusM} m or closer`, {
+        distanceM: d,
+        radiusM: res.radiusM,
+      });
+    }
+    return { checkin: res.checkin, verified: true, distanceM: Math.round(res.distanceM) };
   });
 }
 
@@ -269,6 +337,7 @@ export function walkIn(actor: FieldActor, input: WalkInInput, deps?: FieldDeps):
           source: 'walk_in',
           status: 'checked_in',
           checkedInAt: now,
+          ...visitVerifiedBy('at_checkin', now),
           needsLinking: !input.dealId,
           createdBy: actor.userId,
         })

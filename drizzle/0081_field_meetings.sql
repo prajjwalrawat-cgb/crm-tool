@@ -409,6 +409,56 @@ FROM cls
 WHERE cls.id = m.id AND cls.src IS NOT NULL;
 --> statement-breakpoint
 
+-- Visit verification. A rep who checked in from outside the radius (override,
+-- unverified) can verify later: a 'verify' attempt from inside the radius, or a
+-- check-out from inside it. meeting_checkins keeps every attempt; the meeting
+-- carries the verdict and how it was reached. Added after the tables first
+-- shipped to the test DB, so guarded for replays. ADD VALUE runs on its own
+-- (apply-0081 sends each statement separately, outside an explicit transaction),
+-- and nothing below uses the new value.
+ALTER TYPE "checkin_kind" ADD VALUE IF NOT EXISTS 'verify';
+--> statement-breakpoint
+
+ALTER TABLE "meetings"
+  ADD COLUMN IF NOT EXISTS "visit_verified" boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "visit_verified_how" text,
+  ADD COLUMN IF NOT EXISTS "visit_verified_at" timestamptz;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'meetings_visit_verified_how_check' AND conrelid = '"meetings"'::regclass) THEN
+    ALTER TABLE "meetings" ADD CONSTRAINT "meetings_visit_verified_how_check" CHECK ("visit_verified_how" IN ('at_checkin', 'on_arrival', 'at_checkout'));
+  END IF;
+END $$;
+--> statement-breakpoint
+
+-- Backfill: a meeting with an accepted, verified check-in was verified at check-in.
+-- Idempotent and never overwrites app data: only rows still unverified with no "how".
+UPDATE "meetings" m
+SET visit_verified = true,
+    visit_verified_how = 'at_checkin',
+    visit_verified_at = c.captured_at
+FROM (
+  SELECT DISTINCT ON (tenant_id, meeting_id) tenant_id, meeting_id, captured_at
+  FROM "meeting_checkins"
+  WHERE kind = 'in' AND accepted AND verified
+  ORDER BY tenant_id, meeting_id, captured_at
+) c
+WHERE c.tenant_id = m.tenant_id AND c.meeting_id = m.id
+  AND m.visit_verified = false AND m.visit_verified_how IS NULL;
+--> statement-breakpoint
+
+-- Added after the backfill so existing rows already satisfy it.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'meetings_visit_verified_consistent_check' AND conrelid = '"meetings"'::regclass) THEN
+    ALTER TABLE "meetings" ADD CONSTRAINT "meetings_visit_verified_consistent_check" CHECK (
+      ("visit_verified" AND "visit_verified_how" IS NOT NULL AND "visit_verified_at" IS NOT NULL)
+      OR (NOT "visit_verified" AND "visit_verified_how" IS NULL AND "visit_verified_at" IS NULL)
+    );
+  END IF;
+END $$;
+--> statement-breakpoint
+
 -- Sanity bounds on tenant_field_settings (guarded the same way).
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_checkin_radius_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN

@@ -46,6 +46,11 @@ export type DayMeeting = Meeting & {
   company: PickerCompany | null;
   /** Minutes late of the first accepted check-in (lateBy), null when on time or not checked in. */
   lateMin: number | null;
+  /**
+   * Every attempt, oldest first: kind 'in' / 'out' and 'verify' (a later
+   * verification, never a check-in). `visitVerified` / `visitVerifiedHow` /
+   * `visitVerifiedAt` come from the meeting row itself.
+   */
   checkins: MeetingCheckin[];
   outcome: MeetingOutcome | null;
   risk: MeetingRisk;

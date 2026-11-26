@@ -13,6 +13,8 @@ import {
   PenLine,
   Ban,
   Pencil,
+  ShieldAlert,
+  ShieldCheck,
   User,
   Video,
   X,
@@ -24,6 +26,7 @@ import { toast } from 'sonner';
 
 import type { MeetingStatus } from '@/db/schema/enums';
 import type { DayMeeting } from '@/lib/field/day';
+import { isVisited, verifyAttemptTitle, visitVerificationLabel } from '@/lib/field/verification';
 import { cn } from '@/lib/utils';
 
 import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
@@ -44,6 +47,7 @@ function distanceText(m: number): string {
 }
 
 function verificationText(c: DayMeeting['checkins'][number]): string {
+  if (c.kind === 'verify') return c.accepted ? 'Within the radius' : 'Too far from the site';
   if (!c.accepted) {
     if (c.rejectReason === 'outside_radius') return 'Too far from the site';
     if (c.rejectReason === 'outside_window') return 'Outside check-in window';
@@ -136,6 +140,19 @@ export function MeetingPanel({
             {m.lateMin !== null ? (
               <span className={cn(chipCls, 'bg-orange-50 text-orange-800 dark:bg-orange-500/10 dark:text-orange-300')}>
                 <Clock className="h-3 w-3" aria-hidden /> Late check-in · {m.lateMin} min late
+              </span>
+            ) : null}
+            {physical && isVisited(m.status) ? (
+              <span
+                className={cn(
+                  chipCls,
+                  m.visitVerified
+                    ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
+                    : 'bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300',
+                )}
+              >
+                {m.visitVerified ? <ShieldCheck className="h-3 w-3" aria-hidden /> : <ShieldAlert className="h-3 w-3" aria-hidden />}
+                {visitVerificationLabel(m)}
               </span>
             ) : null}
             {physical && m.siteRepEntered ? (
@@ -255,7 +272,9 @@ export function MeetingPanel({
                     )}
                     <div className="min-w-0">
                       <p className="font-medium text-slate-900 dark:text-[#FAFAFA]">
-                        {c.kind === 'in' ? 'Check-in' : 'Check-out'} {c.accepted ? 'accepted' : 'rejected'}
+                        {c.kind === 'verify'
+                          ? verifyAttemptTitle(c)
+                          : `${c.kind === 'in' ? 'Check-in' : 'Check-out'} ${c.accepted ? 'accepted' : 'rejected'}`}
                         <span className="font-normal tabular-nums text-slate-500 dark:text-[#A1A1AA]"> · {time(c.capturedAt)}</span>
                       </p>
                       <p className="text-[12px] text-slate-500 dark:text-[#A1A1AA]">

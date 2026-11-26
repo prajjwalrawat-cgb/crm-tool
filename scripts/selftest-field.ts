@@ -16,6 +16,7 @@ import {
   parseOutcomeBody,
   parsePickerQuery,
   parseUpdateBody,
+  parsePositionBody,
   setFieldErrorReporter,
 } from '../src/app/api/field/_lib/http';
 import type { MeetingStatus } from '../src/db/schema/enums';
@@ -28,6 +29,14 @@ import { checkinGateLabel } from '../src/app/dashboard/field/_lib/checkin-gate';
 import { applyPick, sameAsCompany, siteCheck, toPickerCompany, type Links, type PickerChoice } from '../src/lib/field/picker-link';
 import { companyGeocodeLine, isCompanyAddress, normAddr } from '../src/lib/field/site-line';
 import { lateBy } from '../src/lib/field/late';
+import {
+  canVerifyLocation,
+  isVisited,
+  verifyAttemptTitle,
+  verifyTooFarText,
+  visitVerificationLabel,
+  visitVerificationSuffix,
+} from '../src/lib/field/verification';
 import { canCancelMeeting, canEditMeeting, editErrorText, editGates, meetingPatch, type MeetingFormValues } from '../src/app/dashboard/field/_lib/meeting-edit';
 
 /**
@@ -669,6 +678,37 @@ async function main() {
     check('lateBy virtual → null', lateBy({ ...m, type: 'virtual' }, at(90), 15) === null);
     check('lateBy not checked in → null', lateBy(m, null, 15) === null);
     check('lateBy ISO strings, grace 0', lateBy({ ...m, startAt: start.toISOString() }, at(1).toISOString(), 0) === 1);
+  }
+
+  // --- visit verification words (verification.ts)
+  {
+    const t = (d: Date | string) => formatTimeInTz(d, 'Asia/Kolkata');
+    const at = '2026-12-02T07:50:00Z'; // 1:20 pm IST
+    const no = { visitVerified: false, visitVerifiedHow: null, visitVerifiedAt: null };
+    check('verification label: not verified', visitVerificationLabel(no) === 'Not verified');
+    check('verification label: at check-in → Verified', visitVerificationLabel({ visitVerified: true, visitVerifiedHow: 'at_checkin' }) === 'Verified');
+    check('verification label: on arrival', visitVerificationLabel({ visitVerified: true, visitVerifiedHow: 'on_arrival' }) === 'Verified on arrival');
+    check('verification label: at check-out', visitVerificationLabel({ visitVerified: true, visitVerifiedHow: 'at_checkout' }) === 'Verified at check-out');
+    check('verification suffix: not verified', visitVerificationSuffix(no, t) === 'not verified');
+    const arr = visitVerificationSuffix({ visitVerified: true, visitVerifiedHow: 'on_arrival', visitVerifiedAt: at }, t);
+    check('verification suffix: on arrival with time', arr === `verified on arrival ${t(at)}` && /1:20/.test(arr), arr);
+    const out = visitVerificationSuffix({ visitVerified: true, visitVerifiedHow: 'at_checkout', visitVerifiedAt: new Date(at) }, t);
+    check('verification suffix: at check-out with time', out === `verified at check-out ${t(at)}`, out);
+    check('verification suffix: at check-in → verified', visitVerificationSuffix({ visitVerified: true, visitVerifiedHow: 'at_checkin', visitVerifiedAt: at }, t) === 'verified');
+    const base = { type: 'physical', status: 'checked_in', visitVerified: false, lat: 28.5, lng: 77.3 };
+    check('canVerifyLocation: checked in, unverified, sited', canVerifyLocation(base));
+    check('canVerifyLocation: already verified → no', !canVerifyLocation({ ...base, visitVerified: true }));
+    check('canVerifyLocation: not checked in → no', !canVerifyLocation({ ...base, status: 'arrived' }) && !canVerifyLocation({ ...base, status: 'checked_out' }));
+    check('canVerifyLocation: virtual → no', !canVerifyLocation({ ...base, type: 'virtual' }));
+    check('canVerifyLocation: no site → no', !canVerifyLocation({ ...base, lat: null, lng: null }));
+    check('isVisited', isVisited('checked_in') && isVisited('checked_out') && isVisited('mom_logged') && !isVisited('arrived') && !isVisited('cancelled'));
+    check('verify too far text', verifyTooFarText(480.4, 300) === 'Still 480 m from the site (limit 300 m). Move closer and try again.', verifyTooFarText(480.4, 300));
+    check('verify too far text in km', verifyTooFarText(2345, 1000) === 'Still 2.3 km from the site (limit 1.0 km). Move closer and try again.', verifyTooFarText(2345, 1000));
+    check('verify attempt titles', verifyAttemptTitle({ accepted: true }) === 'Location verified' && verifyAttemptTitle({ accepted: false }) === 'Verification failed');
+    let perr: unknown;
+    try { parsePositionBody({ lat: 28.5, lng: 200, accuracyM: 5 }); } catch (e) { perr = e; }
+    check('verify body: bad lng → ZodError', perr instanceof ZodError);
+    check('verify body: ok', parsePositionBody({ lat: 28.5, lng: 77.3, accuracyM: 5 }).accuracyM === 5);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

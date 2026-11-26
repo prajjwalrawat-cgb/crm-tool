@@ -521,6 +521,232 @@ async function main() {
       { secondOut, logs: logs.map((l) => l.metadata), status: m7row.status },
     );
 
+    // --- visit verification: Verify location while checked in, and check-out within the radius
+    {
+      const j = JSON.stringify;
+      const verifyRows = async (id: string) => (await checkinsOf(id)).filter((r) => r.kind === 'verify');
+      const vis = (r: Awaited<ReturnType<typeof meetingRow>>) => [r.visitVerified, r.visitVerifiedHow, r.visitVerifiedAt?.toISOString() ?? null];
+      check('walk-in → visit verified at_checkin', j(vis(await meetingRow(w.id))) === j([true, 'at_checkin', fixedNow.toISOString()]));
+      check('verified check-in → visit_verified at_checkin', j(vis(m7row)) === j([true, 'at_checkin', fixedNow.toISOString()]), vis(m7row));
+
+      // (a) override check-in (unverified), then Verify location
+      const v1 = await mk(r1, { companyId: siteCo!.id });
+      const ov1 = await CI.checkIn(r1, v1.id, { ...north(500), accuracyM: 10, overrideReason: 'parking outside' }, deps);
+      check('override check-in leaves the visit unverified', !ov1.verified && j(vis(await meetingRow(v1.id))) === j([false, null, null]));
+      const far = await err(CI.verifyLocation(r1, v1.id, { ...north(480), accuracyM: 8 }, deps));
+      const farRows = await verifyRows(v1.id);
+      const v1a = await meetingRow(v1.id);
+      check(
+        'verify outside radius → outside_radius, 1 rejected verify row, still unverified',
+        far?.code === 'outside_radius' &&
+          Math.abs(Number(far.details?.distanceM) - 480) <= 3 &&
+          far.details?.radiusM === 300 &&
+          farRows.length === 1 &&
+          !farRows[0]!.accepted &&
+          !farRows[0]!.verified &&
+          farRows[0]!.rejectReason === 'outside_radius' &&
+          farRows[0]!.distanceFromSiteM !== null &&
+          farRows[0]!.accuracyM === 8 &&
+          !v1a.visitVerified &&
+          v1a.status === 'checked_in',
+        { code: far?.code, details: far?.details, rows: farRows.map((r) => [r.accepted, r.rejectReason]), v: vis(v1a) },
+      );
+      const vNow = hours(0.5);
+      const ok1 = await CI.verifyLocation(r1, v1.id, { ...north(40), accuracyM: 6 }, { ...deps, now: () => vNow });
+      const v1b = await meetingRow(v1.id);
+      const okRows = await verifyRows(v1.id);
+      check(
+        'verify inside radius → on_arrival, status still checked_in',
+        ok1.verified &&
+          Math.abs(ok1.distanceM - 40) <= 2 &&
+          j(vis(v1b)) === j([true, 'on_arrival', vNow.toISOString()]) &&
+          v1b.status === 'checked_in' &&
+          v1b.checkedInAt?.getTime() === fixedNow.getTime() &&
+          okRows.length === 2 &&
+          okRows.filter((r) => r.accepted && r.verified).length === 1,
+        { ok1, v: vis(v1b), status: v1b.status, rows: okRows.length },
+      );
+      check('second verify → invalid_transition', (await code(CI.verifyLocation(r1, v1.id, { ...north(40), accuracyM: 6 }, deps))) === 'invalid_transition');
+      check('verify rows are never accepted check-ins', (await checkinsOf(v1.id)).filter((r) => r.kind === 'in' && r.accepted).length === 1);
+      await CI.checkOut(r1, v1.id, { ...north(40), accuracyM: 6 }, deps);
+      check('check-out after on_arrival keeps on_arrival', j(vis(await meetingRow(v1.id))) === j([true, 'on_arrival', vNow.toISOString()]));
+
+      // concurrent double tap: one verifies, the other sees it verified
+      const v1c = await mk(r1, { companyId: siteCo!.id });
+      await CI.checkIn(r1, v1c.id, { ...north(500), accuracyM: 10, overrideReason: 'x' }, deps);
+      const two = await Promise.allSettled([
+        CI.verifyLocation(r1, v1c.id, { ...north(20), accuracyM: 5 }, deps),
+        CI.verifyLocation(r1, v1c.id, { ...north(20), accuracyM: 5 }, deps),
+      ]);
+      const twoCodes = two.filter((x) => x.status === 'rejected').map((x) => (x.reason as InstanceType<typeof FieldError>).code);
+      check(
+        'concurrent verify: one accepted, the other invalid_transition',
+        two.filter((x) => x.status === 'fulfilled').length === 1 && j(twoCodes) === '["invalid_transition"]' && (await verifyRows(v1c.id)).length === 1,
+        twoCodes,
+      );
+
+      // (b) verified at check-in → verify refused
+      const v2 = await mk(r1, { companyId: siteCo!.id });
+      await CI.checkIn(r1, v2.id, { ...north(30), accuracyM: 5 }, deps);
+      const v2r = await meetingRow(v2.id);
+      const already = await err(CI.verifyLocation(r1, v2.id, { ...north(30), accuracyM: 5 }, deps));
+      check(
+        'verified at check-in → at_checkin; verify → invalid_transition "already verified"',
+        j(vis(v2r)) === j([true, 'at_checkin', fixedNow.toISOString()]) &&
+          already?.code === 'invalid_transition' &&
+          already.message === 'This visit is already verified.' &&
+          (await verifyRows(v2.id)).length === 0,
+        { v: vis(v2r), code: already?.code, msg: already?.message },
+      );
+
+      // (c) unverified, check-out within the radius → at_checkout; the activity carries it
+      const v3 = await mk(r1, { companyId: siteCo!.id, dealId: deal1!.id });
+      await CI.checkIn(r1, v3.id, { ...north(500), accuracyM: 10, overrideReason: 'x' }, deps);
+      const outNow = hours(1);
+      const out3 = await CI.checkOut(r1, v3.id, { ...north(50), accuracyM: 5 }, { ...deps, now: () => outNow });
+      const v3r = await meetingRow(v3.id);
+      const logOf = async (id: string) =>
+        (
+          await inT(A, (tx) =>
+            tx
+              .select()
+              .from(s.activityLogs)
+              .where(sql`${s.activityLogs.action} = 'meeting_logged' AND ${s.activityLogs.metadata}->>'meetingId' = ${id}`),
+          )
+        ).map((l) => (l.metadata as { verified?: boolean }).verified);
+      check(
+        'unverified + check-out within radius → at_checkout, activity verified true',
+        out3.verified && j(vis(v3r)) === j([true, 'at_checkout', outNow.toISOString()]) && v3r.status === 'checked_out' && j(await logOf(v3.id)) === '[true]',
+        { v: vis(v3r), log: await logOf(v3.id) },
+      );
+
+      // (d) unverified, check-out outside the radius → stays unverified
+      const v4 = await mk(r1, { companyId: siteCo!.id, dealId: deal1!.id });
+      await CI.checkIn(r1, v4.id, { ...north(500), accuracyM: 10, overrideReason: 'x' }, deps);
+      const out4 = await CI.checkOut(r1, v4.id, { ...north(600), accuracyM: 5 }, deps);
+      const v4r = await meetingRow(v4.id);
+      check(
+        'check-out outside radius → stays unverified, activity verified false',
+        !out4.verified && j(vis(v4r)) === j([false, null, null]) && v4r.status === 'checked_out' && j(await logOf(v4.id)) === '[false]',
+        { v: vis(v4r), log: await logOf(v4.id) },
+      );
+      check('verify after check-out → invalid_transition', (await code(CI.verifyLocation(r1, v4.id, { ...S, accuracyM: 5 }, deps))) === 'invalid_transition');
+
+      // (e) Check out & log MOM within the radius verifies too
+      const v5 = await mk(r1, { companyId: siteCo!.id });
+      await CI.checkIn(r1, v5.id, { ...north(500), accuracyM: 10, overrideReason: 'x' }, deps);
+      await OC.saveOutcome(r1, v5.id, { momText: 'Visited', checkOutAt: { ...north(20), accuracyM: 5 } }, deps);
+      const v5r = await meetingRow(v5.id);
+      check(
+        'Check out & log MOM within radius → at_checkout, mom_logged',
+        j(vis(v5r)) === j([true, 'at_checkout', fixedNow.toISOString()]) && v5r.status === 'mom_logged',
+        vis(v5r),
+      );
+
+      // (f) gates
+      const v6 = await mk(r1, { companyId: siteCo!.id });
+      check('verify on planned → invalid_transition', (await code(CI.verifyLocation(r1, v6.id, { ...S, accuracyM: 5 }, deps))) === 'invalid_transition');
+      await CI.checkIn(r1, v6.id, { ...north(500), accuracyM: 10, overrideReason: 'x' }, deps);
+      check('verify by a non-owner manager → forbidden', (await code(CI.verifyLocation(m, v6.id, { ...S, accuracyM: 5 }, deps))) === 'forbidden');
+      check('verify by a peer rep → not_found', (await code(CI.verifyLocation(r3, v6.id, { ...S, accuracyM: 5 }, deps))) === 'not_found');
+      check('verify from another tenant → not_found', (await code(CI.verifyLocation(b1, v6.id, { ...S, accuracyM: 5 }, deps))) === 'not_found');
+      check('verify bad position → validation', (await code(CI.verifyLocation(r1, v6.id, { lat: 91, lng: 0, accuracyM: 5 }, deps))) === 'validation');
+      check('rejected gates write no verify row', (await verifyRows(v6.id)).length === 0);
+      const vv = await mk(r1, { type: 'virtual', virtualUrl: 'https://meet.example/v' });
+      check('verify a virtual meeting → validation', (await code(CI.verifyLocation(r1, vv.id, { ...S, accuracyM: 5 }, deps))) === 'validation');
+      const vn = await mk(r1);
+      await CI.checkIn(r1, vn.id, { ...S, accuracyM: 5 }, deps);
+      const noSite = await err(CI.verifyLocation(r1, vn.id, { ...S, accuracyM: 5 }, deps));
+      check(
+        'verify with no site coordinates → validation',
+        noSite?.code === 'validation' &&
+          noSite.message === 'The site has no location yet — ask your manager to pin it.' &&
+          (await verifyRows(vn.id)).length === 0,
+        noSite?.message,
+      );
+
+      // (g) a company radius override applies to verify
+      const [wideCo] = await db
+        .insert(s.companies)
+        .values({ tenantId: A, name: 'ZZ Wide Co', address: 'Wide Rd', lat: S.lat, lng: S.lng, geocodeStatus: 'ok', checkinRadiusM: 1000 })
+        .returning();
+      const v7 = await mk(r1, { companyId: wideCo!.id });
+      await CI.checkIn(r1, v7.id, { ...north(1500), accuracyM: 10, overrideReason: 'x' }, deps);
+      const v7far = await err(CI.verifyLocation(r1, v7.id, { ...north(1200), accuracyM: 5 }, deps));
+      const v7ok = await CI.verifyLocation(r1, v7.id, { ...north(800), accuracyM: 5 }, deps);
+      check('verify uses the company radius (1000 m)', v7far?.details?.radiusM === 1000 && v7ok.verified, { far: v7far?.details });
+
+      // (h) verify rows never count as check-ins: late label, live risk, checked-in KPI
+      const gv = await M.createMeeting(
+        r1,
+        { title: 'ZZ verify-only', type: 'physical', startAt: hours(1), endAt: hours(1.5), companyId: siteCo!.id },
+        deps,
+      );
+      const later = { ...deps, now: () => hours(12) };
+      const before = await DY.getDay(r1, { date: '2026-12-02' }, later);
+      await inT(A, (tx) =>
+        tx.insert(s.meetingCheckins).values({
+          tenantId: A,
+          meetingId: gv.id,
+          userId: U.r1,
+          kind: 'verify',
+          lat: S.lat,
+          lng: S.lng,
+          accuracyM: 5,
+          distanceFromSiteM: 0,
+          verified: true,
+          accepted: true,
+          capturedAt: hours(1.1),
+        }),
+      );
+      const after = await DY.getDay(r1, { date: '2026-12-02' }, later);
+      const gvRow = after.reps.flatMap((r) => r.meetings).find((x) => x.id === gv.id);
+      check(
+        'a verify row is not a check-in: lateMin null, no_checkin risk, checked-in KPI unchanged',
+        !!gvRow &&
+          gvRow.lateMin === null &&
+          gvRow.risk.reasons.includes('no_checkin') &&
+          gvRow.status === 'planned' &&
+          gvRow.checkins.length === 1 &&
+          after.kpis.checkedIn === before.kpis.checkedIn &&
+          after.kpis.atRisk === before.kpis.atRisk,
+        { late: gvRow?.lateMin, risk: gvRow?.risk.reasons, kb: before.kpis, ka: after.kpis },
+      );
+      const v1day = after.reps.flatMap((r) => r.meetings).find((x) => x.id === v1.id);
+      check(
+        'day view exposes visitVerified / How / At and lists verify attempts',
+        v1day?.visitVerified === true &&
+          v1day.visitVerifiedHow === 'on_arrival' &&
+          new Date(v1day.visitVerifiedAt!).getTime() === vNow.getTime() &&
+          v1day.checkins.filter((c) => c.kind === 'verify').length === 2,
+        { v: v1day && [v1day.visitVerified, v1day.visitVerifiedHow, v1day.visitVerifiedAt] },
+      );
+
+      // (i) the 0081 backfill restores at_checkin and never overwrites app data
+      const sqlText = (await import('node:fs')).readFileSync('drizzle/0081_field_meetings.sql', 'utf8');
+      const backfill = sqlText
+        .split('--> statement-breakpoint')
+        .map((x) => x.trim())
+        .find((x) => x.includes("visit_verified_how = 'at_checkin'"));
+      await db.execute(sql`UPDATE meetings SET visit_verified = false, visit_verified_how = NULL, visit_verified_at = NULL WHERE id = ${v2.id}`);
+      await db.execute(sql.raw(backfill!));
+      await db.execute(sql.raw(backfill!));
+      check(
+        'backfill: verified check-in → at_checkin; replays keep on_arrival / at_checkout / unverified',
+        j(vis(await meetingRow(v2.id))) === j([true, 'at_checkin', fixedNow.toISOString()]) &&
+          j(vis(await meetingRow(v1.id))) === j([true, 'on_arrival', vNow.toISOString()]) &&
+          j(vis(await meetingRow(v3.id))) === j([true, 'at_checkout', outNow.toISOString()]) &&
+          j(vis(await meetingRow(v4.id))) === j([false, null, null]),
+      );
+      let badCombo = false;
+      try {
+        await db.execute(sql`UPDATE meetings SET visit_verified = true WHERE id = ${v4.id}`);
+      } catch {
+        badCombo = true;
+      }
+      check('CHECK: visit_verified without how/at is rejected', badCombo);
+    }
+
     // --- outcomes
     const m8 = await mk(r1, { companyId: siteCo!.id });
     await CI.checkIn(r1, m8.id, { ...S, accuracyM: 5 }, deps);

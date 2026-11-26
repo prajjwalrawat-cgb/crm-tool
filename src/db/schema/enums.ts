@@ -159,7 +159,8 @@ export const geocodeStatus = pgEnum('geocode_status', [
   'failed',
   'manual',
 ]);
-export const checkinKind = pgEnum('checkin_kind', ['in', 'out']);
+/** 'verify': a later attempt to verify an unverified visit (never a check-in). */
+export const checkinKind = pgEnum('checkin_kind', ['in', 'out', 'verify']);
 export const locationSource = pgEnum('location_source', [
   'askmira',
   'native',

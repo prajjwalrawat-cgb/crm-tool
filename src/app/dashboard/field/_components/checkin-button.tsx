@@ -1,9 +1,10 @@
 'use client';
 
-import { Clock, Loader2, LogIn, LogOut } from 'lucide-react';
+import { Clock, Loader2, LogIn, LogOut, MapPinCheck } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { toast } from 'sonner';
 
+import { verifyTooFarText } from '@/lib/field/verification';
 import { cn } from '@/lib/utils';
 
 import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
@@ -25,17 +26,28 @@ type Stage =
   | { kind: 'override'; pos: GeoPosition; distanceM: number; radiusM: number }
   /** The server refused: outside the check-in time window (422 outside_window). */
   | { kind: 'window'; label: string }
+  /** Verify only: still outside the radius (422 outside_radius). No override. */
+  | { kind: 'far'; message: string }
   | { kind: 'failed'; pos: GeoPosition; message: string; overrideReason?: string };
 
 const fmtM = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
 
+const ENDPOINT = { in: 'checkin', out: 'checkout', verify: 'verify' } as const;
+const LABEL = {
+  in: { idle: 'Check in', done: 'Checked in', note: 'Your location is saved with this check-in' },
+  out: { idle: 'Check out', done: 'Checked out', note: 'Your location is saved with this check-out' },
+  verify: { idle: 'Verify location', done: 'Verified', note: 'Your location is saved with this verification' },
+} as const;
+
 /**
- * Check in / Check out with one GPS read. Flow: notice → locate (low-accuracy
+ * Check in / Check out / Verify location with one GPS read. Flow: notice → locate (low-accuracy
  * Retry / Continue) → POST. A check-in outside the radius (422) asks for a
  * reason and resends with `overrideReason`. Failed sends keep the position so
  * Retry does not need a new fix. A check-in outside its time window (the
  * server's `checkinOpensAt` / `checkinClosesAt`) is disabled with the opening
- * or closing time, re-checked every minute.
+ * or closing time, re-checked every minute. Verify location (checked in,
+ * not verified) has no override: outside the radius it says how far the rep
+ * still is and offers Retry.
  */
 export function CheckinButton({
   meetingId,
@@ -45,7 +57,7 @@ export function CheckinButton({
   window: win,
 }: {
   meetingId: string;
-  kind: 'in' | 'out';
+  kind: 'in' | 'out' | 'verify';
   onDone: () => void;
   primary?: boolean;
   /** Check-in only: the window from DayMeeting (ISO). */
@@ -72,14 +84,14 @@ export function CheckinButton({
 
   async function send(pos: GeoPosition, overrideReason?: string) {
     setStage({ kind: 'sending' });
-    const res = await fieldApi<CheckResult>(`/meetings/${meetingId}/${kind === 'in' ? 'checkin' : 'checkout'}`, {
+    const res = await fieldApi<CheckResult>(`/meetings/${meetingId}/${ENDPOINT[kind]}`, {
       body: { lat: pos.lat, lng: pos.lng, accuracyM: pos.accuracyM, ...(overrideReason ? { overrideReason } : {}) },
     });
     if (res.ok) {
       setStage({ kind: 'done' });
       setReason('');
       const note = res.data.verified ? '' : ' (not verified)';
-      toast.success(kind === 'in' ? `Checked in${note}` : `Checked out${note}`);
+      toast.success(kind === 'verify' ? "Verified — you're on site." : kind === 'in' ? `Checked in${note}` : `Checked out${note}`);
       onDone();
       return;
     }
@@ -108,13 +120,17 @@ export function CheckinButton({
       });
       return;
     }
+    if (kind === 'verify' && res.code === 'outside_radius') {
+      setStage({ kind: 'far', message: verifyTooFarText(Number(res.body.distanceM ?? 0), Number(res.body.radiusM ?? 0)) });
+      return;
+    }
     setStage({ kind: 'failed', pos, message: res.error, overrideReason });
   }
 
   const busy = position.state.kind === 'locating' || stage.kind === 'sending';
   const done = stage.kind === 'done';
   const blocked = gate ?? (stage.kind === 'window' ? stage.label : null);
-  const Icon = kind === 'in' ? LogIn : LogOut;
+  const Icon = kind === 'in' ? LogIn : kind === 'out' ? LogOut : MapPinCheck;
 
   return (
     <div className="w-full space-y-2">
@@ -138,16 +154,12 @@ export function CheckinButton({
               : stage.kind === 'sending'
               ? 'Saving…'
               : done
-                ? kind === 'in'
-                  ? 'Checked in'
-                  : 'Checked out'
-                : kind === 'in'
-                  ? 'Check in'
-                  : 'Check out'}
+                ? LABEL[kind].done
+                : LABEL[kind].idle}
           </Button>
           {position.state.kind === 'idle' && stage.kind === 'idle' && blocked === null ? (
             <p className="text-center text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
-              Your location is saved with this check-{kind}
+              {LABEL[kind].note}
             </p>
           ) : null}
         </>
@@ -159,6 +171,21 @@ export function CheckinButton({
         <div role="alert" className="space-y-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-[12.5px] text-rose-800 dark:border-rose-900/50 dark:bg-rose-500/10 dark:text-rose-200">
           <p>{stage.message}</p>
           <Button onClick={() => void send(stage.pos, stage.overrideReason)} className="min-h-10 px-4">
+            Retry
+          </Button>
+        </div>
+      ) : null}
+
+      {stage.kind === 'far' ? (
+        <div role="alert" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-500/10 dark:text-amber-100">
+          <p>{stage.message}</p>
+          <Button
+            onClick={() => {
+              setStage({ kind: 'idle' });
+              void position.locate();
+            }}
+            className="min-h-10 px-4"
+          >
             Retry
           </Button>
         </div>

@@ -35,6 +35,9 @@ import {
 import { tenants } from './tenants';
 import { users } from './users';
 
+/** How a visit became verified (meetings.visit_verified_how). */
+export type VisitVerifiedHow = 'at_checkin' | 'on_arrival' | 'at_checkout';
+
 /**
  * Field Meetings (0081). See docs/superpowers/specs/2026-11-25-field-meetings-design.md.
  * All tables are tenant tables with RLS; the SQL in drizzle/0081_field_meetings.sql
@@ -89,6 +92,14 @@ export const meetings = pgTable(
     /** Denormalised from meeting_checkins for risk queries. */
     checkedInAt: timestamp('checked_in_at', { withTimezone: true }),
     checkedOutAt: timestamp('checked_out_at', { withTimezone: true }),
+    /**
+     * The visit was verified on site: at check-in, by a later 'verify' attempt
+     * (on_arrival), or by a check-out within the radius. How and when are null
+     * while unverified (CHECK meetings_visit_verified_consistent_check).
+     */
+    visitVerified: boolean('visit_verified').notNull().default(false),
+    visitVerifiedHow: text('visit_verified_how').$type<VisitVerifiedHow>(),
+    visitVerifiedAt: timestamp('visit_verified_at', { withTimezone: true }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     cancelReason: text('cancel_reason'),
     createdBy: text('created_by'),
@@ -103,6 +114,10 @@ export const meetings = pgTable(
     check(
       'meetings_site_source_check',
       sql`${t.siteSource} IN ('company', 'address', 'pin', 'walk_in')`,
+    ),
+    check(
+      'meetings_visit_verified_how_check',
+      sql`${t.visitVerifiedHow} IN ('at_checkin', 'on_arrival', 'at_checkout')`,
     ),
     uniqueIndex('meetings_tenant_source_external_unique').on(
       t.tenantId,

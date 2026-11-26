@@ -18,6 +18,7 @@ import {
 import { useState } from 'react';
 
 import type { DayMeeting } from '@/lib/field/day';
+import { canVerifyLocation, visitVerificationSuffix } from '@/lib/field/verification';
 import { cn } from '@/lib/utils';
 
 import { Button } from '../../settings/lead-capture/_components/ui';
@@ -181,7 +182,9 @@ export function MeetingCard({
           {lastIn ? (
             <>
               Checked in {time(lastIn.capturedAt)}
-              {lastIn.verified ? ' · at site' : lastIn.overrideReason === 'site_not_geocoded' ? ' · site not pinned' : ' · not verified'}
+              {!m.visitVerified && lastIn.overrideReason === 'site_not_geocoded'
+                ? ' · site not pinned'
+                : ` · ${visitVerificationSuffix(m, time)}`}
             </>
           ) : null}
           {lastIn && lastOut ? ' · ' : null}
@@ -231,6 +234,12 @@ export function MeetingCard({
                 onDone={onChanged}
                 window={{ opensAt: m.checkinOpensAt, closesAt: m.checkinClosesAt }}
               />
+            </div>
+          ) : null}
+
+          {canWrite && m.ownerId === userId && canVerifyLocation(m) ? (
+            <div className="w-full">
+              <CheckinButton meetingId={m.id} kind="verify" onDone={onChanged} primary={false} />
             </div>
           ) : null}
 

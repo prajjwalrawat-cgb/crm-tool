@@ -3,6 +3,7 @@
 import { AlertTriangle, ChevronLeft, ChevronRight, PenLine } from 'lucide-react';
 
 import type { DayMeeting } from '@/lib/field/day';
+import { isVisited, visitVerificationLabel } from '@/lib/field/verification';
 import { cn } from '@/lib/utils';
 
 import { formatTimeInTz } from '../_lib/datetime';
@@ -35,6 +36,7 @@ function blockLabel(rep: string, m: DayMeeting, tz: string): string {
     m.lateMin !== null ? `late check-in, ${m.lateMin} min late` : null,
     m.type === 'physical' && (m.lat === null || m.lng === null) && m.status !== 'cancelled' ? 'site not located' : null,
     m.type === 'physical' && m.siteRepEntered ? 'rep-entered address' : null,
+    m.type === 'physical' && isVisited(m.status) ? visitVerificationLabel(m).toLowerCase() : null,
   ].filter(Boolean);
   const extra = notes.length ? ` ${notes.join('; ')}.` : '';
   return `${rep}: ${m.title}, ${time}, ${STATUS_LABEL[m.status]}${m.type === 'virtual' ? ', virtual' : ''}. ${risks}.${extra}`;
