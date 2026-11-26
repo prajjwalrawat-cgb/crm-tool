@@ -3,7 +3,7 @@
 Deferred findings from the PR 1 task and branch reviews (2026-11-25). None block merge; triage before PR 2/3 or when the Maps key goes live.
 
 ## Open product decisions
-- Check-in time window: today a rep can check in to any of their meetings at any time (e.g. next week's while at the site). Option: reject or mark unverified outside ~[start−2h, end+4h].
+- ~~Check-in time window~~ — decided 2026-11-26: Settings → Field meetings, opens 120 min before / closes 240 min after by default, editable by owner/admin/manager (built, 6687eec).
 - Reps setting a site by typing an address on their own meeting: once MAPS_API_KEY is set, Google geocodes it and check-ins verify against it. Options: require manager confirmation for address-sourced sites on rep-created meetings, or reject coordinate-shaped addresses without pinFieldSites.
 - Company re-geocode does not move not-started meetings that already hold the old company point.
 - pinCompanySite moves meetings of reps outside the pinner's scope, and meetings with their own different address (label/point disagree).
