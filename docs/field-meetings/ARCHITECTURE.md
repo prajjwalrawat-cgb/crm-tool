@@ -117,7 +117,7 @@ interface MapsProvider {
 `getMapsProvider()` returns `GoogleProvider` when `MAPS_API_KEY` is set, else `EstimateProvider`.
 
 - `geocode`: `ok` and `failed` are verdicts about the address and are cached per tenant by normalised address (`geocode_cache`). `pending` means "no answer yet" (no key, timeout, quota, denied) and is never cached. `EstimateProvider` always answers `pending`; it never invents coordinates.
-- `driveMinutes`: Google Distance Matrix with traffic (departure time clamped to now). On any failure, or without a key, a straight-line estimate (distance x 1.4 at 25 km/h, rounded up) with `estimate: true`.
+- `driveMinutes`: Google **Routes API** `computeRoutes` (TRAFFIC_AWARE, key sent in the `X-Goog-Api-Key` header, field mask `routes.duration`; departure time moved to at least one minute ahead of now). The legacy Distance Matrix is not available to newer Cloud projects. On any failure, or without a key, a straight-line estimate (distance x 1.4 at 25 km/h, rounded up) with `estimate: true`.
 - `resolveShortUrl`: follows exactly one redirect hop and returns the `Location`, guarded against SSRF. The input must be https and its host must be one of `goo.gl`, `maps.app.goo.gl`, `g.co`, or a Google host (`google.com`, `www.google.com`, `maps.google.com`, `google.co.in`, `www.google.co.in`, `maps.google.co.in`) with a path starting `/maps`. The redirect target must be https and on a Google host. Timeout 3 s, redirects are not auto-followed. Anything else returns `null`.
 - Calls are bounded (4 s Google, 3 s redirect).
 

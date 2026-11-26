@@ -128,12 +128,12 @@ Planned and walk-in customer visits, browser check-in against a site, risk flags
 
 | Variable | Used for | Status |
 |---|---|---|
-| `MAPS_API_KEY` | Google Maps Platform. Geocoding API (company and meeting addresses) is used now. Distance Matrix API (travel-gap drive times) is also used when the key is set. Directions is for PR 2. | Optional. Without it addresses stay "Not located yet" (never guessed coordinates), drive times are straight-line estimates and are marked as estimates. Manual site pins work either way. |
+| `MAPS_API_KEY` | Google Maps Platform. Geocoding API (company and meeting addresses) is used now. Routes API (travel-gap drive times with traffic) is also used when the key is set; PR 2 uses it for map routes too. | Optional. Without it addresses stay "Not located yet" (never guessed coordinates), drive times are straight-line estimates and are marked as estimates. Manual site pins work either way. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar sync | PR 2, not read yet |
 | `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_TENANT` | Outlook calendar sync | PR 2, not read yet |
 | `ASKMIRA_*` (base URL, service token, webhook secret) | Ask Mira location provider. Stored per workspace in `tenant_field_settings`, not env. | PR 3, not read yet |
 
-Enable the Geocoding and Distance Matrix APIs on the key and restrict it to the server's IP addresses.
+Enable the Geocoding API and the Routes API on the key and restrict the key to those APIs (no application restriction: Vercel has no fixed IPs; the key is only used server-side).
 
 ### Settings and permissions
 

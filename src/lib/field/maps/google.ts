@@ -6,14 +6,11 @@ type GeocodeResponse = {
   status?: string;
   results?: Array<{ formatted_address?: string; geometry?: { location?: { lat: number; lng: number } } }>;
 };
-type MatrixResponse = {
-  status?: string;
-  rows?: Array<{
-    elements?: Array<{ status?: string; duration?: { value: number }; duration_in_traffic?: { value: number } }>;
-  }>;
-};
+/** Routes API computeRoutes, field mask `routes.duration` (e.g. "1500s"). */
+type RoutesResponse = { routes?: Array<{ duration?: string }> };
 
 const GOOGLE_TIMEOUT_MS = 4000;
+const ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
 export class GoogleProvider implements MapsProvider {
   readonly name = 'google';
@@ -58,23 +55,38 @@ export class GoogleProvider implements MapsProvider {
     }
   }
 
+  /**
+   * Routes API (computeRoutes) — the legacy Distance Matrix is not available to
+   * newer Google Cloud projects. The key goes in a header, never the URL.
+   */
   async driveMinutes(a: LatLng, b: LatLng, departAt: Date): Promise<DriveResult> {
-    // Google rejects departure_time in the past.
-    const unix = Math.max(Math.floor(departAt.getTime() / 1000), Math.floor(Date.now() / 1000));
-    const url =
-      'https://maps.googleapis.com/maps/api/distancematrix/json?' +
-      new URLSearchParams({
-        origins: `${a.lat},${a.lng}`,
-        destinations: `${b.lat},${b.lng}`,
-        departure_time: String(unix),
-        traffic_model: 'best_guess',
-        key: this.apiKey,
-      }).toString();
+    // Traffic-aware routing rejects departure times in the past: use the later of
+    // the requested time and a moment from now (whole seconds).
+    const floorS = (ms: number) => Math.floor(ms / 1000) * 1000;
+    const departMs = Math.max(floorS(departAt.getTime()), floorS(Date.now() + 60_000));
+    const point = (p: LatLng) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
     try {
-      const data = await this.json<MatrixResponse>(url);
-      const el = data.rows?.[0]?.elements?.[0];
-      const secs = el?.status === 'OK' ? (el.duration_in_traffic?.value ?? el.duration?.value) : undefined;
-      if (typeof secs === 'number') return { minutes: secs / 60, estimate: false };
+      const res = await this.fetchFn(ROUTES_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.apiKey,
+          'X-Goog-FieldMask': 'routes.duration',
+        },
+        body: JSON.stringify({
+          origin: point(a),
+          destination: point(b),
+          travelMode: 'DRIVE',
+          routingPreference: 'TRAFFIC_AWARE',
+          departureTime: new Date(departMs).toISOString(),
+        }),
+        signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as RoutesResponse;
+        const m = /^(\d+(?:\.\d+)?)s$/.exec(data.routes?.[0]?.duration ?? '');
+        if (m) return { minutes: Number(m[1]) / 60, estimate: false };
+      }
     } catch {
       /* fall through to the estimator */
     }
