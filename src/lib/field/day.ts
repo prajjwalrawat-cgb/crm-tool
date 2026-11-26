@@ -19,6 +19,7 @@ import { tenantTransaction } from '@/lib/db-context';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 import { narrowToOwner } from '@/lib/reports/manager/scope';
 
+import { checkinWindow } from './checkin-window';
 import { computeKpis } from './kpis';
 import { asActor, mapsOf, nowOf, type FieldDeps } from './internal';
 import { estimateDriveMinutes } from './geo';
@@ -36,6 +37,9 @@ export type DayMeeting = Meeting & {
   checkins: MeetingCheckin[];
   outcome: MeetingOutcome | null;
   risk: MeetingRisk;
+  /** Check-in time window (ISO), from `checkinWindow`; the UI never re-derives it. */
+  checkinOpensAt: string;
+  checkinClosesAt: string;
 };
 
 export type DayView = {
@@ -233,7 +237,9 @@ export function getDay(
     for (const c of checkins) checkinsBy.set(c.meetingId, [...(checkinsBy.get(c.meetingId) ?? []), c]);
     const outcomeBy = new Map(outcomes.map((o) => [o.meetingId, o]));
 
-    const all: DayMeeting[] = rows.map((r) => ({
+    const all: DayMeeting[] = rows.map((r) => {
+      const win = checkinWindow(r.meeting, settings);
+      return {
       ...r.meeting,
       deal:
         r.dealId !== null
@@ -251,7 +257,10 @@ export function getDay(
       checkins: checkinsBy.get(r.meeting.id) ?? [],
       outcome: outcomeBy.get(r.meeting.id) ?? null,
       risk: risks.get(r.meeting.id)!,
-    }));
+      checkinOpensAt: win.opensAt.toISOString(),
+      checkinClosesAt: win.closesAt.toISOString(),
+      };
+    });
 
     const kpis = computeKpis(
       all.map((m) => ({

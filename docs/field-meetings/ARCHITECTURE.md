@@ -79,16 +79,17 @@ A second load within the cache TTL makes no provider calls.
 `checkins.ts`. Every attempt is logged in `meeting_checkins`, accepted or not.
 
 1. The caller must own the meeting, and the meeting must be able to move to `checked_in`.
-2. Radius = the company's `checkin_radius_m` when the meeting's company has one, else the tenant's `checkin_radius_m` (default 300 m). Both are 50 to 5000 m (DB CHECKs).
-3. Distance = haversine between the browser position and the meeting's site (`meetings.lat/lng`, copied from the company or pinned when the meeting was created or last re-sited).
-4. Outcomes:
+2. Time window: check-in is open from `checkin_opens_before_min` before the start to `checkin_closes_after_min` after the end (tenant settings, defaults 120 and 240, each 0 to 1440; both ends inclusive; 0 / 0 = only during the meeting). The rule lives in one pure helper, `checkinWindow` / `checkinWindowState` in `checkin-window.ts`, used by `checkIn` and by `getDay`, which exposes `checkinOpensAt` / `checkinClosesAt` (ISO) on every `DayMeeting` so the UI never re-derives it. Outside the window the attempt is committed (`accepted = false`, `reject_reason = 'outside_window'`, with the submitted position and distance), then `FieldError('outside_window')` carries `opensAt` and `closesAt`; the route answers 422 `{ error, code, opensAt, closesAt }`. This check runs before the distance check, and an override reason does not bypass it. Walk-ins, check-out and outcomes are not affected. The My day card disables Check in with "Check-in opens at 9:30 am" / "Check-in closed at 4:30 pm" (tenant time zone, re-evaluated each minute) and shows the same copy on a 422 `outside_window`.
+3. Radius = the company's `checkin_radius_m` when the meeting's company has one, else the tenant's `checkin_radius_m` (default 300 m). Both are 50 to 5000 m (DB CHECKs).
+4. Distance = haversine between the browser position and the meeting's site (`meetings.lat/lng`, copied from the company or pinned when the meeting was created or last re-sited).
+5. Outcomes (inside the window):
    - Within the radius: accepted, `verified = true`.
    - Outside the radius, no override reason: rejected. The attempt is committed (`accepted = false`, `reject_reason = 'outside_radius'`), then `FieldError('outside_radius')` carries `distanceM` and `radiusM`.
    - Outside the radius with an override reason: accepted, `verified = false`, reason stored.
    - Site has no coordinates: accepted, `verified = false`, `override_reason = 'site_not_geocoded'`, distance null.
-5. GPS accuracy is stored with the attempt but does not change the verdict.
-6. Check-out records a `kind = 'out'` row with the same distance and verified computation, and is never rejected. On check-out with a linked deal, one `meeting_logged` activity is recorded on the deal, carrying the check-in's verdict.
-7. Walk-in: one transaction creates the meeting (`source = 'walk_in'`, start now, 30 minutes, address from reverse geocode, site = the rep's position, `geocode_status = 'manual'`) and a verified check-in. `needs_linking` is set when there is no deal. The reverse geocode happens before any insert, so a provider failure leaves nothing behind.
+6. GPS accuracy is stored with the attempt but does not change the verdict.
+7. Check-out records a `kind = 'out'` row with the same distance and verified computation, and is never rejected. On check-out with a linked deal, one `meeting_logged` activity is recorded on the deal, carrying the check-in's verdict.
+8. Walk-in: one transaction creates the meeting (`source = 'walk_in'`, start now, 30 minutes, address from reverse geocode, site = the rep's position, `geocode_status = 'manual'`) and a verified check-in. `needs_linking` is set when there is no deal. The reverse geocode happens before any insert, so a provider failure leaves nothing behind.
 
 ## 4. MapsProvider contract
 
@@ -144,6 +145,8 @@ Pins:
 | `geocode_cache`, `drive_time_cache` | address to point; point pair to minutes | Per tenant. No user id. |
 | `location_pings` | continuous rep trail | Exists, partitioned, and is NOT written in PR 1. Native provider only; forbidden for Ask Mira workspaces (enforced in PR 3). |
 | `location_view_audit` | who looked at whose location and why | Exists; written by PR 3 when a trail is viewed. |
+
+Settings page permissions: owners and admins edit every field; managers (`manageFieldCheckinWindow`) see the page and edit only the check-in window, with the rest read-only. `saveFieldSettingsAs` enforces this per field on the server: a patch from a manager that touches any other field is rejected whole (forbidden).
 
 Nothing in PR 1 tracks a rep between check-ins. The settings page shows the location provider disabled ("available later"); tracking hours are stored but have no effect on position capture until PR 3 (they do gate the risk scan).
 

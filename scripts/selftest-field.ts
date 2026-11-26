@@ -22,6 +22,8 @@ import { formatTimeInTz, isoToZonedInput, isValidDate, shiftDate, todayInTz, zon
 import { directionsUrl } from '../src/app/dashboard/field/_lib/maps-link';
 import { geoErrorMessage, isLowAccuracy } from '../src/app/dashboard/field/_lib/geolocate';
 import { MIN_BLOCK_PCT, blockColor, blockGeometry, layoutLane, type LaneItem } from '../src/app/dashboard/field/_lib/timeline';
+import { checkinWindow, checkinWindowState } from '../src/lib/field/checkin-window';
+import { checkinGateLabel } from '../src/app/dashboard/field/_lib/checkin-gate';
 import { canCancelMeeting, canEditMeeting, editErrorText, editGates, meetingPatch, type MeetingFormValues } from '../src/app/dashboard/field/_lib/meeting-edit';
 
 /**
@@ -321,6 +323,12 @@ async function main() {
     };
     const rad = await j(new FieldError('outside_radius', 'Too far', { distanceM: 500, radiusM: 200 }));
     check('http outside_radius 422 with code/distanceM/radiusM', rad.status === 422 && rad.body.code === 'outside_radius' && rad.body.distanceM === 500 && rad.body.radiusM === 200 && rad.cache === 'no-store', rad);
+    const win = await j(new FieldError('outside_window', 'Not yet', { opensAt: new Date('2026-12-02T03:00:00Z'), closesAt: new Date('2026-12-02T09:30:00Z') }));
+    check(
+      'http outside_window 422 with ISO opensAt/closesAt',
+      win.status === 422 && win.body.code === 'outside_window' && win.body.error === 'Not yet' && win.body.opensAt === '2026-12-02T03:00:00.000Z' && win.body.closesAt === '2026-12-02T09:30:00.000Z',
+      win,
+    );
     check('http invalid_transition 409', (await j(new FieldError('invalid_transition', 'x'))).status === 409);
     check('http not_found 404', (await j(new FieldError('not_found', 'x'))).status === 404);
     check('http forbidden 403', (await j(new FieldError('forbidden', 'x'))).status === 403);
@@ -517,6 +525,37 @@ async function main() {
       editErrorText({ error: 'Cannot change time once the visit has started', code: 'invalid_transition' }).includes('refresh') &&
         editErrorText({ error: 'Title is required', code: 'validation' }) === 'Title is required',
     );
+  }
+
+  // ---- Check-in time window (pure)
+  {
+    const start = new Date('2026-12-02T06:00:00Z'); // 11:30 IST
+    const end = new Date('2026-12-02T07:00:00Z');
+    const at = (min: number) => new Date(start.getTime() + min * 60_000);
+    const def = checkinWindow({ startAt: start, endAt: end }, { checkinOpensBeforeMin: 120, checkinClosesAfterMin: 240 });
+    check('window: opens 120 min before start', def.opensAt.toISOString() === '2026-12-02T04:00:00.000Z', def);
+    check('window: closes 240 min after end', def.closesAt.toISOString() === '2026-12-02T11:00:00.000Z', def);
+    check('window: before open', checkinWindowState(def, at(-121)) === 'before');
+    check('window: at open boundary inclusive', checkinWindowState(def, at(-120)) === 'open');
+    check('window: inside', checkinWindowState(def, at(30)) === 'open');
+    check('window: at close boundary inclusive', checkinWindowState(def, at(60 + 240)) === 'open');
+    check('window: after close', checkinWindowState(def, new Date(at(300).getTime() + 1)) === 'after');
+    const custom = checkinWindow({ startAt: start, endAt: end }, { checkinOpensBeforeMin: 15, checkinClosesAfterMin: 30 });
+    check('window custom 15/30: 16 min early before, 15 open', checkinWindowState(custom, at(-16)) === 'before' && checkinWindowState(custom, at(-15)) === 'open');
+    check('window custom 15/30: 30 after end open, 31 after', checkinWindowState(custom, at(90)) === 'open' && checkinWindowState(custom, at(91)) === 'after');
+    const zero = checkinWindow({ startAt: start, endAt: end }, { checkinOpensBeforeMin: 0, checkinClosesAfterMin: 0 });
+    check(
+      'window 0/0: only during the meeting',
+      checkinWindowState(zero, at(-1)) === 'before' &&
+        checkinWindowState(zero, at(0)) === 'open' &&
+        checkinWindowState(zero, at(60)) === 'open' &&
+        checkinWindowState(zero, at(61)) === 'after',
+    );
+    const tz = 'Asia/Kolkata';
+    check('gate label before: opens at 9:30 am', checkinGateLabel(def.opensAt.toISOString(), def.closesAt.toISOString(), at(-180), tz) === 'Check-in opens at 9:30 am', checkinGateLabel(def.opensAt, def.closesAt, at(-180), tz));
+    check('gate label after: closed at 4:30 pm', checkinGateLabel(def.opensAt, def.closesAt, at(400), tz) === 'Check-in closed at 4:30 pm', checkinGateLabel(def.opensAt, def.closesAt, at(400), tz));
+    check('gate label inside: null', checkinGateLabel(def.opensAt, def.closesAt, at(0), tz) === null);
+    check('gate label missing window: null', checkinGateLabel(undefined, undefined, at(0), tz) === null);
   }
 
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);

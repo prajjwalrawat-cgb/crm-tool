@@ -296,6 +296,8 @@ CREATE TABLE IF NOT EXISTS "tenant_field_settings" (
   "tracking_start" time NOT NULL DEFAULT '09:00',
   "tracking_end" time NOT NULL DEFAULT '19:00',
   "tracking_interval_sec" integer NOT NULL DEFAULT 120,
+  "checkin_opens_before_min" integer NOT NULL DEFAULT 120,
+  "checkin_closes_after_min" integer NOT NULL DEFAULT 240,
   "askmira_base_url" text,
   "askmira_service_token_enc" text,
   "askmira_webhook_secret_enc" text,
@@ -348,6 +350,13 @@ DO $$ BEGIN
 END $$;
 --> statement-breakpoint
 
+-- Check-in time window (minutes before start / after end). Added after the
+-- table first shipped to the test DB, so guarded for replays.
+ALTER TABLE "tenant_field_settings"
+  ADD COLUMN IF NOT EXISTS "checkin_opens_before_min" integer NOT NULL DEFAULT 120,
+  ADD COLUMN IF NOT EXISTS "checkin_closes_after_min" integer NOT NULL DEFAULT 240;
+--> statement-breakpoint
+
 -- Sanity bounds on tenant_field_settings (guarded the same way).
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_checkin_radius_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
@@ -364,6 +373,12 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_tracking_window_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
     ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_tracking_window_check" CHECK ("tracking_start" < "tracking_end");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_checkin_opens_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
+    ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_checkin_opens_check" CHECK ("checkin_opens_before_min" BETWEEN 0 AND 1440);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_field_settings_checkin_closes_check' AND conrelid = '"tenant_field_settings"'::regclass) THEN
+    ALTER TABLE "tenant_field_settings" ADD CONSTRAINT "tenant_field_settings_checkin_closes_check" CHECK ("checkin_closes_after_min" BETWEEN 0 AND 1440);
   END IF;
 END $$;
 --> statement-breakpoint

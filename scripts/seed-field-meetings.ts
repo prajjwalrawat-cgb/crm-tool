@@ -53,6 +53,7 @@ const PLAN: Record<'rep1' | 'rep2' | 'rep3', Slot[]> = {
     { site: 'okhla', title: 'Follow-up visit', startMin: 290, endMin: 320 },
   ],
   // No check-in: the first meeting started 30 min ago (past the 15 min grace) and was never checked in.
+  // It is still inside its check-in window (default: opens 2 h before start, closes 4 h after end).
   rep3: [
     { site: 'gurugram', title: 'Contract signing', startMin: -30, endMin: 30 },
     { site: 'okhla', title: 'Demo at works', startMin: 110, endMin: 160, deal: 'own' },
@@ -86,6 +87,8 @@ async function main() {
   const { createMeeting } = await import('../src/lib/field/meetings');
   const { scanTenantRisks } = await import('../src/lib/field/risk-scan');
   const { inArray } = await import('drizzle-orm');
+  const { getFieldSettings } = await import('../src/lib/field/settings');
+  const { checkinWindow, checkinWindowState } = await import('../src/lib/field/checkin-window');
   type FieldActor = import('../src/lib/field/types').FieldActor;
 
   const slugs = TENANTS.map((t) => t.slug);
@@ -208,15 +211,26 @@ async function main() {
 
       const rows = await inT(tenantId, (tx) =>
         tx
-          .select({ title: s.meetings.title, ownerId: s.meetings.ownerId, startAt: s.meetings.startAt, reasons: s.meetings.atRiskReasons })
+          .select({
+            title: s.meetings.title,
+            ownerId: s.meetings.ownerId,
+            startAt: s.meetings.startAt,
+            endAt: s.meetings.endAt,
+            reasons: s.meetings.atRiskReasons,
+          })
           .from(s.meetings)
           .where(inArray(s.meetings.id, meetingIds)),
       );
       const who = new Map(people.map((p) => [uid(p.key), p.key]));
       rows.sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+      const fs = await inT(tenantId, (tx) => getFieldSettings(tx, tenantId));
+      const fmt = (d: Date) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
       for (const r of rows) {
-        const hm = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(r.startAt);
-        console.log(`  ${who.get(r.ownerId)} ${hm} ${r.title.padEnd(24)} flags: ${r.reasons.length ? r.reasons.join(', ') : '-'}`);
+        const w = checkinWindow(r, fs);
+        const state = checkinWindowState(w, runAt) === 'open' ? 'open now' : checkinWindowState(w, runAt) === 'before' ? 'not open yet' : 'closed';
+        console.log(
+          `  ${who.get(r.ownerId)} ${fmt(r.startAt)} ${r.title.padEnd(24)} check-in ${fmt(w.opensAt)}-${fmt(w.closesAt)} (${state}) flags: ${r.reasons.length ? r.reasons.join(', ') : '-'}`,
+        );
       }
     }
 

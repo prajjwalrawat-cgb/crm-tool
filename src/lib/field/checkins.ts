@@ -6,6 +6,7 @@ import { companies, meetingCheckins, meetings, type Meeting, type MeetingCheckin
 import { recordActivity } from '@/lib/activity/recorder';
 import { tenantTransaction } from '@/lib/db-context';
 
+import { checkinWindow, checkinWindowState } from './checkin-window';
 import { haversineMeters } from './geo';
 import {
   asActor,
@@ -44,7 +45,7 @@ const siteOf = (m: Meeting): LatLng | null => (m.lat !== null && m.lng !== null 
 const round = (d: number | null) => (d === null ? null : Math.round(d));
 
 /** The meeting's company radius override, else the tenant radius. */
-async function effectiveRadius(tx: Tx, tenantId: string, companyId: string | null): Promise<number> {
+async function effectiveRadius(tx: Tx, tenantId: string, companyId: string | null, tenantRadiusM?: number): Promise<number> {
   if (companyId) {
     const [c] = await tx
       .select({ r: companies.checkinRadiusM })
@@ -53,7 +54,7 @@ async function effectiveRadius(tx: Tx, tenantId: string, companyId: string | nul
       .limit(1);
     if (c?.r != null) return c.r;
   }
-  return (await getFieldSettings(tx, tenantId)).checkinRadiusM;
+  return tenantRadiusM ?? (await getFieldSettings(tx, tenantId)).checkinRadiusM;
 }
 
 const setMeeting = (tx: Tx, m: Meeting, values: { [K in keyof typeof meetings.$inferInsert]?: (typeof meetings.$inferInsert)[K] | SQL }) =>
@@ -64,6 +65,7 @@ const setMeeting = (tx: Tx, m: Meeting, values: { [K in keyof typeof meetings.$i
     .returning();
 
 type CheckInTx =
+  | { rejected: 'window'; opensAt: Date; closesAt: Date; state: 'before' | 'after' }
   | { rejected: true; distanceM: number; radiusM: number }
   | { rejected: false; checkin: MeetingCheckin; verified: boolean; distanceM: number | null };
 
@@ -85,7 +87,10 @@ export function checkIn(
     const res: CheckInTx = await tenantTransaction(async (tx) => {
       const cur = await lockOwnedMeeting(tx, actor, scope, id);
       assertTransition(cur.status, 'checked_in', cur.type);
-      const radiusM = await effectiveRadius(tx, actor.tenantId, cur.companyId);
+      const settings = await getFieldSettings(tx, actor.tenantId);
+      const window = checkinWindow(cur, settings);
+      const windowState = checkinWindowState(window, now);
+      const radiusM = await effectiveRadius(tx, actor.tenantId, cur.companyId, settings.checkinRadiusM);
       const site = siteOf(cur);
       const distanceM = site ? haversineMeters(site, p) : null;
       const base = {
@@ -100,6 +105,12 @@ export function checkIn(
         locationSource: 'browser' as const,
         capturedAt: now,
       };
+
+      if (windowState !== 'open') {
+        // Outside the time window: an override reason does not bypass it.
+        await tx.insert(meetingCheckins).values({ ...base, accepted: false, verified: false, rejectReason: 'outside_window' });
+        return { rejected: 'window', ...window, state: windowState };
+      }
 
       if (distanceM !== null && distanceM > radiusM && !override) {
         // Commit the rejected attempt; the error is thrown after the transaction.
@@ -123,6 +134,15 @@ export function checkIn(
       return { rejected: false, checkin: checkin!, verified, distanceM };
     });
 
+    if (res.rejected === 'window') {
+      throw new FieldError(
+        'outside_window',
+        res.state === 'before'
+          ? 'Check-in has not opened yet for this meeting'
+          : 'Check-in has closed for this meeting',
+        { opensAt: res.opensAt, closesAt: res.closesAt },
+      );
+    }
     if (res.rejected) {
       const d = Math.round(res.distanceM);
       throw new FieldError('outside_radius', `You are ${d} m from the site; check-in needs ${res.radiusM} m or closer`, {

@@ -1,14 +1,17 @@
 'use client';
 
-import { Loader2, LogIn, LogOut } from 'lucide-react';
-import { useId, useState } from 'react';
+import { Clock, Loader2, LogIn, LogOut } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
 import { toast } from 'sonner';
 
 import { cn } from '@/lib/utils';
 
 import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
 import { fieldApi } from '../_lib/api';
+import { checkinGateLabel } from '../_lib/checkin-gate';
+import { formatTimeInTz } from '../_lib/datetime';
 import type { GeoPosition } from '../_lib/geolocate';
+import { useTenantTz } from '../_lib/tz-context';
 import { usePosition } from '../_lib/use-position';
 import { PositionPrompt } from './position-prompt';
 
@@ -20,6 +23,8 @@ type Stage =
   /** Saved: stays disabled until the parent re-renders (router.refresh swaps the card). */
   | { kind: 'done' }
   | { kind: 'override'; pos: GeoPosition; distanceM: number; radiusM: number }
+  /** The server refused: outside the check-in time window (422 outside_window). */
+  | { kind: 'window'; label: string }
   | { kind: 'failed'; pos: GeoPosition; message: string; overrideReason?: string };
 
 const fmtM = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
@@ -28,21 +33,40 @@ const fmtM = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math
  * Check in / Check out with one GPS read. Flow: notice → locate (low-accuracy
  * Retry / Continue) → POST. A check-in outside the radius (422) asks for a
  * reason and resends with `overrideReason`. Failed sends keep the position so
- * Retry does not need a new fix.
+ * Retry does not need a new fix. A check-in outside its time window (the
+ * server's `checkinOpensAt` / `checkinClosesAt`) is disabled with the opening
+ * or closing time, re-checked every minute.
  */
 export function CheckinButton({
   meetingId,
   kind,
   onDone,
   primary = true,
+  window: win,
 }: {
   meetingId: string;
   kind: 'in' | 'out';
   onDone: () => void;
   primary?: boolean;
+  /** Check-in only: the window from DayMeeting (ISO). */
+  window?: { opensAt: string; closesAt: string };
 }) {
   const reasonId = useId();
+  const tz = useTenantTz();
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  const [now, setNow] = useState(() => new Date());
+  const opensAt = win?.opensAt;
+  const closesAt = win?.closesAt;
+  useEffect(() => {
+    if (kind !== 'in' || !opensAt || !closesAt) return;
+    // Each minute: re-evaluate the window and drop a stale server refusal.
+    const t = setInterval(() => {
+      setNow(new Date());
+      setStage((s) => (s.kind === 'window' ? { kind: 'idle' } : s));
+    }, 60_000);
+    return () => clearInterval(t);
+  }, [kind, opensAt, closesAt]);
+  const gate = kind === 'in' ? checkinGateLabel(opensAt, closesAt, now, tz) : null;
   const [reason, setReason] = useState('');
   const position = usePosition((pos) => void send(pos));
 
@@ -59,6 +83,22 @@ export function CheckinButton({
       onDone();
       return;
     }
+    if (kind === 'in' && res.code === 'outside_window') {
+      const at = new Date();
+      const o = String(res.body.opensAt ?? '');
+      const c = String(res.body.closesAt ?? '');
+      setNow(at);
+      // Server clock is the authority: if ours still thinks the window is open, pick by which end is nearer.
+      const label =
+        checkinGateLabel(o, c, at, tz) ??
+        (o && c
+          ? at.getTime() < new Date(c).getTime() - (new Date(c).getTime() - new Date(o).getTime()) / 2
+            ? `Check-in opens at ${formatTimeInTz(o, tz)}`
+            : `Check-in closed at ${formatTimeInTz(c, tz)}`
+          : res.error);
+      setStage({ kind: 'window', label });
+      return;
+    }
     if (kind === 'in' && res.code === 'outside_radius') {
       setStage({
         kind: 'override',
@@ -73,6 +113,7 @@ export function CheckinButton({
 
   const busy = position.state.kind === 'locating' || stage.kind === 'sending';
   const done = stage.kind === 'done';
+  const blocked = gate ?? (stage.kind === 'window' ? stage.label : null);
   const Icon = kind === 'in' ? LogIn : LogOut;
 
   return (
@@ -81,15 +122,20 @@ export function CheckinButton({
         <>
           <Button
             variant={primary ? 'primary' : 'secondary'}
-            disabled={busy || done}
+            disabled={busy || done || blocked !== null}
+            title={blocked ?? undefined}
             onClick={() => {
               setStage({ kind: 'idle' });
               void position.locate();
             }}
             className="min-h-11 w-full px-4 text-[14px]"
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Icon className="h-4 w-4" aria-hidden />}
-            {stage.kind === 'sending'
+            {blocked !== null && !busy ? (
+              <Clock className="h-4 w-4" aria-hidden />
+            ) : busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Icon className="h-4 w-4" aria-hidden />}
+            {blocked !== null && !busy
+              ? blocked
+              : stage.kind === 'sending'
               ? 'Saving…'
               : done
                 ? kind === 'in'
@@ -99,7 +145,7 @@ export function CheckinButton({
                   ? 'Check in'
                   : 'Check out'}
           </Button>
-          {position.state.kind === 'idle' && stage.kind === 'idle' ? (
+          {position.state.kind === 'idle' && stage.kind === 'idle' && blocked === null ? (
             <p className="text-center text-[11.5px] text-slate-500 dark:text-[#A1A1AA]">
               Your location is saved with this check-{kind}
             </p>

@@ -82,7 +82,7 @@ const ITEMS: readonly SettingsItem[] = [
   { href: '/dashboard/settings/ai', label: 'AI', icon: Brain, visibility: 'adminOnly' },
   { href: '/dashboard/settings/ai-suggestions', label: 'AI suggestions', icon: Sparkles, visibility: 'adminOnly' },
   { href: '/dashboard/settings/prospects', label: 'Prospect board', icon: Kanban, visibility: 'adminOnly' },
-  { href: '/dashboard/settings/field', label: 'Field meetings', icon: MapPin, visibility: 'adminOnly' },
+  { href: '/dashboard/settings/field', label: 'Field meetings', icon: MapPin, visibility: 'managerOrAdmin' },
   { href: '/dashboard/settings/telephony', label: 'Telephony', icon: Headset, visibility: 'adminOnly' },
 ];
 

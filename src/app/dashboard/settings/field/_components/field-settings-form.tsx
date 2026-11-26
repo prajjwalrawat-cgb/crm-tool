@@ -16,12 +16,19 @@ const num = 'w-24 rounded-md border border-slate-300 px-2 py-1 text-[13px] dark:
 /** A blank field is NaN, which the server rejects like any out-of-range value. */
 const toNum = (v: string) => (v.trim() === '' ? Number.NaN : Number(v));
 
-export function FieldSettingsForm({ initial }: { initial: FieldSettings }) {
+/**
+ * `canManageAll` false (managers): only the check-in window is editable and
+ * only those two fields are sent; the server enforces the same split.
+ */
+export function FieldSettingsForm({ initial, canManageAll }: { initial: FieldSettings; canManageAll: boolean }) {
   const [radius, setRadius] = useState(String(initial.checkinRadiusM));
   const [grace, setGrace] = useState(String(initial.graceMin));
   const [momDue, setMomDue] = useState(String(initial.momDueHours));
   const [start, setStart] = useState(initial.trackingStart);
   const [end, setEnd] = useState(initial.trackingEnd);
+  const [opensBefore, setOpensBefore] = useState(String(initial.checkinOpensBeforeMin));
+  const [closesAfter, setClosesAfter] = useState(String(initial.checkinClosesAfterMin));
+  const locked = !canManageAll;
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -29,13 +36,19 @@ export function FieldSettingsForm({ initial }: { initial: FieldSettings }) {
   function save() {
     setError(null);
     startTransition(async () => {
-      const r = await saveFieldSettingsAction({
-        checkinRadiusM: toNum(radius),
-        graceMin: toNum(grace),
-        momDueHours: toNum(momDue),
-        trackingStart: start,
-        trackingEnd: end,
-      });
+      const windowFields = { checkinOpensBeforeMin: toNum(opensBefore), checkinClosesAfterMin: toNum(closesAfter) };
+      const r = await saveFieldSettingsAction(
+        canManageAll
+          ? {
+              checkinRadiusM: toNum(radius),
+              graceMin: toNum(grace),
+              momDueHours: toNum(momDue),
+              trackingStart: start,
+              trackingEnd: end,
+              ...windowFields,
+            }
+          : windowFields,
+      );
       if (!r.ok) {
         setError(r.message);
         toast.error(r.message);
@@ -48,33 +61,52 @@ export function FieldSettingsForm({ initial }: { initial: FieldSettings }) {
 
   return (
     <div className="space-y-3">
+      {locked ? (
+        <p className="text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+          Managers can change the check-in window. The other settings are set by an owner or admin.
+        </p>
+      ) : null}
       <div className={box}>
         <label className={label}>
           Check-in radius (m)
-          <input type="number" min={50} max={5000} className={num} value={radius} disabled={pending} onChange={(e) => setRadius(e.target.value)} />
+          <input type="number" min={50} max={5000} className={num} value={radius} disabled={pending || locked} onChange={(e) => setRadius(e.target.value)} />
         </label>
         <p className={help}>How close a rep must be to the site to check in, from 50 to 5000 metres. A company can override this.</p>
       </div>
       <div className={box}>
         <label className={label}>
+          Check-in opens (minutes before start)
+          <input type="number" min={0} max={1440} className={num} value={opensBefore} disabled={pending} onChange={(e) => setOpensBefore(e.target.value)} />
+        </label>
+        <label className={`${label} mt-2`}>
+          Check-in closes (minutes after end)
+          <input type="number" min={0} max={1440} className={num} value={closesAfter} disabled={pending} onChange={(e) => setClosesAfter(e.target.value)} />
+        </label>
+        <p className={help}>
+          Reps can only check in inside this window, from 0 to 1440 minutes each. Set both to 0 to allow check-in only
+          during the meeting itself. A reason for checking in far from the site does not bypass it.
+        </p>
+      </div>
+      <div className={box}>
+        <label className={label}>
           No-check-in grace (min)
-          <input type="number" min={0} max={120} className={num} value={grace} disabled={pending} onChange={(e) => setGrace(e.target.value)} />
+          <input type="number" min={0} max={120} className={num} value={grace} disabled={pending || locked} onChange={(e) => setGrace(e.target.value)} />
         </label>
         <p className={help}>Minutes after the start time before a meeting with no check-in is flagged, from 0 to 120.</p>
       </div>
       <div className={box}>
         <label className={label}>
           Meeting notes due (hours)
-          <input type="number" min={1} max={72} className={num} value={momDue} disabled={pending} onChange={(e) => setMomDue(e.target.value)} />
+          <input type="number" min={1} max={72} className={num} value={momDue} disabled={pending || locked} onChange={(e) => setMomDue(e.target.value)} />
         </label>
         <p className={help}>Hours after check-out before missing notes are flagged, from 1 to 72.</p>
       </div>
       <div className={box}>
         <div className={label}>
           Tracking hours
-          <input type="time" aria-label="Tracking start" className={num} value={start} disabled={pending} onChange={(e) => setStart(e.target.value)} />
+          <input type="time" aria-label="Tracking start" className={num} value={start} disabled={pending || locked} onChange={(e) => setStart(e.target.value)} />
           <span aria-hidden>to</span>
-          <input type="time" aria-label="Tracking end" className={num} value={end} disabled={pending} onChange={(e) => setEnd(e.target.value)} />
+          <input type="time" aria-label="Tracking end" className={num} value={end} disabled={pending || locked} onChange={(e) => setEnd(e.target.value)} />
         </div>
         <p className={help}>Location is only recorded between these hours, in the workspace time zone. Start must be before end.</p>
       </div>

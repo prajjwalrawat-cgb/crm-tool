@@ -289,6 +289,8 @@ export const tenantFieldSettings = pgTable(
   trackingStart: time('tracking_start').notNull().default('09:00'),
   trackingEnd: time('tracking_end').notNull().default('19:00'),
   trackingIntervalSec: integer('tracking_interval_sec').notNull().default(120),
+  checkinOpensBeforeMin: integer('checkin_opens_before_min').notNull().default(120),
+  checkinClosesAfterMin: integer('checkin_closes_after_min').notNull().default(240),
   askmiraBaseUrl: text('askmira_base_url'),
   askmiraServiceTokenEnc: text('askmira_service_token_enc'),
   askmiraWebhookSecretEnc: text('askmira_webhook_secret_enc'),
@@ -303,6 +305,8 @@ export const tenantFieldSettings = pgTable(
     check('tenant_field_settings_mom_due_check', sql`${t.momDueHours} BETWEEN 1 AND 72`),
     check('tenant_field_settings_interval_check', sql`${t.trackingIntervalSec} BETWEEN 30 AND 3600`),
     check('tenant_field_settings_tracking_window_check', sql`${t.trackingStart} < ${t.trackingEnd}`),
+    check('tenant_field_settings_checkin_opens_check', sql`${t.checkinOpensBeforeMin} BETWEEN 0 AND 1440`),
+    check('tenant_field_settings_checkin_closes_check', sql`${t.checkinClosesAfterMin} BETWEEN 0 AND 1440`),
   ],
 );
 

@@ -3,6 +3,8 @@ import 'server-only';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { tenantFieldSettings } from '@/db/schema';
+import type { MembershipRole } from '@/db/schema/enums';
+import { can } from '@/lib/rbac';
 import type { DbExecutor } from '@/lib/db-context';
 import { FieldError } from './types';
 
@@ -14,6 +16,10 @@ export type FieldSettings = {
   trackingStart: string;
   trackingEnd: string;
   trackingIntervalSec: number;
+  /** Check-in opens this many minutes before the meeting starts. */
+  checkinOpensBeforeMin: number;
+  /** Check-in closes this many minutes after the meeting ends. */
+  checkinClosesAfterMin: number;
 };
 
 export const FIELD_SETTINGS_DEFAULTS: FieldSettings = {
@@ -24,6 +30,8 @@ export const FIELD_SETTINGS_DEFAULTS: FieldSettings = {
   trackingStart: '09:00',
   trackingEnd: '19:00',
   trackingIntervalSec: 120,
+  checkinOpensBeforeMin: 120,
+  checkinClosesAfterMin: 240,
 };
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
@@ -34,6 +42,8 @@ const patchSchema = z
     momDueHours: z.number().int().min(1).max(72),
     trackingStart: hhmm,
     trackingEnd: hhmm,
+    checkinOpensBeforeMin: z.number().int().min(0).max(1440),
+    checkinClosesAfterMin: z.number().int().min(0).max(1440),
   })
   .partial()
   .strict();
@@ -53,6 +63,8 @@ export async function getFieldSettings(tx: DbExecutor, tenantId: string): Promis
     trackingStart: hm(r.trackingStart),
     trackingEnd: hm(r.trackingEnd),
     trackingIntervalSec: r.trackingIntervalSec,
+    checkinOpensBeforeMin: r.checkinOpensBeforeMin,
+    checkinClosesAfterMin: r.checkinClosesAfterMin,
   };
 }
 
@@ -76,12 +88,39 @@ export async function saveFieldSettings(
     momDueHours: next.momDueHours,
     trackingStart: next.trackingStart,
     trackingEnd: next.trackingEnd,
+    checkinOpensBeforeMin: next.checkinOpensBeforeMin,
+    checkinClosesAfterMin: next.checkinClosesAfterMin,
   };
   await tx
     .insert(tenantFieldSettings)
     .values({ tenantId, ...values })
     .onConflictDoUpdate({ target: tenantFieldSettings.tenantId, set: { ...values, updatedAt: new Date() } });
   return next;
+}
+
+/** Fields a manager may change (`manageFieldCheckinWindow`); every other field needs `manageFieldSettings`. */
+export const CHECKIN_WINDOW_FIELDS = ['checkinOpensBeforeMin', 'checkinClosesAfterMin'] as const;
+
+/**
+ * Saves a patch after per-field permission checks for `role`: a patch that
+ * touches a field the role cannot edit is rejected whole (forbidden), nothing saved.
+ */
+export async function saveFieldSettingsAs(
+  tx: DbExecutor,
+  tenantId: string,
+  role: MembershipRole | null | undefined,
+  patch: FieldSettingsPatch,
+): Promise<FieldSettings> {
+  const keys = Object.keys(patch).filter((k) => patch[k as keyof FieldSettingsPatch] !== undefined);
+  const windowKeys = new Set<string>(CHECKIN_WINDOW_FIELDS);
+  const other = keys.filter((k) => !windowKeys.has(k));
+  if (other.length > 0 && !can(role, 'manageFieldSettings')) {
+    throw new FieldError('forbidden', 'Only owners and admins can change the check-in radius, grace, notes due and tracking hours.');
+  }
+  if (keys.some((k) => windowKeys.has(k)) && !can(role, 'manageFieldCheckinWindow')) {
+    throw new FieldError('forbidden', 'Only owners, admins and managers can change the check-in window.');
+  }
+  return saveFieldSettings(tx, tenantId, patch);
 }
 
 /** True when `now`, read in `tz`, falls in [trackingStart, trackingEnd). */

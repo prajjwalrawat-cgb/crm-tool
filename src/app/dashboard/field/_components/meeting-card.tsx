@@ -204,7 +204,12 @@ export function MeetingCard({
 
           {canWrite && physical && PRE_CHECKIN.has(m.status) ? (
             <div className="w-full sm:w-auto sm:flex-1">
-              <CheckinButton meetingId={m.id} kind="in" onDone={onChanged} />
+              <CheckinButton
+                meetingId={m.id}
+                kind="in"
+                onDone={onChanged}
+                window={{ opensAt: m.checkinOpensAt, closesAt: m.checkinClosesAt }}
+              />
             </div>
           ) : null}
 

@@ -144,6 +144,8 @@ const PERMISSIONS = {
   viewFieldTeam: ['owner', 'admin', 'manager'],
   /** Field Meetings: check-in radius, grace, MOM due and tracking hours. */
   manageFieldSettings: ['owner', 'admin'],
+  /** Field Meetings: the check-in time window (opens before start / closes after end). */
+  manageFieldCheckinWindow: ['owner', 'admin', 'manager'],
   /** Field Meetings: pin a company / meeting site. Reps can never set or move a site. */
   pinFieldSites: ['owner', 'admin', 'manager'],
 } as const satisfies Record<string, readonly MembershipRole[]>;

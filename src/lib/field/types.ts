@@ -6,7 +6,8 @@ export type RiskReason = 'no_checkin' | 'travel_gap' | 'overlap' | 'mom_missing'
 
 export type FieldActor = { tenantId: string; userId: string; role: MembershipRole };
 
-export type FieldErrorCode = 'not_found' | 'forbidden' | 'invalid_transition' | 'validation' | 'outside_radius';
+export type FieldErrorCode = 'not_found' | 'forbidden' | 'invalid_transition' | 'validation' | 'outside_radius'
+  | 'outside_window';
 
 export class FieldError extends Error {
   readonly code: FieldErrorCode;

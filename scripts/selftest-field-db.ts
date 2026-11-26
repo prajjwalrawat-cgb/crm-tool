@@ -214,6 +214,10 @@ async function main() {
 
     // The settings tests above left tenant A at 500 m; the brief's cases assume the 300 m default.
     await inT(A, (tx) => saveFieldSettings(tx, A, { checkinRadiusM: 300 }));
+    // The check-in window has its own block below; the rest of these cases check
+    // in hours away from meeting time, so open the window as wide as it goes.
+    const WIDE = { checkinOpensBeforeMin: 1440, checkinClosesAfterMin: 1440 };
+    await inT(A, (tx) => saveFieldSettings(tx, A, WIDE));
     const S = { lat: 28.5355, lng: 77.391 };
     const north = (meters: number) => ({ lat: S.lat + meters / 111_195, lng: S.lng });
     const [siteCo] = await db
@@ -287,6 +291,100 @@ async function main() {
       inT(A, (tx) => tx.select().from(s.meetingCheckins).where(sql`${s.meetingCheckins.meetingId} = ${id}`));
     const meetingRow = async (id: string) =>
       (await inT(A, (tx) => tx.select().from(s.meetings).where(sql`${s.meetings.id} = ${id}`)))[0]!;
+
+    // --- check-in time window (defaults: opens 120 min before start, closes 240 min after end)
+    {
+      await inT(A, (tx) => saveFieldSettings(tx, A, { checkinOpensBeforeMin: 120, checkinClosesAfterMin: 240 }));
+      const SA = await import('../src/lib/field/settings');
+      const wm = await M.createMeeting(
+        r1,
+        { title: 'ZZ window', type: 'physical', startAt: hours(5), endAt: hours(5.5), companyId: siteCo!.id },
+        deps,
+      );
+      const early = await err(CI.checkIn(r1, wm.id, { ...S, accuracyM: 5 }, deps));
+      const rows = await checkinsOf(wm.id);
+      check(
+        'window: check-in 5 h before start → outside_window with opensAt/closesAt',
+        early?.code === 'outside_window' &&
+          (early.details?.opensAt as Date).getTime() === hours(3).getTime() &&
+          (early.details?.closesAt as Date).getTime() === hours(9.5).getTime(),
+        { code: early?.code, details: early?.details },
+      );
+      check(
+        'window: rejected attempt logged once (outside_window, coords kept), status unchanged',
+        rows.length === 1 &&
+          rows[0]!.accepted === false &&
+          rows[0]!.rejectReason === 'outside_window' &&
+          rows[0]!.lat === S.lat &&
+          rows[0]!.distanceFromSiteM !== null &&
+          (await meetingRow(wm.id)).status === 'planned',
+        rows,
+      );
+      const ov = await err(CI.checkIn(r1, wm.id, { ...north(500), accuracyM: 5, overrideReason: 'client asked' }, deps));
+      check('window: override reason does not bypass it', ov?.code === 'outside_window' && (await meetingRow(wm.id)).status === 'planned', ov?.code);
+      const http = await import('../src/app/api/field/_lib/http');
+      const res = http.fieldErrorResponse(early);
+      const body = (await res.json()) as Record<string, unknown>;
+      check(
+        'window: HTTP 422 body carries ISO opensAt/closesAt',
+        res.status === 422 && body.code === 'outside_window' && body.opensAt === hours(3).toISOString() && body.closesAt === hours(9.5).toISOString(),
+        body,
+      );
+      const day = await DY.getDay(r1, { date: '2026-12-02' }, deps);
+      const dm = day.reps.flatMap((r) => r.meetings).find((x) => x.id === wm.id);
+      check(
+        'window: day view exposes checkinOpensAt/closesAt',
+        dm?.checkinOpensAt === hours(3).toISOString() && dm?.checkinClosesAt === hours(9.5).toISOString(),
+        { o: dm?.checkinOpensAt, c: dm?.checkinClosesAt },
+      );
+      const atOpen = await CI.checkIn(r1, wm.id, { ...S, accuracyM: 5 }, { ...deps, now: () => hours(3) });
+      check('window: check-in at the opening instant works as before', atOpen.verified && (await meetingRow(wm.id)).status === 'checked_in');
+      // After close: a meeting that ended 5 h ago (closes 4 h after end).
+      const late = await M.createMeeting(r1, { title: 'ZZ window late', type: 'physical', startAt: hours(-5.5), endAt: hours(-5), companyId: siteCo!.id }, deps);
+      const lateErr = await err(CI.checkIn(r1, late.id, { ...S, accuracyM: 5 }, deps));
+      check('window: check-in after close → outside_window', lateErr?.code === 'outside_window', lateErr?.code);
+      // Walk-ins are not affected by the window.
+      const walk = await CI.walkIn(r1, { ...S, accuracyM: 5, title: 'ZZ window walk-in' }, deps);
+      check('window: walk-in unaffected', walk.status === 'checked_in');
+
+      // Per-field permissions on the settings save path.
+      const forbidden = async (role: 'manager' | 'member' | 'admin', patch: Parameters<typeof SA.saveFieldSettingsAs>[3]) => {
+        try {
+          await inT(A, (tx) => SA.saveFieldSettingsAs(tx, A, role, patch));
+          return false;
+        } catch (e) {
+          return e instanceof FieldError && e.code === 'forbidden';
+        }
+      };
+      const mgrSaved = await inT(A, (tx) => SA.saveFieldSettingsAs(tx, A, 'manager', { checkinOpensBeforeMin: 30, checkinClosesAfterMin: 60 }));
+      check('settings: manager can save the check-in window', mgrSaved.checkinOpensBeforeMin === 30 && mgrSaved.checkinClosesAfterMin === 60);
+      check('settings: manager cannot save the radius', await forbidden('manager', { checkinRadiusM: 800 }));
+      check(
+        'settings: manager posting window + radius is rejected whole',
+        (await forbidden('manager', { checkinOpensBeforeMin: 10, checkinRadiusM: 800 })) &&
+          (await inT(A, (tx) => getFieldSettings(tx, A))).checkinOpensBeforeMin === 30 &&
+          (await inT(A, (tx) => getFieldSettings(tx, A))).checkinRadiusM === 300,
+      );
+      check('settings: member cannot save the window', await forbidden('member', { checkinOpensBeforeMin: 10 }));
+      check('settings: member cannot save the radius', await forbidden('member', { checkinRadiusM: 800 }));
+      const adm = await inT(A, (tx) => SA.saveFieldSettingsAs(tx, A, 'admin', { checkinRadiusM: 300, checkinOpensBeforeMin: 0, checkinClosesAfterMin: 0 }));
+      check('settings: admin can save radius and window', adm.checkinRadiusM === 300 && adm.checkinOpensBeforeMin === 0);
+      let rangeErr = false;
+      try {
+        await inT(A, (tx) => SA.saveFieldSettingsAs(tx, A, 'manager', { checkinClosesAfterMin: 1441 }));
+      } catch (e) {
+        rangeErr = e instanceof FieldError && e.code === 'validation';
+      }
+      check('settings: window 1441 → validation', rangeErr);
+
+      // 0 / 0: only during the meeting itself.
+      const tight = await M.createMeeting(r1, { title: 'ZZ window tight', type: 'physical', startAt: hours(1), endAt: hours(1.5), companyId: siteCo!.id }, deps);
+      const tooEarly = await code(CI.checkIn(r1, tight.id, { ...S, accuracyM: 5 }, { ...deps, now: () => new Date(hours(1).getTime() - 60_000) }));
+      const during = await code(CI.checkIn(r1, tight.id, { ...S, accuracyM: 5 }, { ...deps, now: () => hours(1.25) }));
+      check('window 0/0: a minute early rejected, during the meeting accepted', tooEarly === 'outside_window' && during === 'ok', { tooEarly, during });
+
+      await inT(A, (tx) => saveFieldSettings(tx, A, WIDE));
+    }
 
     // --- check-in acceptance
     const m1 = await mk(r1, { companyId: siteCo!.id });
@@ -723,6 +821,7 @@ async function main() {
         { n, a: [ra.lat, ra.address], b: rb.lat, c: rc.lat, d: [rd.lat, rd.status] },
       );
     }
+
   }
 
   // ---------------------------------------------------------------- risk scan (Task 5)

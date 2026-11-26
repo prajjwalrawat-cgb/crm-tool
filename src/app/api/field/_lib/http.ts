@@ -20,6 +20,7 @@ const STATUS: Record<FieldErrorCode, number> = {
   validation: 400,
   invalid_transition: 409,
   outside_radius: 422,
+  outside_window: 422,
 };
 
 /**
@@ -37,6 +38,11 @@ export function fieldErrorResponse(err: unknown): Response {
     if (err.code === 'outside_radius') {
       body.distanceM = err.details?.distanceM;
       body.radiusM = err.details?.radiusM;
+    }
+    if (err.code === 'outside_window') {
+      const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v);
+      body.opensAt = iso(err.details?.opensAt);
+      body.closesAt = iso(err.details?.closesAt);
     }
     return jsonResponse(body, STATUS[err.code]);
   }
