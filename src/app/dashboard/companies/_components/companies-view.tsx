@@ -42,7 +42,7 @@ import type { CustomFieldDef } from '@/lib/custom-fields/types';
 import { RelativeTime } from '@/lib/dates/relative-time';
 import { DEAL_STAGE_LABELS, type DealStage } from '@/lib/deals/schema';
 import type { PageSize } from '@/lib/pagination/page-size';
-import { canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
+import { can, canDeleteCompanies, canManageCompanies } from '@/lib/rbac';
 import type { Teammate } from '@/lib/teammates/queries';
 import { cn } from '@/lib/utils';
 
@@ -260,6 +260,14 @@ export function CompaniesView({
       normalizedName: null,
       mergedIntoId: null,
       dedupOverride: false,
+      address: null,
+      city: null,
+      state: null,
+      postalCode: null,
+      lat: null,
+      lng: null,
+      geocodeStatus: null,
+      checkinRadiusM: null,
       // A company that does not exist yet has no deals, no contacts and no
       // history. Zeroes here are the truth, not a placeholder — and they
       // render as em dashes, so the optimistic row looks the way the real
@@ -276,6 +284,7 @@ export function CompaniesView({
         setCreateFieldErrors(result.fieldErrors ?? {});
       } else {
         setCreateResetKey((k) => k + 1);
+        if (result.warning) toast.warning(result.warning);
       }
     });
   }
@@ -457,6 +466,7 @@ export function CompaniesView({
                   teammates={teammates}
                   currentUserId={currentUserId}
                   customFieldDefs={customFieldDefs}
+                  canPin={can(currentRole, 'pinFieldSites')}
                 />
               )}
             </CreateDrawer>
@@ -557,6 +567,7 @@ export function CompaniesView({
         error={editError}
         fieldErrors={editFieldErrors}
         canDelete={canDelete}
+        canPin={can(currentRole, 'pinFieldSites')}
       />
     </div>
   );

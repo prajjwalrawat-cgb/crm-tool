@@ -1,0 +1,439 @@
+'use client';
+
+import {
+  AlertTriangle,
+  Briefcase,
+  Building2,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  MapPin,
+  MapPinned,
+  MapPinOff,
+  PenLine,
+  Ban,
+  Pencil,
+  ShieldAlert,
+  ShieldCheck,
+  User,
+  Video,
+  X,
+  XCircle,
+} from 'lucide-react';
+import Link from 'next/link';
+import { useEffect, useId, useRef, useState } from 'react';
+import { toast } from 'sonner';
+
+import type { MeetingStatus } from '@/db/schema/enums';
+import type { DayMeeting } from '@/lib/field/day';
+import { canPinAfterCheckIn, isVisited, verifyAttemptTitle, visitVerificationLabel } from '@/lib/field/verification';
+import { cn } from '@/lib/utils';
+
+import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
+import { fieldApi } from '../_lib/api';
+import { formatTimeInTz } from '../_lib/datetime';
+import { STATUS_LABEL, STATUS_TONE, riskLabel } from '../_lib/labels';
+import { canCancelMeeting, canEditMeeting } from '../_lib/meeting-edit';
+import { useTenantTz } from '../_lib/tz-context';
+import { CancelMeetingSheet, EditMeetingSheet } from './meeting-actions';
+
+/**
+ * A site can be pinned until the rep checks in, or after a check-in made while
+ * the site had no location and the visit is unverified (mirrors the service rule).
+ */
+const PINNABLE = new Set<MeetingStatus>(['planned', 'en_route', 'arrived']);
+
+const SENTIMENT_LABEL: Record<string, string> = { positive: 'Positive', neutral: 'Neutral', negative: 'Negative' };
+
+function distanceText(m: number): string {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)} km from site` : `${Math.round(m)} m from site`;
+}
+
+function verificationText(c: DayMeeting['checkins'][number]): string {
+  if (c.kind === 'verify') return c.accepted ? 'Within the radius' : 'Too far from the site';
+  if (!c.accepted) {
+    if (c.rejectReason === 'outside_radius') return 'Too far from the site';
+    if (c.rejectReason === 'outside_window') return 'Outside check-in window';
+    return 'Rejected';
+  }
+  if (c.verified) return 'Verified at site';
+  if (c.overrideReason === 'site_not_geocoded') return 'Site not located';
+  return c.overrideReason ? `Override: ${c.overrideReason}` : 'Not verified';
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-[11.5px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1A1AA]">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Side panel for one meeting on the manager board: links, check-in trail
+ * (every attempt), MOM, risks in plain words, "Pin site" before check-in (or
+ * after a check-in made while the site had no location),
+ * and Edit / Cancel meeting for writers (gated by status like the service).
+ * Non-modal: the board stays usable, Escape or the close button dismiss it.
+ */
+export function MeetingPanel({
+  meeting: m,
+  repName,
+  canWrite,
+  ownersInScope,
+  onClose,
+  onChanged,
+}: {
+  meeting: DayMeeting;
+  repName: string;
+  /** False for viewers: no edit, cancel or pin. */
+  canWrite: boolean;
+  ownersInScope: Array<{ id: string; name: string }>;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [sheet, setSheet] = useState<null | 'edit' | 'cancel'>(null);
+  const tz = useTenantTz();
+  const ids = useId();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const time = (d: Date | string) => formatTimeInTz(d, tz);
+  const physical = m.type === 'physical';
+  const pinAfterCheckIn = physical && canPinAfterCheckIn(m);
+  const canPin = canWrite && physical && (PINNABLE.has(m.status) || pinAfterCheckIn);
+  const canEdit = canWrite && canEditMeeting(m.status);
+  const canCancel = canWrite && canCancelMeeting(m.status);
+  const siteMissing = physical && (m.lat === null || m.lng === null);
+  const firstInId = m.checkins.find((c) => c.kind === 'in' && c.accepted)?.id ?? null;
+  const chipCls = 'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium';
+
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, [m.id]);
+
+  useEffect(() => {
+    // While a sheet is open, Escape closes the sheet only.
+    if (sheet) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, sheet]);
+
+  return (
+    <aside
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={`${ids}-title`}
+      className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-[#262626] dark:bg-[#0F0F0F]"
+    >
+      <header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-[#1F1F1F]">
+        <div className="min-w-0">
+          <p className="text-[12px] font-medium tabular-nums text-slate-500 dark:text-[#A1A1AA]">
+            {repName} · {time(m.startAt)} – {time(m.endAt)}
+            {m.source === 'walk_in' ? ' · Walk-in' : ''}
+          </p>
+          <h2 id={`${ids}-title`} className="mt-0.5 break-words text-[16px] font-semibold text-slate-900 dark:text-[#FAFAFA]">
+            {m.title}
+          </h2>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className={cn(chipCls, STATUS_TONE[m.status])}>{STATUS_LABEL[m.status]}</span>
+            {m.needsLinking && m.status !== 'cancelled' ? (
+              <span className={cn(chipCls, 'bg-slate-100 text-slate-700 dark:bg-[#1F1F1F] dark:text-[#D4D4D8]')}>
+                <Briefcase className="h-3 w-3" aria-hidden /> Needs a deal
+              </span>
+            ) : null}
+            {m.lateMin !== null ? (
+              <span className={cn(chipCls, 'bg-orange-50 text-orange-800 dark:bg-orange-500/10 dark:text-orange-300')}>
+                <Clock className="h-3 w-3" aria-hidden /> Late check-in · {m.lateMin} min late
+              </span>
+            ) : null}
+            {physical && isVisited(m.status) ? (
+              <span
+                className={cn(
+                  chipCls,
+                  m.visitVerified
+                    ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
+                    : 'bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300',
+                )}
+              >
+                {m.visitVerified ? <ShieldCheck className="h-3 w-3" aria-hidden /> : <ShieldAlert className="h-3 w-3" aria-hidden />}
+                {visitVerificationLabel(m)}
+              </span>
+            ) : null}
+            {physical && m.siteRepEntered ? (
+              <span className={cn(chipCls, 'bg-violet-50 text-violet-800 dark:bg-violet-500/10 dark:text-violet-300')}>
+                <PenLine className="h-3 w-3" aria-hidden /> Rep-entered address
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          aria-label="Close meeting details"
+          className="-mr-1 rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#181818]"
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      </header>
+
+      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4 text-[13px] text-slate-700 dark:text-[#D4D4D8]">
+        <Section title="Risks">
+          {m.risk.reasons.length > 0 ? (
+            <ul className="space-y-1.5">
+              {m.risk.reasons.map((r) => (
+                <li
+                  key={r}
+                  className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+                >
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <span>
+                    {riskLabel(r, m.risk)}
+                    {r === 'travel_gap' && m.risk.estimate ? ' (estimated)' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-slate-500 dark:text-[#A1A1AA]">No risks right now.</p>
+          )}
+        </Section>
+
+        <Section title="Details">
+          <dl className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <dt className="sr-only">Deal</dt>
+              <Briefcase className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+              <dd className="min-w-0 truncate">
+                {m.deal ? (
+                  <Link href={`/dashboard/deals/${m.deal.id}`} className="font-medium text-indigo-600 hover:underline dark:text-indigo-400">
+                    {m.deal.name}
+                  </Link>
+                ) : (
+                  <span className="text-slate-500 dark:text-[#A1A1AA]">No deal linked</span>
+                )}
+              </dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="sr-only">Contact</dt>
+              <User className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+              <dd className="min-w-0 truncate">{m.contact?.name ?? <span className="text-slate-500 dark:text-[#A1A1AA]">No contact</span>}</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="sr-only">Company</dt>
+              <Building2 className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+              <dd className="min-w-0 truncate">{m.company?.name ?? <span className="text-slate-500 dark:text-[#A1A1AA]">No company</span>}</dd>
+            </div>
+            {physical ? (
+              <div className="flex items-start gap-2">
+                <dt className="sr-only">Site</dt>
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                <dd className="min-w-0 break-words">
+                  {m.address?.trim() || 'No address'}
+                  {m.lat !== null && m.lng !== null ? (
+                    <span className="block text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+                      {`Pinned at ${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}${
+                        m.geocodeStatus !== 'manual' ? '' : m.siteSource === 'company' ? ' (company pin)' : ' (set by hand)'
+                      }`}
+                    </span>
+                  ) : null}
+                  {siteMissing ? (
+                    <span className="mt-0.5 flex items-start gap-1 text-[12px] text-amber-800 dark:text-amber-300">
+                      <MapPinOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Site not located: check-ins here are unverified.{canPin ? ' Pin the site below.' : ''}
+                    </span>
+                  ) : null}
+                  {m.siteRepEntered ? (
+                    <span className="mt-0.5 flex items-start gap-1 text-[12px] text-violet-800 dark:text-violet-300">
+                      <PenLine className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Rep-entered address. The rep typed this address; check-ins{' '}
+                      {siteMissing ? 'will be verified against it once the site is located.' : 'are verified against it.'}
+                    </span>
+                  ) : null}
+                </dd>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <dt className="sr-only">Meeting type</dt>
+                <Video className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                <dd>Virtual meeting</dd>
+              </div>
+            )}
+          </dl>
+        </Section>
+
+        {physical ? (
+          <Section title="Check-ins">
+            {m.checkins.length === 0 ? (
+              <p className="text-slate-500 dark:text-[#A1A1AA]">No check-in attempts yet.</p>
+            ) : (
+              <ol className="space-y-2">
+                {m.checkins.map((c) => (
+                  <li key={c.id} className="flex items-start gap-2">
+                    {c.accepted ? (
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+                    ) : (
+                      <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-900 dark:text-[#FAFAFA]">
+                        {c.kind === 'verify'
+                          ? verifyAttemptTitle(c)
+                          : `${c.kind === 'in' ? 'Check-in' : 'Check-out'} ${c.accepted ? 'accepted' : 'rejected'}`}
+                        <span className="font-normal tabular-nums text-slate-500 dark:text-[#A1A1AA]"> · {time(c.capturedAt)}</span>
+                      </p>
+                      <p className="text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+                        {c.distanceFromSiteM !== null ? `${distanceText(c.distanceFromSiteM)} · ` : ''}
+                        {verificationText(c)}
+                        {c.accuracyM !== null ? ` · GPS ±${Math.round(c.accuracyM)} m` : ''}
+                      </p>
+                      {c.id === firstInId && m.lateMin !== null ? (
+                        <p className="flex items-center gap-1 text-[12px] font-medium text-orange-800 dark:text-orange-300">
+                          <Clock className="h-3 w-3" aria-hidden /> Late check-in · {m.lateMin} min late
+                        </p>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Section>
+        ) : null}
+
+        <Section title="MOM">
+          {m.outcome ? (
+            <div className="space-y-2">
+              {m.outcome.sentiment ? (
+                <p className="text-[12px] text-slate-500 dark:text-[#A1A1AA]">
+                  Sentiment: <span className="font-medium text-slate-700 dark:text-[#D4D4D8]">{SENTIMENT_LABEL[m.outcome.sentiment] ?? m.outcome.sentiment}</span>
+                </p>
+              ) : null}
+              <p className="whitespace-pre-line break-words">{m.outcome.momText?.trim() || 'No notes written.'}</p>
+              {m.outcome.nextSteps.length > 0 ? (
+                <div>
+                  <p className="text-[12px] font-medium text-slate-600 dark:text-[#A1A1AA]">Next steps</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {m.outcome.nextSteps.map((s, i) => (
+                      <li key={i} className="break-words">
+                        {s.text}
+                        {s.dueDate ? <span className="text-slate-500 dark:text-[#A1A1AA]"> · due {s.dueDate}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-slate-500 dark:text-[#A1A1AA]">No MOM logged yet.</p>
+          )}
+        </Section>
+
+        {canPin ? (
+          <PinSite
+            meetingId={m.id}
+            onPinned={onChanged}
+            hint={
+              pinAfterCheckIn
+                ? 'The rep checked in before the site had a location. Pin it, then the rep can verify on site or at check-out.'
+                : null
+            }
+          />
+        ) : null}
+
+        {canEdit || canCancel ? (
+          <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-[#1F1F1F]">
+            {canEdit ? (
+              <Button onClick={() => setSheet('edit')}>
+                <Pencil className="h-4 w-4" aria-hidden /> Edit
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button variant="danger" onClick={() => setSheet('cancel')}>
+                <Ban className="h-4 w-4" aria-hidden /> Cancel meeting
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {sheet === 'edit' ? (
+        <EditMeetingSheet
+          meeting={m}
+          ownersInScope={ownersInScope}
+          onClose={() => setSheet(null)}
+          onSaved={() => {
+            setSheet(null);
+            onChanged();
+          }}
+        />
+      ) : null}
+      {sheet === 'cancel' ? (
+        <CancelMeetingSheet
+          meeting={m}
+          onClose={() => setSheet(null)}
+          onDone={() => {
+            setSheet(null);
+            onChanged();
+          }}
+        />
+      ) : null}
+    </aside>
+  );
+}
+
+/** "Pin site": a Google Maps link or "lat, lng". The server's message is shown on failure. */
+function PinSite({ meetingId, onPinned, hint }: { meetingId: string; onPinned: () => void; hint: string | null }) {
+  const ids = useId();
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = input.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    const res = await fieldApi(`/meetings/${meetingId}/site`, { body: { input: value } });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setInput('');
+    toast.success('Site pinned');
+    onPinned();
+  }
+
+  return (
+    <Section title="Pin site">
+      <form onSubmit={submit} className="space-y-2">
+        {hint ? <p className="text-[12px] text-amber-800 dark:text-amber-300">{hint}</p> : null}
+        <label htmlFor={`${ids}-pin`} className="block text-[12px] text-slate-600 dark:text-[#A1A1AA]">
+          Paste a Google Maps link or coordinates (lat, lng). Check-ins are measured from this point.
+        </label>
+        <div className="flex gap-2">
+          <input
+            id={`${ids}-pin`}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="28.5355, 77.3910"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${ids}-err` : undefined}
+            className={cn(inputCls, 'h-9 flex-1 text-[13px]')}
+          />
+          <Button type="submit" variant="primary" disabled={busy || !input.trim()}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <MapPinned className="h-4 w-4" aria-hidden />}
+            Pin site
+          </Button>
+        </div>
+        {error ? (
+          <p id={`${ids}-err`} role="alert" className="text-[12px] text-red-600 dark:text-red-400">
+            {error}
+          </p>
+        ) : null}
+      </form>
+    </Section>
+  );
+}

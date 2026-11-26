@@ -140,6 +140,14 @@ const PERMISSIONS = {
   bulkParkProspects: ['owner', 'admin', 'manager'],
   /** Prospect Board: team-level reports (funnel, source quality). */
   viewProspectReports: ['owner', 'admin', 'manager'],
+  /** Field Meetings: see the team's day board (reps see only their own). */
+  viewFieldTeam: ['owner', 'admin', 'manager'],
+  /** Field Meetings: check-in radius, grace, MOM due and tracking hours. */
+  manageFieldSettings: ['owner', 'admin'],
+  /** Field Meetings: the check-in time window (opens before start / closes after end). */
+  manageFieldCheckinWindow: ['owner', 'admin', 'manager'],
+  /** Field Meetings: pin a company / meeting site. Reps can never set or move a site. */
+  pinFieldSites: ['owner', 'admin', 'manager'],
 } as const satisfies Record<string, readonly MembershipRole[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

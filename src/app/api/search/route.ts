@@ -4,7 +4,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 
 import { runWithTenantContext, tenantTransaction } from '@/lib/db-context';
 import { getCurrentMembership } from '@/lib/membership';
-import { personaOf } from '@/lib/personas';
+import { ownerOrUnassignedRestriction, personaOf } from '@/lib/personas';
 import type { SearchHit, SearchResponse } from '@/lib/search/types';
 import { requireTenant } from '@/lib/tenant';
 
@@ -53,11 +53,10 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   // RBAC: sales persona is scoped to records they own (or unassigned
   // ones, matching the list-page rules in listDeals/listContacts/etc).
-  // Admin + manager see the full tenant. Bind `mineOnlyId` and
-  // `mineOnly` so a single SQL shape covers both cases without
-  // branching the queries.
-  const mineOnly = persona === 'sales';
-  const mineOnlyId = mineOnly ? userId : null;
+  // Admin + manager see the full tenant (ownerOrUnassignedRestriction,
+  // shared with the list pages and the Field pickers). `mineOnlyId` is
+  // null for them so a single SQL shape covers both cases.
+  const mineOnlyId = ownerOrUnassignedRestriction(membership?.role ?? null, userId) ?? null;
   // Workflows are admin-only — never expose to non-admin personas.
   const seeWorkflows = persona === 'admin';
 

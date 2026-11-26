@@ -5,7 +5,7 @@ import { listContacts } from '@/lib/contacts/queries';
 import { listCustomFieldDefs } from '@/lib/custom-fields/queries';
 import { requireMembership } from '@/lib/membership';
 import { parseCursorParam, parsePageSize } from '@/lib/pagination/cursor';
-import { personaOf } from '@/lib/personas';
+import { ownerOrUnassignedRestriction } from '@/lib/personas';
 import { listTeammates } from '@/lib/teammates/queries';
 
 import { ContactsView } from './_components/contacts-view';
@@ -34,9 +34,8 @@ export default async function ContactsPage({
     const filters = parseContactFilters(sp);
 
     const membership = await requireMembership();
-    const persona = personaOf(membership.role);
     const restrictToOwnerOrUnassigned =
-      persona === 'sales' ? userId : undefined;
+      ownerOrUnassignedRestriction(membership.role, userId);
 
     const [page, companyOptions, teammates, customFieldDefs] = await Promise.all([
       listContacts(tenant.id, {

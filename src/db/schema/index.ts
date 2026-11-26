@@ -65,3 +65,4 @@ export * from './telephony';
 export * from './ai-suggestions';
 export * from './quotes';
 export * from './prospects';
+export * from './field';

@@ -23,7 +23,13 @@ import {
   runWithTenantContext,
   tenantTransaction,
 } from '@/lib/db-context';
+import { getMapsProvider } from '@/lib/field/maps';
+import { pinCompanySite, propagateCompanyPoint } from '@/lib/field/meetings';
+import { companyGeocodeLine, companySiteFromPre, fetchPre, lookupPre, resolvePin } from '@/lib/field/site';
+import { FieldError, type LatLng } from '@/lib/field/types';
 import { sendWorkflowEvent } from '@/lib/inngest/send';
+import { captureError } from '@/lib/observability';
+import { can } from '@/lib/rbac';
 import { serializeCompany } from '@/lib/realtime/payloads';
 import { publishRealtimeEvent } from '@/lib/realtime/publisher';
 import { normalizeCompanyName } from '@/lib/dedup/normalize';
@@ -51,7 +57,8 @@ export async function findSimilarCompaniesAction(
 }
 
 export type CreateCompanyResult =
-  | { ok: true; company: Company }
+  /** `warning`: saved, but a follow-up step (e.g. the site pin) did not apply. */
+  | { ok: true; company: Company; warning?: string }
   | { ok: false; message: string; fieldErrors?: Record<string, string[]> };
 
 export type UpdateCompanyResult = CreateCompanyResult;
@@ -59,6 +66,65 @@ export type UpdateCompanyResult = CreateCompanyResult;
 export type SimpleResult =
   | { ok: true }
   | { ok: false; message: string };
+
+/* -------- SITE FIELDS (create + edit) -------- */
+
+const ADDRESS_FIELDS = ['address', 'city', 'state', 'postalCode'] as const;
+type AddressField = (typeof ADDRESS_FIELDS)[number];
+
+type SiteForm =
+  | {
+      ok: true;
+      /** Only the address fields the form sent (blank = null). */
+      address: Partial<Record<AddressField, string | null>>;
+      /** Site pin text; always '' without `pinFieldSites`, so a rep's crafted field is ignored. */
+      pinText: string;
+      /** undefined = not sent or not allowed; null = clear to the workspace default. */
+      radius: number | null | undefined;
+    }
+  | { ok: false; result: { ok: false; message: string; fieldErrors: Record<string, string[]> } };
+
+/**
+ * Field Meetings site block from the company form (create and edit): address
+ * for anyone who can create / edit companies, site pin and check-in radius for
+ * `pinFieldSites` only. The form only sends these when it shows them.
+ */
+function readSiteForm(formData: FormData, role: Parameters<typeof can>[0]): SiteForm {
+  const textOrNull = (key: string, max: number): string | null | undefined => {
+    if (!formData.has(key)) return undefined;
+    const v = String(formData.get(key) ?? '').trim();
+    return v ? v.slice(0, max) : null;
+  };
+  const address: Partial<Record<AddressField, string | null>> = {};
+  for (const f of ADDRESS_FIELDS) {
+    const v = textOrNull(f, f === 'address' ? 500 : 120);
+    if (v !== undefined) address[f] = v;
+  }
+  const canPin = can(role, 'pinFieldSites');
+  const pinText = canPin ? String(formData.get('sitePin') ?? '').trim() : '';
+  let radius: number | null | undefined;
+  if (canPin && formData.has('checkinRadiusM')) {
+    const raw = String(formData.get('checkinRadiusM') ?? '').trim();
+    radius = raw === '' ? null : Number(raw);
+    if (radius !== null && (!Number.isInteger(radius) || radius < 50 || radius > 5000)) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          message: 'Please fix the highlighted fields.',
+          fieldErrors: { checkinRadiusM: ['Whole number from 50 to 5000 metres, or blank for the workspace default.'] },
+        },
+      };
+    }
+  }
+  return { ok: true, address, pinText, radius };
+}
+
+const pinError = (e: FieldError) => ({
+  ok: false as const,
+  message: 'Please fix the highlighted fields.',
+  fieldErrors: { sitePin: [e.message] },
+});
 
 /* -------- CREATE -------- */
 
@@ -101,7 +167,29 @@ export async function createCompanyAction(
       // past a surfaced duplicate warning (Module 5).
       const dedupOverride = formData.get('dedupOverride') === '1';
 
-      const created = await tenantTransaction(async (tx) => {
+      // Field Meetings site: every network call (pin short link, geocode) runs
+      // before the write transaction. A pin wins over the address lookup.
+      const siteForm = readSiteForm(formData, membership.role);
+      if (!siteForm.ok) return siteForm.result;
+      const maps = getMapsProvider();
+      let pinPoint: LatLng | null = null;
+      if (siteForm.pinText) {
+        try {
+          pinPoint = await resolvePin(siteForm.pinText, maps);
+        } catch (e) {
+          if (e instanceof FieldError) return pinError(e);
+          throw e;
+        }
+      }
+      const a = siteForm.address;
+      const target = pinPoint
+        ? null
+        : companyGeocodeLine({ address: a.address ?? null, city: a.city ?? null, state: a.state ?? null, postalCode: a.postalCode ?? null });
+      const cached = target ? await tenantTransaction((tx) => lookupPre(tx, tenant.id, target)) : null;
+      const pre = await fetchPre(target, cached, maps);
+
+      const inserted = await tenantTransaction(async (tx) => {
+        const site = target ? await companySiteFromPre(tx, tenant.id, target, pre, maps.name) : {};
         const [row] = await tx
           .insert(companies)
           .values({
@@ -114,6 +202,9 @@ export async function createCompanyAction(
             customFields: cf.values,
             normalizedName: normalizeCompanyName(parsed.data.name),
             dedupOverride,
+            ...siteForm.address,
+            ...site,
+            ...(siteForm.radius !== undefined && !pinPoint ? { checkinRadiusM: siteForm.radius } : {}),
           })
           .returning();
         if (!row) return null;
@@ -143,7 +234,27 @@ export async function createCompanyAction(
         return row;
       });
 
-      if (!created) return { ok: false, message: 'Failed to create company.' };
+      if (!inserted) return { ok: false, message: 'Failed to create company.' };
+
+      // The pin (already resolved to a point, so no network here) and its radius
+      // go through the one company-pin path once the company exists.
+      // The company is already committed: a pin failure must not lose the
+      // follow-up events or invite a duplicate retry, so it becomes a warning.
+      let created = inserted;
+      let warning: string | undefined;
+      if (pinPoint) {
+        try {
+          created = await pinCompanySite(
+            { tenantId: tenant.id, userId: membership.userId, role: membership.role },
+            inserted.id,
+            `${pinPoint.lat}, ${pinPoint.lng}`,
+            siteForm.radius,
+          );
+        } catch (e) {
+          captureError(e, { category: 'companies.create_pin_failed', severity: 'medium' });
+          warning = "Company created, but the site pin couldn't be saved. Open it and pin the site again.";
+        }
+      }
 
       // Workflow events ship after commit. The mutation has already
       // succeeded; if the inngest send fails we log and move on (see
@@ -165,7 +276,7 @@ export async function createCompanyAction(
       revalidatePath('/dashboard/companies');
       revalidatePath('/dashboard/activity');
       revalidatePath('/dashboard');
-      return { ok: true, company: created };
+      return warning ? { ok: true, company: created, warning } : { ok: true, company: created };
     },
   );
 }
@@ -207,7 +318,58 @@ export async function updateCompanyAction(
         };
       }
 
+      const siteForm = readSiteForm(formData, membership.role);
+      if (!siteForm.ok) return siteForm.result;
+      const { address: addressIn, pinText, radius } = siteForm;
+
+      // 1. Pin first (network for short links happens inside, outside our write transaction).
+      //    A manual pin makes the address edit below keep its coordinates.
+      if (pinText) {
+        try {
+          await pinCompanySite(
+            { tenantId: tenant.id, userId: membership.userId, role: membership.role },
+            parsed.data.id,
+            pinText,
+            radius,
+          );
+        } catch (e) {
+          if (e instanceof FieldError) return pinError(e);
+          throw e;
+        }
+      }
+
+      // 2. Plan the geocode (read tx -> network -> write tx), never a network call under the write.
+      const maps = getMapsProvider();
+      const plan = await tenantTransaction(async (tx) => {
+        const [cur] = await tx
+          .select()
+          .from(companies)
+          .where(and(eq(companies.id, parsed.data.id), eq(companies.tenantId, tenant.id), isNull(companies.deletedAt)))
+          .limit(1);
+        if (!cur) return null;
+        const next = {
+          address: addressIn.address !== undefined ? addressIn.address : cur.address,
+          city: addressIn.city !== undefined ? addressIn.city : cur.city,
+          state: addressIn.state !== undefined ? addressIn.state : cur.state,
+          postalCode: addressIn.postalCode !== undefined ? addressIn.postalCode : cur.postalCode,
+        };
+        const changed = ADDRESS_FIELDS.some((f) => addressIn[f] !== undefined && addressIn[f] !== cur[f]);
+        // Re-locate on an address change, and retry companies that still have no point
+        // (e.g. saved before a MAPS_API_KEY existed). Manual pins are never overwritten.
+        const regeocode = cur.geocodeStatus !== 'manual' && (changed || (cur.lat === null && companyGeocodeLine(next) !== null));
+        const target = regeocode ? companyGeocodeLine(next) : null;
+        // Addresses that company meetings may carry when they inherited it (old line, old street).
+        const prevAddresses = [companyGeocodeLine(cur), cur.address];
+        return { next, regeocode, target, prevAddresses, cached: await lookupPre(tx, tenant.id, target) };
+      });
+      if (!plan) return { ok: false, message: 'Company not found in this tenant.' };
+      const pre = await fetchPre(plan.target, plan.cached, maps);
+
       const updated = await tenantTransaction(async (tx) => {
+        const site: Partial<typeof companies.$inferInsert> = { ...plan.next };
+        // A null target (address cleared) leaves no point.
+        if (plan.regeocode) Object.assign(site, await companySiteFromPre(tx, tenant.id, plan.target, pre, maps.name));
+        if (radius !== undefined && !pinText) site.checkinRadiusM = radius;
         const [row] = await tx
           .update(companies)
           .set({
@@ -216,6 +378,7 @@ export async function updateCompanyAction(
             industry: parsed.data.industry,
             updatedBy: membership.userId,
             customFields: cf.values,
+            ...site,
           })
           .where(
             and(
@@ -226,6 +389,16 @@ export async function updateCompanyAction(
           )
           .returning();
         if (!row) return null;
+        // A fresh (non-manual) point reaches the company's not-started meetings that have no site yet.
+        if (plan.regeocode && row.lat !== null && row.lng !== null && row.geocodeStatus === 'ok') {
+          await propagateCompanyPoint(
+            tx,
+            tenant.id,
+            { ...row, lat: row.lat, lng: row.lng },
+            [...plan.prevAddresses, companyGeocodeLine(row), row.address],
+            new Date(),
+          );
+        }
         await recordActivity(tx, {
           tenantId: tenant.id,
           actorUserId: membership.userId,

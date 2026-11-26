@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 
 import type { Notification } from '@/db/schema';
+import type { Persona } from '@/lib/personas';
 import { useRealtimeEvents } from '@/hooks/use-realtime-events';
 import { cn } from '@/lib/utils';
 
@@ -57,6 +58,7 @@ const TYPE_ICON: Record<string, LucideIcon> = {
   call_missed: PhoneMissed,
   prospect_claim_assigned: UserCog,
   prospect_claim_expired: Bell,
+  field_meeting_at_risk: Bell,
 };
 
 const TYPE_TINT: Record<string, string> = {
@@ -74,9 +76,15 @@ const TYPE_TINT: Record<string, string> = {
   call_missed: 'text-rose-500',
   prospect_claim_assigned: 'text-blue-500',
   prospect_claim_expired: 'text-amber-500',
+  field_meeting_at_risk: 'text-amber-500',
 };
 
-function notificationHref(n: NotificationItem): string | null {
+/**
+ * Meetings: reps (sales persona) cannot open the manager's Field day page, so
+ * their links go to My day; managers/admins go to Field day. Unknown persona
+ * falls back to My day, which every persona can open.
+ */
+function notificationHref(n: NotificationItem, persona: Persona | null): string | null {
   if (!n.entityType || !n.entityId) return null;
   switch (n.entityType) {
     case 'deal':
@@ -89,6 +97,10 @@ function notificationHref(n: NotificationItem): string | null {
       return `/dashboard/contacts`;
     case 'prospect':
       return `/dashboard/prospects?p=${n.entityId}`;
+    case 'meeting':
+      return persona === 'manager' || persona === 'admin'
+        ? `/dashboard/field/today?m=${n.entityId}`
+        : `/dashboard/field/my-day?m=${n.entityId}`;
     case 'workflow':
       return `/dashboard/workflows`;
     default:
@@ -100,10 +112,13 @@ export function NotificationBell({
   tenantId,
   currentUserId,
   initialNotifications,
+  persona = null,
 }: {
   tenantId: string;
   currentUserId: string;
   initialNotifications: Notification[];
+  /** Viewer's persona, for role-dependent links (meetings). */
+  persona?: Persona | null;
 }) {
   const [items, setItems] = useState<NotificationItem[]>(() =>
     initialNotifications.map((n) => ({
@@ -243,8 +258,11 @@ export function NotificationBell({
               </div>
             ) : (
               <ul className="flex flex-col">
-                {renderGroupedItems(items, handleMarkRead, () =>
-                  setOpen(false),
+                {renderGroupedItems(
+                  items,
+                  handleMarkRead,
+                  () => setOpen(false),
+                  persona,
                 )}
               </ul>
             )}
@@ -292,6 +310,7 @@ function renderGroupedItems(
   items: NotificationItem[],
   onMarkRead: (id: string) => void,
   closeDropdown: () => void,
+  persona: Persona | null,
 ): React.ReactNode {
   // Two-level grouping: unread first (with an "Unread" pseudo-bucket),
   // then read items grouped by recency bucket. Within each group the
@@ -321,7 +340,7 @@ function renderGroupedItems(
       </li>,
     );
     for (const n of unread) {
-      nodes.push(renderNotificationRow(n, onMarkRead, closeDropdown));
+      nodes.push(renderNotificationRow(n, onMarkRead, closeDropdown, persona));
     }
   }
 
@@ -337,7 +356,7 @@ function renderGroupedItems(
       </li>,
     );
     for (const n of rows) {
-      nodes.push(renderNotificationRow(n, onMarkRead, closeDropdown));
+      nodes.push(renderNotificationRow(n, onMarkRead, closeDropdown, persona));
     }
   }
 
@@ -348,10 +367,11 @@ function renderNotificationRow(
   n: NotificationItem,
   onMarkRead: (id: string) => void,
   closeDropdown: () => void,
+  persona: Persona | null,
 ): React.ReactNode {
   const Icon = TYPE_ICON[n.type] ?? Bell;
   const tint = TYPE_TINT[n.type] ?? 'text-slate-500';
-  const href = notificationHref(n);
+  const href = notificationHref(n, persona);
   const content = (
     <>
       <Icon

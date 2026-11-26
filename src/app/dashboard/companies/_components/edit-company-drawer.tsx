@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 
 import { CustomFieldInputs } from '../../_components/custom-field-inputs';
 import { Drawer } from '../../_components/drawer';
+import { Field, SiteAddressFieldset } from './site-address-fieldset';
 
 function customErrors(fieldErrors: Record<string, string[]>): Record<string, string> {
   return Object.fromEntries(
@@ -29,6 +30,8 @@ type Props = {
   error: string | null;
   fieldErrors: Record<string, string[]>;
   canDelete: boolean;
+  /** `pinFieldSites`: shows the site pin and check-in radius inputs. */
+  canPin?: boolean;
 };
 
 export function EditCompanyDrawer({
@@ -43,6 +46,7 @@ export function EditCompanyDrawer({
   error,
   fieldErrors,
   canDelete,
+  canPin = false,
 }: Props) {
   // See edit-deal-drawer.tsx — uncontrolled inputs only pick up
   // `defaultValue` on first mount, so we remount the form whenever
@@ -136,6 +140,8 @@ export function EditCompanyDrawer({
           errors={fieldErrors.industry}
         />
 
+        <SiteAddressFieldset company={company} canPin={canPin} fieldErrors={fieldErrors} />
+
         <CustomFieldInputs
           defs={customFieldDefs}
           values={(company?.customFields ?? {}) as CustomValues}
@@ -152,49 +158,5 @@ export function EditCompanyDrawer({
         ) : null}
       </form>
     </Drawer>
-  );
-}
-
-type FieldProps = {
-  name: string;
-  label: string;
-  defaultValue: string;
-  required?: boolean;
-  errors?: string[];
-};
-
-function Field({ name, label, defaultValue, required, errors }: FieldProps) {
-  const hasError = Boolean(errors?.length);
-  const errorId = hasError ? `${name}-error` : undefined;
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={name} className="text-xs font-medium text-slate-700">
-        {label}
-        {required ? <span className="ml-0.5 text-red-500">*</span> : null}
-      </label>
-      <input
-        id={name}
-        name={name}
-        type="text"
-        defaultValue={defaultValue}
-        aria-invalid={hasError || undefined}
-        aria-describedby={errorId}
-        className={cn(
-          'rounded-md border bg-white px-3 py-1.5 text-sm shadow-sm transition',
-          'placeholder:text-slate-400 focus:outline-none focus:ring-2',
-          hasError
-            ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-            : 'border-slate-200 focus:border-indigo-500 focus:ring-indigo-500/20',
-          '',
-          hasError ? '' : '',
-        )}
-      />
-      {hasError ? (
-        <p id={errorId} className="text-xs text-red-600">
-          {errors!.join(' ')}
-        </p>
-      ) : null}
-    </div>
   );
 }

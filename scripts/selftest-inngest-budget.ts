@@ -66,10 +66,13 @@ async function main() {
   const leads = wf('lead-capture.ts');
   const reports = wf('reports.ts');
   const gmail = wf('gmail-sync.ts');
+  const field = wf('field.ts');
   eq('cron: dialer tick every 15 min', cronOf(telephony, 'campaign-dialer-tick'), '*/15 * * * *');
   eq('cron: SLA watchdog every 10 min', cronOf(leads, 'lead-sla-watchdog'), '*/10 * * * *');
   eq('cron: unassigned retry every 15 min', cronOf(leads, 'lead-unassigned-retry'), '*/15 * * * *');
   eq('cron: report rollup every 15 min', cronOf(reports, 'report-rollup-recent'), '*/15 * * * *');
+  eq('cron: field risk scan every 5 min', cronOf(field, 'field-risk-scan'), '*/5 * * * *');
+  check('field risk scan: one step, no per-tenant steps', (field.match(/step\.run\(/g) ?? []).length === 1);
   eq('cron: gmail sync every 15 min', /cron\('([^']+)'\)/.exec(gmail)?.[1], '*/15 * * * *');
 
   // No per-tenant step ids left in the merged crons (each would bill one execution per tenant per run).
