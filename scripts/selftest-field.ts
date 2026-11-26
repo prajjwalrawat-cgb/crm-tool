@@ -246,29 +246,57 @@ async function main() {
   // ---- maps providers (no network: fetch is injected) ----
   {
     const urls: string[] = [];
-    const fakeFetch = async (u: string) => {
+    const inits: RequestInit[] = [];
+    const fakeFetch = async (u: string, init?: RequestInit) => {
       urls.push(u);
-      return new Response(
-        JSON.stringify({
-          status: 'OK',
-          rows: [{ elements: [{ status: 'OK', duration: { value: 600 }, duration_in_traffic: { value: 1500 } }] }],
-        }),
-        { status: 200 },
-      );
+      inits.push(init ?? {});
+      return new Response(JSON.stringify({ routes: [{ duration: '1500s' }] }), { status: 200 });
     };
     const g = new GoogleProvider('KEY123', fakeFetch);
     const depart = new Date(Date.now() + 3600_000);
     const r = await g.driveMinutes(noida, cyber, depart);
-    const unix = Math.floor(depart.getTime() / 1000);
+    const body = JSON.parse(String(inits[0]?.body ?? '{}')) as {
+      origin?: { location?: { latLng?: { latitude: number; longitude: number } } };
+      destination?: { location?: { latLng?: { latitude: number; longitude: number } } };
+      travelMode?: string;
+      routingPreference?: string;
+      departureTime?: string;
+    };
+    const headers = new Headers(inits[0]?.headers);
     check(
-      'google provider builds Distance Matrix URL with departure_time',
-      urls[0]!.includes('distancematrix') &&
-        urls[0]!.includes(`departure_time=${unix}`) &&
-        urls[0]!.includes('key=KEY123') &&
-        urls[0]!.includes('traffic_model=best_guess'),
-      urls[0],
+      'google drive calls Routes API computeRoutes with traffic and departure time',
+      urls[0] === 'https://routes.googleapis.com/directions/v2:computeRoutes' &&
+        inits[0]?.method === 'POST' &&
+        headers.get('X-Goog-Api-Key') === 'KEY123' &&
+        headers.get('X-Goog-FieldMask') === 'routes.duration' &&
+        !urls[0]!.includes('KEY123') &&
+        body.travelMode === 'DRIVE' &&
+        body.routingPreference === 'TRAFFIC_AWARE' &&
+        body.departureTime === new Date(Math.floor(depart.getTime() / 1000) * 1000).toISOString() &&
+        body.origin?.location?.latLng?.latitude === noida.lat &&
+        body.destination?.location?.latLng?.longitude === cyber.lng,
+      { url: urls[0], body },
     );
-    check('google drive parses duration_in_traffic', r.minutes === 25 && r.estimate === false, r);
+    check('google drive parses Routes duration', r.minutes === 25 && r.estimate === false, r);
+
+    // A past departure is moved to just ahead of now (Routes rejects past times for traffic).
+    const past = new GoogleProvider('K', async (u: string, init?: RequestInit) => {
+      urls.push(u);
+      inits.push(init ?? {});
+      return new Response(JSON.stringify({ routes: [{ duration: '600s' }] }), { status: 200 });
+    });
+    const before = Date.now();
+    await past.driveMinutes(noida, cyber, new Date(before - 3600_000));
+    const pastDep = Date.parse((JSON.parse(String(inits[1]?.body)) as { departureTime: string }).departureTime);
+    check('google drive moves a past departure to the near future', pastDep > before, { pastDep, before });
+
+    // No route / denied (e.g. API not enabled) → estimate, never a fake real time.
+    const gnone = new GoogleProvider('K', async () => new Response(JSON.stringify({}), { status: 200 }));
+    const rn = await gnone.driveMinutes(noida, cyber, depart);
+    check('google drive with no route falls back to estimate', rn.estimate === true && rn.minutes > 0, rn);
+    const gdenied = new GoogleProvider('K', async () => new Response(JSON.stringify({ error: { code: 403 } }), { status: 403 }));
+    const rd = await gdenied.driveMinutes(noida, cyber, depart);
+    check('google drive denied falls back to estimate', rd.estimate === true, rd);
 
     const gfail = new GoogleProvider('K', async () => new Response('x', { status: 500 }));
     const rf = await gfail.driveMinutes(noida, cyber, depart);
