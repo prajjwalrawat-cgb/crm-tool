@@ -75,7 +75,6 @@ export function listPickerOptions(actor: FieldActor, query: PickerQuery): Promis
   return asActor(actor, async () => {
     const q = (query.q ?? '').trim().slice(0, 100);
     const companyId = query.companyId && isUuid(query.companyId) ? query.companyId : null;
-    const t = actor.tenantId;
 
     const items = await tenantTransaction(async (tx): Promise<PickerChoice[]> => {
       if (query.kind === 'company') {
@@ -117,7 +116,8 @@ export function listPickerOptions(actor: FieldActor, query: PickerQuery): Promis
             company: companySiteCols(companies),
           })
           .from(contacts)
-          .leftJoin(companies, and(eq(companies.id, contacts.companyId), eq(companies.tenantId, t)))
+          // A joined record is returned only when the actor can see it (else null: the form skips the fill).
+          .leftJoin(companies, and(eq(companies.id, contacts.companyId), ...visibleCompanies(actor)))
           .where(and(...conds))
           .orderBy(desc(contacts.updatedAt), desc(contacts.id))
           .limit(PICKER_LIMIT);
@@ -152,8 +152,9 @@ export function listPickerOptions(actor: FieldActor, query: PickerQuery): Promis
           contactCompanyId: contacts.companyId,
         })
         .from(deals)
-        .leftJoin(companies, and(eq(companies.id, deals.companyId), eq(companies.tenantId, t)))
-        .leftJoin(contacts, and(eq(contacts.id, deals.contactId), eq(contacts.tenantId, t), isNull(contacts.deletedAt)))
+        // Joined company / contact only when visible to the actor (checkLinks would reject them otherwise).
+        .leftJoin(companies, and(eq(companies.id, deals.companyId), ...visibleCompanies(actor)))
+        .leftJoin(contacts, and(eq(contacts.id, deals.contactId), ...visibleContacts(actor)))
         .where(and(...conds))
         .orderBy(desc(deals.updatedAt), desc(deals.id))
         .limit(PICKER_LIMIT);

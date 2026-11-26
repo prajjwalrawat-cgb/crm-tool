@@ -26,7 +26,7 @@ import { MIN_BLOCK_PCT, blockColor, blockGeometry, layoutLane, type LaneItem } f
 import { checkinWindow, checkinWindowState } from '../src/lib/field/checkin-window';
 import { checkinGateLabel } from '../src/app/dashboard/field/_lib/checkin-gate';
 import { applyPick, sameAsCompany, siteCheck, toPickerCompany, type Links, type PickerChoice } from '../src/lib/field/picker-link';
-import { companyGeocodeLine, isCompanyAddress } from '../src/lib/field/site-line';
+import { companyGeocodeLine, isCompanyAddress, normAddr } from '../src/lib/field/site-line';
 import { lateBy } from '../src/lib/field/late';
 import { canCancelMeeting, canEditMeeting, editErrorText, editGates, meetingPatch, type MeetingFormValues } from '../src/app/dashboard/field/_lib/meeting-edit';
 
@@ -618,6 +618,20 @@ async function main() {
         isCompanyAddress('Acme Rd', block) &&
         !isCompanyAddress('Acme Rd, Gate 2', block) &&
         !isCompanyAddress('x', null),
+    );
+    check(
+      'normAddr: case, inner whitespace, spacing around commas',
+      normAddr('  Pin  Rd ,Noida,  UP ') === 'pin rd, noida, up' && normAddr(null) === '' && normAddr('A\n B') === 'a b',
+      normAddr('  Pin  Rd ,Noida,  UP '),
+    );
+    check(
+      'isCompanyAddress / sameAsCompany ignore case and spacing (server and form agree)',
+      isCompanyAddress('acme rd ,  NOIDA, up, 201301', block) &&
+        isCompanyAddress('ACME  RD', block) &&
+        sameAsCompany('acme rd ,  NOIDA, up, 201301', A) &&
+        sameAsCompany('ACME  RD', A) &&
+        !sameAsCompany('Acme Rd 2', A) &&
+        !isCompanyAddress('Acme Rd 2', block),
     );
     check('sameAsCompany mirrors isCompanyAddress', sameAsCompany(line, A) && sameAsCompany('', A) && !sameAsCompany('Gate 2', A));
     check('siteCheck pinned company', siteCheck(line, A).text === 'Checked against: company site (pinned)', siteCheck(line, A));

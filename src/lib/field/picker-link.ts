@@ -1,6 +1,6 @@
 import type { GeocodeStatus } from '@/db/schema/enums';
 
-import { companyGeocodeLine } from './site-line';
+import { companyGeocodeLine, normAddr } from './site-line';
 
 /**
  * Pure, client-safe: the shapes /api/field/pickers returns and how picking a
@@ -127,8 +127,8 @@ export function siteCheck(address: string, company: PickerCompany | null): SiteC
 
 /** Same rule as isCompanyAddress, over a PickerCompany (blank, full line, or street line). */
 export function sameAsCompany(address: string, company: Pick<PickerCompany, 'siteLine' | 'street'>): boolean {
-  const a = address.trim();
-  return a === '' || a === company.siteLine || a === (company.street?.trim() ?? null);
+  const a = normAddr(address);
+  return a === '' || a === normAddr(company.siteLine) || (!!company.street?.trim() && a === normAddr(company.street));
 }
 
 /** A PickerCompany from a company row's address block and point (server or day view). */

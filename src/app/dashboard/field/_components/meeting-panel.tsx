@@ -211,7 +211,9 @@ export function MeetingPanel({
                   {m.address?.trim() || 'No address'}
                   {m.lat !== null && m.lng !== null ? (
                     <span className="block text-[12px] text-slate-500 dark:text-[#A1A1AA]">
-                      {`Pinned at ${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}${m.geocodeStatus === 'manual' ? ' (set by hand)' : ''}`}
+                      {`Pinned at ${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}${
+                        m.geocodeStatus !== 'manual' ? '' : m.siteSource === 'company' ? ' (company pin)' : ' (set by hand)'
+                      }`}
                     </span>
                   ) : null}
                   {siteMissing ? (

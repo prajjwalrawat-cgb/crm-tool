@@ -369,7 +369,9 @@ export function updateMeeting(
     const plan = await tenantTransaction(async (tx) => {
       const cur = await readMeeting(tx, actor, id);
       if (!canSeeOwner(actor, scope, cur.ownerId)) throw new FieldError('not_found', 'Meeting not found');
-      const { resite } = buildUpdate(cur, patch);
+      const { set, resite } = buildUpdate(cur, patch);
+      // Fail an invisible link before any Maps call for a new company's line.
+      await checkLinks(tx, actor, { dealId: set.dealId, contactId: set.contactId, companyId: set.companyId });
       if (!resite) return { target: null, cached: null };
       const input = await resiteInput(tx, actor.tenantId, cur, resite);
       const target = geocodeTarget(input.address, input.company);
@@ -385,7 +387,13 @@ export function updateMeeting(
       await checkLinks(tx, actor, { dealId: set.dealId, contactId: set.contactId, companyId: set.companyId });
       if (resite) {
         const input = await resiteInput(tx, actor.tenantId, cur, resite);
-        Object.assign(set, siteColumns(actor, await siteFor(tx, actor.tenantId, input.address, input.company, pre, maps.name, now)));
+        const site = siteColumns(actor, await siteFor(tx, actor.tenantId, input.address, input.company, pre, maps.name, now));
+        // Only a typed address changes who entered it: a company-only re-site that keeps the
+        // meeting's own address keeps its marker, whoever made the edit.
+        if (resite.address === undefined && site.siteSource === 'address' && cur.siteSource === 'address') {
+          site.siteRepEntered = cur.siteRepEntered;
+        }
+        Object.assign(set, site);
       }
       if (Object.keys(set).length === 0) return cur;
       const [row] = await setMeeting(tx, cur, { ...set, updatedAt: now() });

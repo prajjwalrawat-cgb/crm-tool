@@ -24,13 +24,24 @@ export function companyGeocodeLine(c: CompanyAddress | null | undefined): string
 }
 
 /**
+ * The form used to compare addresses: lower-case, internal whitespace collapsed,
+ * one ", " between parts. "Pin Rd ,  Noida" and "pin rd, noida" are the same.
+ */
+export function normAddr(a: string | null | undefined): string {
+  return (a ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .trim();
+}
+
+/**
  * The meeting's address is the company's own: blank, the full company line, or
- * the street line alone (older rows). Compared after trimming, like the service's
- * optText. False when there is no company.
+ * the street line alone (older rows), compared with normAddr. False when there is no company.
  */
 export function isCompanyAddress(address: string | null | undefined, company: CompanyAddress | null | undefined): boolean {
   if (!company) return false;
-  const a = address?.trim() ?? '';
+  const a = normAddr(address);
   if (!a) return true;
-  return a === companyGeocodeLine(company) || a === company.address?.trim();
+  return a === normAddr(companyGeocodeLine(company)) || (!!company.address?.trim() && a === normAddr(company.address));
 }

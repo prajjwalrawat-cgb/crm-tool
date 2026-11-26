@@ -5,7 +5,7 @@ import { useId, useState } from 'react';
 
 import type { MeetingStatus } from '@/db/schema/enums';
 import type { DayMeeting } from '@/lib/field/day';
-import { applyPick, siteCheck, type Links, type PickerKind } from '@/lib/field/picker-link';
+import { applyPick, sameAsCompany, siteCheck, type Links, type PickerKind } from '@/lib/field/picker-link';
 import { cn } from '@/lib/utils';
 
 import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
@@ -127,8 +127,12 @@ export function MeetingForm({
     const r = applyPick(links, kind, item);
     setLinks(r.links);
     setLinkNotice(r.notice);
-    if (r.companyChanged && gates.structural && r.links.company?.company) {
-      setAddress(r.links.company.company.siteLine ?? '');
+    if (r.companyChanged && gates.structural) {
+      const next = r.links.company?.company;
+      const prev = links.company?.company;
+      if (next) setAddress(next.siteLine ?? '');
+      // Company cleared: an address that was only the old company's line goes with it.
+      else if (prev && address.trim() && sameAsCompany(address, prev)) setAddress('');
     }
   }
 

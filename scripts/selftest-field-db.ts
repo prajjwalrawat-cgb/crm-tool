@@ -731,6 +731,44 @@ async function main() {
       );
       check('pickers: q escapes LIKE wildcards', (await PK.listPickerOptions(m, { kind: 'company', q: '%' })).items.length === 0);
 
+      const linkErr0 = async (p: Promise<unknown>) => {
+        const e = await err(p);
+        return e ? `${e.code}:${e.message}` : 'ok';
+      };
+      // A visible deal on an invisible company / contact: the joined rows are not returned.
+      const [dCross] = await db
+        .insert(s.deals)
+        .values({ tenantId: A, name: 'ZZ Pick deal cross', amountMinor: 100, currency: 'INR', ownerId: U.r1, companyId: own2!.id, contactId: kOther!.id })
+        .returning();
+      const cross = (await PK.listPickerOptions(r1, { kind: 'deal', q: 'ZZ Pick deal cross' })).items[0];
+      check(
+        "pickers: own deal on another rep's company / contact → no company or contact in the row",
+        cross?.id === dCross!.id && cross.company === null && cross.contact === null,
+        cross,
+      );
+      const crossMgr = (await PK.listPickerOptions(m, { kind: 'deal', q: 'ZZ Pick deal cross' })).items[0];
+      check('pickers: manager sees the deal with its company and contact', crossMgr?.company?.id === own2!.id && crossMgr.contact?.id === kOther!.id, crossMgr);
+      const crossMtg = await M.createMeeting(
+        r1,
+        { title: 'ZZ cross deal', type: 'physical', startAt: hours(45), endAt: hours(45.5), dealId: dCross!.id },
+        deps,
+      );
+      check('links: creating with that deal (no company) succeeds', crossMtg.dealId === dCross!.id && crossMtg.companyId === null, crossMtg);
+      const [kMerged] = await db
+        .insert(s.contacts)
+        .values({ tenantId: A, firstName: 'ZZ Pick', lastName: 'Merged', companyId: open1!.id, mergedIntoId: kOpenOther!.id })
+        .returning();
+      check('pickers: merged contacts are not listed', !ids(await PK.listPickerOptions(m, { kind: 'contact', q: 'ZZ Pick' })).includes(kMerged!.id));
+      const geoCount = { n: 0 };
+      const countingMaps = fake({ geocode: async () => (geoCount.n++, { status: 'ok' as const, point: { lat: 1, lng: 1 } }) });
+      const okMtg = await M.createMeeting(r1, { title: 'ZZ plan links', type: 'physical', startAt: hours(46), endAt: hours(46.5), address: 'Geo Rd' }, deps);
+      const before = geoCount.n;
+      const planErr = await linkErr0(M.updateMeeting(r1, okMtg.id, { companyId: own2!.id, address: null }, { maps: countingMaps, now: () => fixedNow }));
+      check(
+        'links: an invisible company in an edit fails before any geocode',
+        planErr === 'validation:That company is not available.' && geoCount.n === before,
+        { planErr, geo: geoCount.n - before },
+      );
       // The service's link check applies the same visibility as the pickers.
       const linkErr = async (p: Promise<unknown>) => {
         const e = await err(p);
@@ -819,6 +857,31 @@ async function main() {
       );
       const back = await M.updateMeeting(r1, inh.id, { address: line }, noKey);
       check('restoring the company line uses the company site again', back.siteSource === 'company' && back.lat === 28.44 && !back.siteRepEntered, back);
+      // A company-only edit keeps the marker of the typed address it keeps.
+      const repTyped = await M.createMeeting(
+        r1,
+        { title: 'ZZ rep typed', type: 'physical', startAt: hours(34), endAt: hours(34.5), companyId: pinCo!.id, address: 'Gate 7, Sector 63' },
+        noKey,
+      );
+      const mgrCoOnly = await M.updateMeeting(m, repTyped.id, { companyId: siteCo!.id }, noKey);
+      check(
+        'manager changing only the company of a rep-typed address → still rep-entered',
+        mgrCoOnly.siteSource === 'address' && mgrCoOnly.siteRepEntered === true && mgrCoOnly.address === 'Gate 7, Sector 63' && mgrCoOnly.companyId === siteCo!.id,
+        mgrCoOnly,
+      );
+      const mgrTyped = await M.createMeeting(
+        m,
+        { title: 'ZZ mgr typed', type: 'physical', startAt: hours(35), endAt: hours(35.5), companyId: pinCo!.id, address: 'Gate 8, Sector 63', ownerId: U.r1 },
+        noKey,
+      );
+      const repCoOnly = await M.updateMeeting(r1, mgrTyped.id, { companyId: siteCo!.id }, noKey);
+      check(
+        'rep changing only the company of a manager-typed address → still not rep-entered',
+        repCoOnly.siteSource === 'address' && repCoOnly.siteRepEntered === false && repCoOnly.address === 'Gate 8, Sector 63',
+        repCoOnly,
+      );
+      const spaced = await M.updateMeeting(r1, repTyped.id, { address: 'site rd ,  NOIDA' }, noKey);
+      check('an address matching the company line up to case/spacing uses the company site', spaced.siteSource === 'company' && spaced.lat === S.lat && !spaced.siteRepEntered, spaced);
       const pinnedMtg = await M.pinMeetingSite(m, repOwn.id, '28.61, 77.21', deps);
       check('manager pin clears the marker (site_source pin)', pinnedMtg.siteSource === 'pin' && pinnedMtg.siteRepEntered === false, pinnedMtg);
       await M.pinCompanySite(m, pinCo!.id, '28.45, 77.45', undefined, deps);
