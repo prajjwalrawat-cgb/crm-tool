@@ -183,7 +183,7 @@ export function MeetingCard({
             <>
               Checked in {time(lastIn.capturedAt)}
               {!m.visitVerified && lastIn.overrideReason === 'site_not_geocoded'
-                ? ' · site not pinned'
+                ? " · site wasn't located at check-in"
                 : ` · ${visitVerificationSuffix(m, time)}`}
             </>
           ) : null}
