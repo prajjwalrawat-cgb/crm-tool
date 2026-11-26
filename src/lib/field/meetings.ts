@@ -40,6 +40,7 @@ import {
   type PreGeocode,
   type Site,
 } from './site';
+import { visibleCompanies, visibleContacts, visibleDeals } from './pickers';
 import { assertTransition } from './state-machine';
 import { FieldError, type FieldActor } from './types';
 
@@ -82,36 +83,46 @@ function requireTimes(startAt: unknown, endAt: unknown): { startAt: Date; endAt:
   return { startAt, endAt };
 }
 
-/** Each given link must exist in the tenant (RLS hides other tenants and deleted rows). */
+/**
+ * Each given link must be a record the actor can see: same rule as the meeting
+ * form pickers (visibleDeals / visibleCompanies / visibleContacts, i.e. the CRM's
+ * ownerOrUnassignedRestriction). A missing and an invisible id get the same
+ * answer, so the check never reveals that another rep's record exists.
+ */
 export async function checkLinks(
   tx: Tx,
-  tenantId: string,
+  actor: FieldActor,
   links: { dealId?: string | null; companyId?: string | null; contactId?: string | null },
 ): Promise<{ company: Company | null }> {
-  const bad = (what: string) => new FieldError('validation', `${what} not found`);
+  const bad = (what: string) => new FieldError('validation', `That ${what} is not available.`);
   if (links.dealId != null) {
-    if (!isUuid(links.dealId)) throw bad('Deal');
+    if (!isUuid(links.dealId)) throw bad('deal');
     const [d] = await tx
       .select({ id: deals.id })
       .from(deals)
-      .where(and(eq(deals.tenantId, tenantId), eq(deals.id, links.dealId)))
+      .where(and(...visibleDeals(actor), eq(deals.id, links.dealId)))
       .limit(1);
-    if (!d) throw bad('Deal');
+    if (!d) throw bad('deal');
   }
   if (links.contactId != null) {
-    if (!isUuid(links.contactId)) throw bad('Contact');
+    if (!isUuid(links.contactId)) throw bad('contact');
     const [c] = await tx
       .select({ id: contacts.id })
       .from(contacts)
-      .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, links.contactId)))
+      .where(and(...visibleContacts(actor), eq(contacts.id, links.contactId)))
       .limit(1);
-    if (!c) throw bad('Contact');
+    if (!c) throw bad('contact');
   }
   let company: Company | null = null;
   if (links.companyId != null) {
-    if (!isUuid(links.companyId)) throw bad('Company');
-    company = await loadCompany(tx, tenantId, links.companyId);
-    if (!company) throw bad('Company');
+    if (!isUuid(links.companyId)) throw bad('company');
+    const [c] = await tx
+      .select()
+      .from(companies)
+      .where(and(...visibleCompanies(actor), eq(companies.id, links.companyId)))
+      .limit(1);
+    if (!c) throw bad('company');
+    company = c;
   }
   return { company };
 }
@@ -164,7 +175,7 @@ export function createMeeting(actor: FieldActor, input: CreateMeetingInput, deps
     let pre: PreGeocode = null;
     if (type === 'physical') {
       const plan = await tenantTransaction(async (tx) => {
-        const { company } = await checkLinks(tx, actor.tenantId, input);
+        const { company } = await checkLinks(tx, actor, input);
         const target = geocodeTarget(address, company);
         return { target, cached: await lookupPre(tx, actor.tenantId, target) };
       });
@@ -172,7 +183,7 @@ export function createMeeting(actor: FieldActor, input: CreateMeetingInput, deps
     }
 
     return tenantTransaction(async (tx) => {
-      const { company } = await checkLinks(tx, actor.tenantId, input);
+      const { company } = await checkLinks(tx, actor, input);
       const site: Site =
         type === 'physical'
           ? await siteFor(tx, actor.tenantId, address, company, pre, maps.name, now)
@@ -371,7 +382,7 @@ export function updateMeeting(
       const { set, ownerChange, resite } = buildUpdate(cur, patch);
       if (ownerChange !== null) await assertCanActForTx(tx, actor, scope, ownerChange);
       // Only links being changed are validated; an untouched link never blocks an edit.
-      await checkLinks(tx, actor.tenantId, { dealId: set.dealId, contactId: set.contactId, companyId: set.companyId });
+      await checkLinks(tx, actor, { dealId: set.dealId, contactId: set.contactId, companyId: set.companyId });
       if (resite) {
         const input = await resiteInput(tx, actor.tenantId, cur, resite);
         Object.assign(set, siteColumns(actor, await siteFor(tx, actor.tenantId, input.address, input.company, pre, maps.name, now)));

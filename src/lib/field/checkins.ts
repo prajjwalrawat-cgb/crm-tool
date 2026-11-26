@@ -245,7 +245,7 @@ export function walkIn(actor: FieldActor, input: WalkInInput, deps?: FieldDeps):
     const maps = mapsOf(deps);
 
     return tenantTransaction(async (tx) => {
-      await checkLinks(tx, actor.tenantId, input);
+      await checkLinks(tx, actor, input);
       const address = await maps.reverseGeocode({ lat: p.lat, lng: p.lng });
       assertTransition('planned', 'checked_in', 'physical');
       const [meeting] = await tx

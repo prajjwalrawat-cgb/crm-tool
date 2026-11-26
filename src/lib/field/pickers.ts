@@ -22,6 +22,33 @@ import type { FieldActor } from './types';
 
 export const PICKER_LIMIT = 20;
 
+/**
+ * The records `actor` can see, per kind: the tenant's live (not deleted, not merged)
+ * rows, restricted by ownerOrUnassignedRestriction. One rule for the pickers and for
+ * the service's link check (checkLinks), so an id the picker never offers cannot be
+ * linked through a raw API call either.
+ */
+export function visibleDeals(actor: FieldActor): SQL[] {
+  const mine = ownerOrUnassignedRestriction(actor.role, actor.userId);
+  const conds: SQL[] = [eq(deals.tenantId, actor.tenantId), isNull(deals.deletedAt)];
+  if (mine) conds.push(or(eq(deals.ownerId, mine), isNull(deals.ownerId))!);
+  return conds;
+}
+
+export function visibleCompanies(actor: FieldActor): SQL[] {
+  const mine = ownerOrUnassignedRestriction(actor.role, actor.userId);
+  const conds: SQL[] = [eq(companies.tenantId, actor.tenantId), isNull(companies.deletedAt), isNull(companies.mergedIntoId)];
+  if (mine) conds.push(or(eq(companies.ownerId, mine), isNull(companies.ownerId))!);
+  return conds;
+}
+
+export function visibleContacts(actor: FieldActor): SQL[] {
+  const mine = ownerOrUnassignedRestriction(actor.role, actor.userId);
+  const conds: SQL[] = [eq(contacts.tenantId, actor.tenantId), isNull(contacts.deletedAt), isNull(contacts.mergedIntoId)];
+  if (mine) conds.push(or(eq(contacts.ownerId, mine), isNull(contacts.ownerId))!);
+  return conds;
+}
+
 export type PickerQuery = { kind: PickerKind; q?: string; companyId?: string | null };
 
 const pattern = (q: string) => `%${q.replace(/[\\%_]/g, '\\$&')}%`;
@@ -48,13 +75,11 @@ export function listPickerOptions(actor: FieldActor, query: PickerQuery): Promis
   return asActor(actor, async () => {
     const q = (query.q ?? '').trim().slice(0, 100);
     const companyId = query.companyId && isUuid(query.companyId) ? query.companyId : null;
-    const mine = ownerOrUnassignedRestriction(actor.role, actor.userId);
     const t = actor.tenantId;
 
     const items = await tenantTransaction(async (tx): Promise<PickerChoice[]> => {
       if (query.kind === 'company') {
-        const conds: SQL[] = [eq(companies.tenantId, t), isNull(companies.deletedAt), isNull(companies.mergedIntoId)];
-        if (mine) conds.push(or(eq(companies.ownerId, mine), isNull(companies.ownerId))!);
+        const conds = visibleCompanies(actor);
         if (q) conds.push(or(ilike(companies.name, pattern(q)), ilike(companies.domain, pattern(q)))!);
         const rows = await tx
           .select(companySiteCols(companies))
@@ -69,8 +94,7 @@ export function listPickerOptions(actor: FieldActor, query: PickerQuery): Promis
       }
 
       if (query.kind === 'contact') {
-        const conds: SQL[] = [eq(contacts.tenantId, t), isNull(contacts.deletedAt), isNull(contacts.mergedIntoId)];
-        if (mine) conds.push(or(eq(contacts.ownerId, mine), isNull(contacts.ownerId))!);
+        const conds = visibleContacts(actor);
         if (companyId) conds.push(eq(contacts.companyId, companyId));
         if (q) {
           const p = pattern(q);
@@ -109,8 +133,7 @@ export function listPickerOptions(actor: FieldActor, query: PickerQuery): Promis
         });
       }
 
-      const conds: SQL[] = [eq(deals.tenantId, t), isNull(deals.deletedAt)];
-      if (mine) conds.push(or(eq(deals.ownerId, mine), isNull(deals.ownerId))!);
+      const conds = visibleDeals(actor);
       if (companyId) conds.push(eq(deals.companyId, companyId));
       if (q) conds.push(ilike(deals.name, pattern(q)));
       const rows = await tx

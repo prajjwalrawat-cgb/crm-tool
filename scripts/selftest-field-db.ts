@@ -730,6 +730,39 @@ async function main() {
       },
       );
       check('pickers: q escapes LIKE wildcards', (await PK.listPickerOptions(m, { kind: 'company', q: '%' })).items.length === 0);
+
+      // The service's link check applies the same visibility as the pickers.
+      const linkErr = async (p: Promise<unknown>) => {
+        const e = await err(p);
+        return e ? `${e.code}:${e.message}` : 'ok';
+      };
+      const at = (h: number) => ({ title: 'ZZ link', type: 'physical' as const, startAt: hours(40 + h), endAt: hours(40.25 + h) });
+      check(
+        "links: rep linking another rep's deal → validation, no existence leak",
+        (await linkErr(M.createMeeting(r1, { ...at(0), dealId: dOther!.id }, deps))) === 'validation:That deal is not available.' &&
+          (await linkErr(M.createMeeting(r1, { ...at(0), dealId: '00000000-0000-4000-8000-000000000000' }, deps))) === 'validation:That deal is not available.',
+      );
+      check(
+        "links: rep linking another rep's company / contact → validation",
+        (await linkErr(M.createMeeting(r1, { ...at(0), companyId: own2!.id }, deps))) === 'validation:That company is not available.' &&
+          (await linkErr(M.createMeeting(r1, { ...at(0), contactId: kOther!.id }, deps))) === 'validation:That contact is not available.',
+      );
+      const okOwn = await M.createMeeting(r1, { ...at(1), dealId: dOwn!.id, companyId: own1!.id, contactId: kOwn!.id }, deps);
+      check('links: rep linking own deal / company / contact → ok', okOwn.dealId === dOwn!.id && okOwn.contactId === kOwn!.id);
+      const okOpen = await M.createMeeting(r1, { ...at(2), companyId: open1!.id, contactId: kOpenOther!.id }, deps);
+      check('links: rep linking unassigned company / contact → ok', okOpen.companyId === open1!.id);
+      check(
+        "links: rep editing to another rep's deal → validation",
+        (await linkErr(M.updateMeeting(r1, okOwn.id, { dealId: dOther!.id }, deps))) === 'validation:That deal is not available.',
+      );
+      check(
+        "links: rep walk-in with another rep's deal → validation",
+        (await linkErr(CI.walkIn(r1, { ...S, accuracyM: 5, dealId: dOther!.id }, deps))) === 'validation:That deal is not available.',
+      );
+      const mgrLink = await M.createMeeting(m, { ...at(3), ownerId: U.r1, dealId: dOther!.id }, deps);
+      check("links: manager linking a team rep's deal → ok", mgrLink.dealId === dOther!.id);
+      const keep = await M.updateMeeting(r1, mgrLink.id, { title: 'ZZ link renamed', dealId: dOther!.id }, deps);
+      check('links: an unchanged link set by a manager never blocks the rep', keep.title === 'ZZ link renamed' && keep.dealId === dOther!.id);
     }
 
     // --- needs a deal, site source and the rep-entered marker
