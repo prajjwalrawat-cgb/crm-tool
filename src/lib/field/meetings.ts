@@ -41,6 +41,8 @@ import {
   type Site,
 } from './site';
 import { visibleCompanies, visibleContacts, visibleDeals } from './pickers';
+import { effectiveRadius } from './settings';
+import { canPinAfterCheckIn } from './verification';
 import { assertTransition } from './state-machine';
 import { FieldError, type FieldActor } from './types';
 
@@ -452,9 +454,22 @@ export function pinMeetingSite(actor: FieldActor, id: string, input: string, dep
     return tenantTransaction(async (tx) => {
       const cur = await lockManagedMeeting(tx, actor, scope, id);
       if (cur.type === 'virtual') throw new FieldError('validation', 'A virtual meeting has no site to pin');
-      if (!PINNABLE.has(cur.status)) {
-        throw new FieldError('invalid_transition', `Cannot move the site of a ${cur.status} meeting`, { from: cur.status });
+      const afterCheckIn = canPinAfterCheckIn(cur);
+      if (!PINNABLE.has(cur.status) && !afterCheckIn) {
+        throw new FieldError(
+          'invalid_transition',
+          cur.status === 'checked_in'
+            ? "This visit's site is already set; it can't be moved after check-in."
+            : `Cannot move the site of a ${cur.status} meeting`,
+          { from: cur.status },
+        );
       }
+      // Existing check-in rows are left as they are ("site not located" in history).
+      // Fix the radius later verification uses, if the check-in did not store one.
+      const radius =
+        afterCheckIn && cur.checkinRadiusMUsed === null
+          ? { checkinRadiusMUsed: await effectiveRadius(tx, cur.tenantId, cur.companyId) }
+          : {};
       const [row] = await setMeeting(tx, cur, {
         lat: point.lat,
         lng: point.lng,
@@ -462,6 +477,7 @@ export function pinMeetingSite(actor: FieldActor, id: string, input: string, dep
         // A manager's pin: the rep-entered marker is cleared.
         siteSource: 'pin',
         siteRepEntered: false,
+        ...radius,
         updatedAt: nowOf(deps),
       });
       await publishMeetingUpdated(tx, row!);

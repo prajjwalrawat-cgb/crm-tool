@@ -1,8 +1,8 @@
 import 'server-only';
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { tenantFieldSettings } from '@/db/schema';
+import { companies, tenantFieldSettings } from '@/db/schema';
 import type { MembershipRole } from '@/db/schema/enums';
 import { can } from '@/lib/rbac';
 import type { DbExecutor } from '@/lib/db-context';
@@ -66,6 +66,24 @@ export async function getFieldSettings(tx: DbExecutor, tenantId: string): Promis
     checkinOpensBeforeMin: r.checkinOpensBeforeMin,
     checkinClosesAfterMin: r.checkinClosesAfterMin,
   };
+}
+
+/** The meeting's company radius override, else the tenant radius. */
+export async function effectiveRadius(
+  tx: DbExecutor,
+  tenantId: string,
+  companyId: string | null,
+  tenantRadiusM?: number,
+): Promise<number> {
+  if (companyId) {
+    const [c] = await tx
+      .select({ r: companies.checkinRadiusM })
+      .from(companies)
+      .where(and(eq(companies.tenantId, tenantId), eq(companies.id, companyId)))
+      .limit(1);
+    if (c?.r != null) return c.r;
+  }
+  return tenantRadiusM ?? (await getFieldSettings(tx, tenantId)).checkinRadiusM;
 }
 
 export async function saveFieldSettings(

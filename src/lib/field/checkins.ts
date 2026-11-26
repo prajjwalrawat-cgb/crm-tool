@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 
-import { companies, meetingCheckins, meetings, type Meeting, type MeetingCheckin, type VisitVerifiedHow } from '@/db/schema';
+import { meetingCheckins, meetings, type Meeting, type MeetingCheckin, type VisitVerifiedHow } from '@/db/schema';
 import { recordActivity } from '@/lib/activity/recorder';
 import { tenantTransaction } from '@/lib/db-context';
 
@@ -21,7 +21,7 @@ import {
 } from './internal';
 import { checkLinks } from './meetings';
 import { assertCanWrite, fieldUserScope, lockOwnedMeeting } from './scope';
-import { getFieldSettings } from './settings';
+import { effectiveRadius, getFieldSettings } from './settings';
 import { assertTransition } from './state-machine';
 import { FieldError, type FieldActor, type LatLng } from './types';
 
@@ -51,19 +51,6 @@ const round = (d: number | null) => (d === null ? null : Math.round(d));
  */
 async function visitRadius(tx: Tx, m: Meeting): Promise<number> {
   return m.checkinRadiusMUsed ?? (await effectiveRadius(tx, m.tenantId, m.companyId));
-}
-
-/** The meeting's company radius override, else the tenant radius. */
-async function effectiveRadius(tx: Tx, tenantId: string, companyId: string | null, tenantRadiusM?: number): Promise<number> {
-  if (companyId) {
-    const [c] = await tx
-      .select({ r: companies.checkinRadiusM })
-      .from(companies)
-      .where(and(eq(companies.tenantId, tenantId), eq(companies.id, companyId)))
-      .limit(1);
-    if (c?.r != null) return c.r;
-  }
-  return tenantRadiusM ?? (await getFieldSettings(tx, tenantId)).checkinRadiusM;
 }
 
 /** The meeting columns that record a verified visit (never unset once set). */

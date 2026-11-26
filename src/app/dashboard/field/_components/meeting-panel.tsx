@@ -26,7 +26,7 @@ import { toast } from 'sonner';
 
 import type { MeetingStatus } from '@/db/schema/enums';
 import type { DayMeeting } from '@/lib/field/day';
-import { isVisited, verifyAttemptTitle, visitVerificationLabel } from '@/lib/field/verification';
+import { canPinAfterCheckIn, isVisited, verifyAttemptTitle, visitVerificationLabel } from '@/lib/field/verification';
 import { cn } from '@/lib/utils';
 
 import { Button, inputCls } from '../../settings/lead-capture/_components/ui';
@@ -37,7 +37,10 @@ import { canCancelMeeting, canEditMeeting } from '../_lib/meeting-edit';
 import { useTenantTz } from '../_lib/tz-context';
 import { CancelMeetingSheet, EditMeetingSheet } from './meeting-actions';
 
-/** A site can be pinned until the rep checks in (mirrors the service rule). */
+/**
+ * A site can be pinned until the rep checks in, or after a check-in made while
+ * the site had no location and the visit is unverified (mirrors the service rule).
+ */
 const PINNABLE = new Set<MeetingStatus>(['planned', 'en_route', 'arrived']);
 
 const SENTIMENT_LABEL: Record<string, string> = { positive: 'Positive', neutral: 'Neutral', negative: 'Negative' };
@@ -69,7 +72,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /**
  * Side panel for one meeting on the manager board: links, check-in trail
- * (every attempt), MOM, risks in plain words, "Pin site" before check-in,
+ * (every attempt), MOM, risks in plain words, "Pin site" before check-in (or
+ * after a check-in made while the site had no location),
  * and Edit / Cancel meeting for writers (gated by status like the service).
  * Non-modal: the board stays usable, Escape or the close button dismiss it.
  */
@@ -95,7 +99,8 @@ export function MeetingPanel({
   const closeRef = useRef<HTMLButtonElement>(null);
   const time = (d: Date | string) => formatTimeInTz(d, tz);
   const physical = m.type === 'physical';
-  const canPin = canWrite && physical && PINNABLE.has(m.status);
+  const pinAfterCheckIn = physical && canPinAfterCheckIn(m);
+  const canPin = canWrite && physical && (PINNABLE.has(m.status) || pinAfterCheckIn);
   const canEdit = canWrite && canEditMeeting(m.status);
   const canCancel = canWrite && canCancelMeeting(m.status);
   const siteMissing = physical && (m.lat === null || m.lng === null);
@@ -242,7 +247,8 @@ export function MeetingPanel({
                   {m.siteRepEntered ? (
                     <span className="mt-0.5 flex items-start gap-1 text-[12px] text-violet-800 dark:text-violet-300">
                       <PenLine className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                      Rep-entered address. The rep typed this address; check-ins are verified against it.
+                      Rep-entered address. The rep typed this address; check-ins{' '}
+                      {siteMissing ? 'will be verified against it once the site is located.' : 'are verified against it.'}
                     </span>
                   ) : null}
                 </dd>
@@ -323,7 +329,17 @@ export function MeetingPanel({
           )}
         </Section>
 
-        {canPin ? <PinSite meetingId={m.id} onPinned={onChanged} /> : null}
+        {canPin ? (
+          <PinSite
+            meetingId={m.id}
+            onPinned={onChanged}
+            hint={
+              pinAfterCheckIn
+                ? 'The rep checked in before the site had a location. Pin it, then the rep can verify on site or at check-out.'
+                : null
+            }
+          />
+        ) : null}
 
         {canEdit || canCancel ? (
           <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-[#1F1F1F]">
@@ -367,7 +383,7 @@ export function MeetingPanel({
 }
 
 /** "Pin site": a Google Maps link or "lat, lng". The server's message is shown on failure. */
-function PinSite({ meetingId, onPinned }: { meetingId: string; onPinned: () => void }) {
+function PinSite({ meetingId, onPinned, hint }: { meetingId: string; onPinned: () => void; hint: string | null }) {
   const ids = useId();
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -393,6 +409,7 @@ function PinSite({ meetingId, onPinned }: { meetingId: string; onPinned: () => v
   return (
     <Section title="Pin site">
       <form onSubmit={submit} className="space-y-2">
+        {hint ? <p className="text-[12px] text-amber-800 dark:text-amber-300">{hint}</p> : null}
         <label htmlFor={`${ids}-pin`} className="block text-[12px] text-slate-600 dark:text-[#A1A1AA]">
           Paste a Google Maps link or coordinates (lat, lng). Check-ins are measured from this point.
         </label>

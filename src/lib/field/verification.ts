@@ -58,3 +58,13 @@ export function verifyTooFarText(distanceM: number, radiusM: number): string {
 export function verifyAttemptTitle(c: { accepted: boolean }): string {
   return c.accepted ? 'Location verified' : 'Verification failed';
 }
+
+/**
+ * The one exception after check-in: the rep checked in while the site had no
+ * location (accepted, unverified). Pinning it lets the rep verify on site or at
+ * check-out. Only the per-meeting pin (pinMeetingSite) allows this, never the
+ * company pin. Shared by the service and the manager panel.
+ */
+export function canPinAfterCheckIn(m: { status: string; lat: number | null; lng: number | null; visitVerified: boolean }): boolean {
+  return m.status === 'checked_in' && (m.lat === null || m.lng === null) && !m.visitVerified;
+}

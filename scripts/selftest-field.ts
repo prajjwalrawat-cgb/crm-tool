@@ -30,6 +30,7 @@ import { applyPick, sameAsCompany, siteCheck, toPickerCompany, type Links, type 
 import { companyGeocodeLine, isCompanyAddress, normAddr } from '../src/lib/field/site-line';
 import { lateBy } from '../src/lib/field/late';
 import {
+  canPinAfterCheckIn,
   canVerifyLocation,
   isVisited,
   verifyAttemptTitle,
@@ -701,6 +702,15 @@ async function main() {
     check('canVerifyLocation: not checked in → no', !canVerifyLocation({ ...base, status: 'arrived' }) && !canVerifyLocation({ ...base, status: 'checked_out' }));
     check('canVerifyLocation: virtual → no', !canVerifyLocation({ ...base, type: 'virtual' }));
     check('canVerifyLocation: no site → no', !canVerifyLocation({ ...base, lat: null, lng: null }));
+    const unsited = { ...base, lat: null, lng: null };
+    check('canPinAfterCheckIn: checked in, unverified, no site', canPinAfterCheckIn(unsited));
+    check('canPinAfterCheckIn: has a site → no', !canPinAfterCheckIn(base));
+    check('canPinAfterCheckIn: verified → no', !canPinAfterCheckIn({ ...unsited, visitVerified: true }));
+    check(
+      'canPinAfterCheckIn: only checked_in',
+      !canPinAfterCheckIn({ ...unsited, status: 'checked_out' }) && !canPinAfterCheckIn({ ...unsited, status: 'mom_logged' }),
+    );
+    check('canVerifyLocation after the pin: once sited → yes', canVerifyLocation({ ...unsited, lat: 28.5, lng: 77.3 }));
     check('isVisited', isVisited('checked_in') && isVisited('checked_out') && isVisited('mom_logged') && !isVisited('arrived') && !isVisited('cancelled'));
     check('verify too far text', verifyTooFarText(480.4, 300) === 'Still 480 m from the site (limit 300 m). Move closer and try again.', verifyTooFarText(480.4, 300));
     check('verify too far text in km', verifyTooFarText(2345, 1000) === 'Still 2.3 km from the site (limit 1.0 km). Move closer and try again.', verifyTooFarText(2345, 1000));

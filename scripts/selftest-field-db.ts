@@ -701,6 +701,96 @@ async function main() {
       await db.execute(sql`UPDATE meetings SET checkin_radius_m_used = NULL WHERE id = ${v9.id}`);
       check('legacy row without a stored radius uses the current one (1000 m)', (await CI.verifyLocation(r1, v9.id, { ...north(800), accuracyM: 5 }, deps)).verified);
 
+      // (g3) pin after a check-in made while the site had no location
+      {
+        const [blankCo] = await db
+          .insert(s.companies)
+          .values({ tenantId: A, name: 'ZZ Siteless Co', address: 'Nowhere Rd', geocodeStatus: 'failed', checkinRadiusM: 1000 })
+          .returning();
+        const p1 = await mk(r1, { companyId: blankCo!.id });
+        const in1 = await CI.checkIn(r1, p1.id, { ...north(800), accuracyM: 10 }, deps);
+        check(
+          'pin-after-check-in: check-in to a site-less meeting is unverified site_not_geocoded',
+          !in1.verified && in1.distanceM === null && in1.checkin.overrideReason === 'site_not_geocoded',
+          in1,
+        );
+        // A legacy-style row without a stored radius: the pin fixes it.
+        await db.execute(sql`UPDATE meetings SET checkin_radius_m_used = NULL WHERE id = ${p1.id}`);
+        const rowsBefore = j(await checkinsOf(p1.id));
+        const pinned1 = await M.pinMeetingSite(m, p1.id, `${S.lat}, ${S.lng}`, deps);
+        const p1r = await meetingRow(p1.id);
+        check(
+          'manager pins a checked_in site-less meeting: coords set, still checked_in, manual pin, radius stored',
+          pinned1.lat === S.lat &&
+            pinned1.lng === S.lng &&
+            p1r.status === 'checked_in' &&
+            p1r.geocodeStatus === 'manual' &&
+            p1r.siteSource === 'pin' &&
+            !p1r.siteRepEntered &&
+            p1r.checkinRadiusMUsed === 1000 &&
+            !p1r.visitVerified,
+          { status: p1r.status, gs: p1r.geocodeStatus, src: p1r.siteSource, r: p1r.checkinRadiusMUsed },
+        );
+        check('pin after check-in leaves check-in rows unchanged', j(await checkinsOf(p1.id)) === rowsBefore);
+        const ver1 = await CI.verifyLocation(r1, p1.id, { ...north(800), accuracyM: 5 }, deps);
+        check(
+          'after the pin, Verify location on site → on_arrival (stored 1000 m radius)',
+          ver1.verified && (await meetingRow(p1.id)).visitVerifiedHow === 'on_arrival',
+          ver1,
+        );
+        check(
+          'pin on a checked_in meeting now verified → invalid_transition',
+          (await code(M.pinMeetingSite(m, p1.id, '28.61, 77.21', deps))) === 'invalid_transition',
+        );
+
+        // Alternative path: verify at check-out; an already stored radius is kept.
+        const p2 = await mk(r1);
+        await CI.checkIn(r1, p2.id, { ...S, accuracyM: 10 }, deps);
+        await db.execute(sql`UPDATE meetings SET checkin_radius_m_used = 450 WHERE id = ${p2.id}`);
+        await M.pinMeetingSite(m, p2.id, `${S.lat}, ${S.lng}`, deps);
+        check('pin after check-in keeps a radius already stored', (await meetingRow(p2.id)).checkinRadiusMUsed === 450);
+        const out2 = await CI.checkOut(r1, p2.id, { ...north(400), accuracyM: 5 }, deps);
+        check(
+          'after the pin, check-out within the radius → at_checkout',
+          out2.verified && (await meetingRow(p2.id)).visitVerifiedHow === 'at_checkout',
+          out2,
+        );
+
+        // Refusals
+        const siteMoved = await err(M.pinMeetingSite(m, v6.id, '28.61, 77.21', deps));
+        check(
+          'pin on a checked_in meeting that has coordinates → invalid_transition',
+          siteMoved?.code === 'invalid_transition' && siteMoved.message === "This visit's site is already set; it can't be moved after check-in.",
+          siteMoved?.message,
+        );
+        const p3 = await mk(r1);
+        await CI.checkIn(r1, p3.id, { ...S, accuracyM: 10 }, deps);
+        check('rep (member) pin after check-in → forbidden', (await code(M.pinMeetingSite(r1, p3.id, '28.61, 77.21', deps))) === 'forbidden');
+        await CI.checkOut(r1, p3.id, { ...S, accuracyM: 10 }, deps);
+        check(
+          'pin on a checked_out site-less meeting → invalid_transition',
+          (await code(M.pinMeetingSite(m, p3.id, '28.61, 77.21', deps))) === 'invalid_transition',
+        );
+        const p4 = await mk(r1);
+        await CI.checkIn(r1, p4.id, { ...S, accuracyM: 10 }, deps);
+        await OC.saveOutcome(r1, p4.id, { momText: 'Visited', checkOutAt: { ...S, accuracyM: 5 } }, deps);
+        check(
+          'pin on a mom_logged site-less meeting → invalid_transition',
+          (await meetingRow(p4.id)).status === 'mom_logged' && (await code(M.pinMeetingSite(m, p4.id, '28.61, 77.21', deps))) === 'invalid_transition',
+        );
+
+        // The company pin does not move a checked_in meeting.
+        const [blankCo2] = await db
+          .insert(s.companies)
+          .values({ tenantId: A, name: 'ZZ Siteless Co 2', address: 'Nowhere Ln', geocodeStatus: 'failed' })
+          .returning();
+        const p5 = await mk(r1, { companyId: blankCo2!.id });
+        await CI.checkIn(r1, p5.id, { ...S, accuracyM: 10 }, deps);
+        await M.pinCompanySite(m, blankCo2!.id, `${S.lat}, ${S.lng}`, undefined, deps);
+        const p5r = await meetingRow(p5.id);
+        check('company pin does not move a checked_in meeting', p5r.lat === null && p5r.lng === null && p5r.status === 'checked_in', p5r);
+      }
+
       // (h) verify rows never count as check-ins: late label, live risk, checked-in KPI
       const gv = await M.createMeeting(
         r1,
