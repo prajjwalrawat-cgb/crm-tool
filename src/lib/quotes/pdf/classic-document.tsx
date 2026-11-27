@@ -255,7 +255,11 @@ export function ClassicQuoteDocument(props: QuoteRenderInput): JSX.Element {
   }
   const units = new Set(quote.items.map((i) => (i.unit ?? '').trim()));
   const totalQty = quote.items.reduce((s, i) => s + Number(i.quantity), 0);
-  const qtyText = units.size === 1 ? `${formatQuantity(totalQty)}${[...units][0] ? ` ${[...units][0]}` : ''}` : '';
+  // Always show the summed quantity; append the unit only when every line shares
+  // one real unit (a purely numeric "unit" is a data-entry slip, not a unit).
+  const sharedUnit = units.size === 1 ? [...units][0] : '';
+  const unitSuffix = sharedUnit && !/^[\d.,\s]+$/.test(sharedUnit) ? ` ${sharedUnit}` : '';
+  const qtyText = quote.items.length > 0 ? `${formatQuantity(totalQty)}${unitSuffix}` : '';
 
   /* ---------- HSN summary ---------- */
   const hsnRows = totals?.settings.showTaxBreakdown ? hsnSummary(quote.items) : [];

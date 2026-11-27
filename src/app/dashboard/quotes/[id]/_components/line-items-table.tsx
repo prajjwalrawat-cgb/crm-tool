@@ -10,6 +10,7 @@ import {
   isGstSlab,
   newEditorItem,
   percentToBps,
+  QUOTE_UNITS,
   type EditorDiscount,
   type EditorItem,
 } from '@/lib/quotes/editor-form';
@@ -104,7 +105,24 @@ export function LineItemsTable({
                   <input className={cellCls} value={it.hsnSac} readOnly={readOnly} onChange={(e) => patch(i, { hsnSac: e.target.value })} />
                 </Cell>
                 <Cell label="Unit">
-                  <input className={cellCls} value={it.unit} placeholder="Nos" readOnly={readOnly} onChange={(e) => patch(i, { unit: e.target.value })} />
+                  <select
+                    aria-label={`Line ${i + 1} unit`}
+                    className={cellCls}
+                    value={it.unit}
+                    disabled={readOnly}
+                    onChange={(e) => patch(i, { unit: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {/* A unit saved before the dropdown existed stays visible until changed. */}
+                    {it.unit && !(QUOTE_UNITS as readonly string[]).includes(it.unit) ? (
+                      <option value={it.unit}>{it.unit}</option>
+                    ) : null}
+                    {QUOTE_UNITS.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
                 </Cell>
                 <Cell label="Qty">
                   <input

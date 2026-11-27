@@ -17,6 +17,13 @@ import type { QuoteDetail, QuoteParty } from './types';
 /** GST rates the line items select suggests (bps). Any 0..4000 is allowed via "Other". */
 export const GST_SLABS_BPS = [0, 25, 300, 500, 1800, 4000] as const;
 
+/** Units offered on a quote line, in GST UQC style. Free text is no longer
+ *  typed in; a line saved earlier with some other unit keeps it selectable. */
+export const QUOTE_UNITS = [
+  'NOS', 'PCS', 'SET', 'PRS', 'DOZ', 'PKT', 'BOX', 'CTN', 'ROL',
+  'KGS', 'GMS', 'MTR', 'SQF', 'SQM', 'LTR', 'JOB', 'DAY', 'HRS', 'MON',
+] as const;
+
 export function isGstSlab(bps: number): boolean {
   return (GST_SLABS_BPS as readonly number[]).includes(bps);
 }
