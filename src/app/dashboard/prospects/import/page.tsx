@@ -2,8 +2,8 @@ import Link from 'next/link';
 
 import { withTenantSession } from '@/lib/auth-guard';
 import { requireMembership } from '@/lib/membership';
-import { listOfferingOptions } from '@/lib/offerings/queries';
-import { listSourceTags } from '@/lib/prospects/queries';
+import { isOfferingsEnabled, listOfferingOptions } from '@/lib/offerings/queries';
+import { getProspectSettings } from '@/lib/prospects/settings';
 import { can } from '@/lib/rbac';
 
 import { DumpInput } from './_components/dump-input';
@@ -25,10 +25,9 @@ export default async function QuickDumpPage() {
         </main>
       );
     }
-    const [sourceTags, offerings] = await Promise.all([
-      listSourceTags(tenant.id),
-      listOfferingOptions(tenant.id, { activeOnly: true }),
-    ]);
+    // Product fit follows the workspace "Offerings" switch, like deals do.
+    const offerings = (await isOfferingsEnabled(tenant.id)) ? await listOfferingOptions(tenant.id, { activeOnly: true }) : [];
+    const { sources } = await getProspectSettings(tenant.id);
     return (
       <main className="mx-auto w-full max-w-[90rem] space-y-4 px-4 py-6 sm:px-5 lg:px-6">
         <header>
@@ -41,7 +40,7 @@ export default async function QuickDumpPage() {
             add them to the Dump column.
           </p>
         </header>
-        <DumpInput sourceTags={sourceTags} offerings={offerings.map((o) => ({ id: o.id, name: o.name }))} />
+        <DumpInput sources={sources} offerings={offerings.map((o) => ({ id: o.id, name: o.name }))} />
       </main>
     );
   });

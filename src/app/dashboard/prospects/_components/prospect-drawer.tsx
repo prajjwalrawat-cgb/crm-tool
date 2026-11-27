@@ -34,7 +34,7 @@ type Props = {
   suggestions: SuggestionView[];
   teammates: Teammate[];
   offerings: { id: string; name: string }[];
-  sourceTags: string[];
+  sources: string[];
   role: MembershipRole;
   currentUserId: string;
   tenantId: string;
@@ -61,7 +61,7 @@ export function ProspectDrawer({
   suggestions,
   teammates,
   offerings,
-  sourceTags,
+  sources,
   role,
   currentUserId,
   tenantId,
@@ -162,7 +162,7 @@ export function ProspectDrawer({
           mode="edit"
           prospect={prospect}
           offerings={offerings}
-          sourceTags={sourceTags}
+          sources={sources}
           readOnly={block !== null}
           onSaved={() => undefined}
         />

@@ -22,13 +22,15 @@ const chipCls = (on: boolean) =>
 type Props = {
   filters: ProspectFilters;
   sourceTags: string[];
+  /** False when offerings are off: no "Group by product fit". */
+  productFitEnabled: boolean;
   /** Writes the next filter set to the URL query string. */
   onChange: (next: ProspectFilters) => void;
   /** Right-aligned slot (e.g. the New prospect button). */
   actions?: ReactNode;
 };
 
-export function BoardToolbar({ filters, sourceTags, onChange, actions }: Props) {
+export function BoardToolbar({ filters, sourceTags, productFitEnabled, onChange, actions }: Props) {
   const [q, setQ] = useState(filters.q ?? '');
   const [lastUrlQ, setLastUrlQ] = useState(filters.q);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,7 +98,7 @@ export function BoardToolbar({ filters, sourceTags, onChange, actions }: Props) 
         onChange={(e) => onChange({ ...filters, groupBy: (e.target.value || undefined) as GroupByKey | undefined })}
       >
         <option value="">No grouping</option>
-        {GROUP_BY_KEYS.map((g) => (
+        {GROUP_BY_KEYS.filter((g) => productFitEnabled || g !== 'product_fit').map((g) => (
           <option key={g} value={g}>
             Group by {GROUP_LABELS[g]}
           </option>

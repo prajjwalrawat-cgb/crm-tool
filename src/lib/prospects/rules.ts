@@ -15,6 +15,34 @@ import { can } from '@/lib/rbac';
 // (redeclared so this module never pulls drizzle into a client bundle).
 export const PROSPECT_STAGES = ['dump', 'researching', 'qualified', 'ready', 'parked'] as const satisfies readonly ProspectStage[];
 export const SIZE_BANDS = ['1-10', '11-50', '51-200', '201-1000', '1000+'] as const;
+/**
+ * The default "where this prospect came from" list (mirrors the 0082 column
+ * default). Each workspace edits its own copy under Settings -> Prospect board.
+ */
+export const PROSPECT_SOURCES = ['WhatsApp', 'Mail', 'Call', 'LinkedIn', 'Found by myself'] as const;
+export const MAX_SOURCES = 30;
+const MAX_SOURCE_LEN = 80;
+
+/**
+ * The workspace's source list, then any extra values (older free-text sources
+ * already on prospects) so they still show. Trimmed, case-insensitive dedupe.
+ */
+export function sourceChoices(
+  base: readonly string[],
+  extra: readonly (string | null | undefined)[] = [],
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of [...base, ...extra]) {
+    const s = raw?.trim();
+    if (s && !seen.has(s.toLowerCase())) {
+      seen.add(s.toLowerCase());
+      out.push(s);
+    }
+  }
+  return out;
+}
+
 export const GROUP_BY_KEYS = ['industry', 'territory', 'product_fit', 'source_tag'] as const;
 export type GroupByKey = (typeof GROUP_BY_KEYS)[number];
 
@@ -65,7 +93,7 @@ export const prospectInputSchema = z.object({
   productFitOfferingId: z.preprocess(emptyToNull, z.string().uuid().nullish().transform((v) => v ?? null)),
   icpScore: z.preprocess(emptyToNull, z.number().int().min(0).max(100).nullish().transform((v) => v ?? null)),
   clusterTags,
-  sourceTag: z.string().trim().min(1).max(80),
+  sourceTag: z.string().trim().min(1, { error: 'Pick a source.' }).max(80),
   notes: optText(MAX_NOTES),
 });
 export type ProspectInput = z.output<typeof prospectInputSchema>;
@@ -269,6 +297,19 @@ export const prospectSettingsSchema = z.object({
   enrichmentEnabled: z.boolean(),
 });
 export type ProspectSettingsInput = z.infer<typeof prospectSettingsSchema>;
+
+/** The editable Source list: 1-30 names, each 1-80 characters, no repeats (ignoring case). */
+export const prospectSourcesSchema = z
+  .array(z.string().trim().min(1, { error: 'A source cannot be blank.' }).max(MAX_SOURCE_LEN, { error: `Keep each source under ${MAX_SOURCE_LEN} characters.` }))
+  .min(1, { error: 'Keep at least one source.' })
+  .max(MAX_SOURCES, { error: `At most ${MAX_SOURCES} sources.` })
+  .refine((list) => new Set(list.map((s) => s.toLowerCase())).size === list.length, { error: 'Each source must be different.' });
+
+/** First human-readable problem with a source list, or null when it is valid. */
+export function prospectSourcesError(input: unknown): string | null {
+  const r = prospectSourcesSchema.safeParse(input);
+  return r.success ? null : (r.error.issues[0]?.message ?? 'Check the sources and try again.');
+}
 
 /** First human-readable problem with a settings input, or null when it is valid. */
 export function prospectSettingsError(input: unknown): string | null {

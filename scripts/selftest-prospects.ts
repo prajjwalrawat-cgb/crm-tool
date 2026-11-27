@@ -9,6 +9,9 @@ import {
   prospectInputSchema,
   prospectSettingsError,
   SETTINGS_MESSAGES,
+  sourceChoices,
+  PROSPECT_SOURCES,
+  prospectSourcesError,
   stageMoveBlock,
   type ProspectCard,
 } from '../src/lib/prospects/rules';
@@ -137,6 +140,27 @@ check('rbac: manager bulkParkProspects', can('manager', 'bulkParkProspects') ===
 }
 
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${!r.ok && r.detail ? `  ${r.detail}` : ''}`);
+// ---- source choices ----
+{
+  const ws = ['WhatsApp', 'Call', 'Trade show'];
+  const plain = sourceChoices(ws);
+  check('sources: the workspace list in order', JSON.stringify(plain) === JSON.stringify(ws), plain);
+  const withOld = sourceChoices(ws, ['call', ' Pune expo ', null, 'pune expo', '']);
+  check(
+    'sources: older values appended once, case-insensitive, list ones not repeated',
+    JSON.stringify(withOld) === JSON.stringify([...ws, 'Pune expo']),
+    withOld,
+  );
+  check('sources: default list has the five standard sources', PROSPECT_SOURCES.length === 5);
+  const blank = prospectInputSchema.safeParse({ companyName: 'Acme', sourceTag: '' });
+  check('sources: blank source -> "Pick a source."', !blank.success && blank.error.issues[0]?.message === 'Pick a source.', blank);
+  check('source list: valid', prospectSourcesError(['WhatsApp', 'Mail']) === null);
+  check('source list: empty rejected', prospectSourcesError([]) === 'Keep at least one source.');
+  check('source list: blank rejected', prospectSourcesError(['Mail', '  ']) === 'A source cannot be blank.');
+  check('source list: case-insensitive repeat rejected', prospectSourcesError(['Mail', 'mail']) === 'Each source must be different.');
+  check('source list: 31 rejected', prospectSourcesError(Array.from({ length: 31 }, (_, i) => `s${i}`)) === 'At most 30 sources.');
+}
+
 const passed = results.filter((r) => r.ok).length;
 console.log(`\nprospects selftest: ${passed} passed, ${results.length - passed} failed`);
 process.exit(exitCode);

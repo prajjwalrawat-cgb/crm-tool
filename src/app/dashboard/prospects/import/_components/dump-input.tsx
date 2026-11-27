@@ -113,13 +113,7 @@ const TABS: { kind: Kind; label: string }[] = [
   { kind: 'image', label: 'Image' },
 ];
 
-export function DumpInput({
-  sourceTags,
-  offerings,
-}: {
-  sourceTags: string[];
-  offerings: { id: string; name: string }[];
-}) {
+export function DumpInput({ sources, offerings }: { sources: string[]; offerings: { id: string; name: string }[] }) {
   const [sourceTag, setSourceTag] = useState('');
   const [kind, setKind] = useState<Kind>('text');
   const [text, setText] = useState('');
@@ -242,21 +236,21 @@ export function DumpInput({
   return (
     <Card>
       <div className="space-y-4">
-        <Field label="Source tag *" htmlFor="dump-source" hint="Where this list came from, e.g. Pune expo 2026.">
-          <input
+        <Field label="Source *" htmlFor="dump-source" hint="Where this list came from.">
+          <select
             id="dump-source"
-            list="dump-source-tags"
             className={inputCls}
             value={sourceTag}
-            maxLength={80}
             onChange={(e) => setSourceTag(e.target.value)}
             disabled={busy}
-          />
-          <datalist id="dump-source-tags">
-            {sourceTags.map((t) => (
-              <option key={t} value={t} />
+          >
+            <option value="">Select source</option>
+            {sources.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
-          </datalist>
+          </select>
         </Field>
 
         <div role="tablist" className="flex gap-1 border-b border-slate-200 dark:border-[#262626]">

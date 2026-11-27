@@ -45,6 +45,8 @@ type Props = {
   truncated: boolean;
   filters: ProspectFilters;
   sourceTags: string[];
+  /** The workspace's Source dropdown choices (Settings -> Prospect board). */
+  sources: string[];
   teammates: Teammate[];
   /** Active offerings; used by the create dialog and drawer. */
   offerings: { id: string; name: string }[];
@@ -98,6 +100,7 @@ export function ProspectBoard({
   truncated,
   filters,
   sourceTags,
+  sources,
   teammates,
   offerings,
   role,
@@ -288,6 +291,7 @@ export function ProspectBoard({
       <BoardToolbar
         filters={filters}
         sourceTags={sourceTags}
+        productFitEnabled={offerings.length > 0}
         onChange={writeFilters}
         actions={
           interactive || canReport ? (
@@ -308,7 +312,7 @@ export function ProspectBoard({
                   >
                     Quick dump
                   </Link>
-                  <NewProspectButton offerings={offerings} sourceTags={sourceTags} />
+                  <NewProspectButton offerings={offerings} sources={sources} />
                 </>
               ) : null}
             </div>
@@ -395,7 +399,7 @@ export function ProspectBoard({
           suggestions={openSuggestions}
           teammates={teammates}
           offerings={offerings}
-          sourceTags={sourceTags}
+          sources={sources}
           role={role}
           currentUserId={currentUserId}
           tenantId={tenantId}

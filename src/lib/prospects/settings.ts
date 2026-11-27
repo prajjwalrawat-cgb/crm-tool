@@ -6,7 +6,7 @@ import { organizationSettings } from '@/db/schema';
 import { tenantTransaction } from '@/lib/db-context';
 
 import type { MutationResult } from './mutations';
-import { prospectSettingsSchema, type Actor, type ProspectSettingsInput } from './rules';
+import { PROSPECT_SOURCES, prospectSettingsSchema, prospectSourcesSchema, type Actor, type ProspectSettingsInput } from './rules';
 
 export { prospectSettingsSchema, type ProspectSettingsInput };
 
@@ -17,6 +17,8 @@ export type ProspectSettings = {
   autoParkEnabled: boolean;
   enrichmentEnabled: boolean;
   aiSuggestionsEnabled: boolean;
+  /** The Source dropdown choices for new prospects. */
+  sources: string[];
 };
 
 export const PROSPECT_SETTING_DEFAULTS: ProspectSettings = {
@@ -26,6 +28,7 @@ export const PROSPECT_SETTING_DEFAULTS: ProspectSettings = {
   autoParkEnabled: true,
   enrichmentEnabled: false,
   aiSuggestionsEnabled: false,
+  sources: [...PROSPECT_SOURCES],
 };
 
 
@@ -41,11 +44,13 @@ export async function getProspectSettingsTx(tx: Tx, tenantId: string): Promise<P
       autoParkEnabled: organizationSettings.prospectAutoParkEnabled,
       enrichmentEnabled: organizationSettings.prospectEnrichmentEnabled,
       aiSuggestionsEnabled: organizationSettings.aiSuggestionsEnabled,
+      sources: organizationSettings.prospectSources,
     })
     .from(organizationSettings)
     .where(eq(organizationSettings.tenantId, tenantId))
     .limit(1);
-  return r ?? { ...PROSPECT_SETTING_DEFAULTS };
+  if (!r) return { ...PROSPECT_SETTING_DEFAULTS, sources: [...PROSPECT_SETTING_DEFAULTS.sources] };
+  return { ...r, sources: r.sources.length ? r.sources : [...PROSPECT_SOURCES] };
 }
 
 export async function getProspectSettings(tenantId: string): Promise<ProspectSettings> {
@@ -71,6 +76,23 @@ export async function updateProspectSettings(
     prospectEnrichmentEnabled: parsed.data.enrichmentEnabled,
     updatedBy: actor.userId,
   };
+  await tenantTransaction((tx) =>
+    tx
+      .insert(organizationSettings)
+      .values({ tenantId, ...v })
+      .onConflictDoUpdate({ target: organizationSettings.tenantId, set: v }),
+  );
+  return { ok: true };
+}
+
+/** Owner/admin only: replace the workspace's Source list. Prospects keep their current source. */
+export async function updateProspectSources(tenantId: string, actor: Actor, input: unknown): Promise<MutationResult> {
+  if (actor.role !== 'owner' && actor.role !== 'admin') {
+    return { ok: false, error: 'no_permission', message: 'Only owners and admins can change this.' };
+  }
+  const parsed = prospectSourcesSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: 'invalid', message: parsed.error.issues[0]?.message ?? 'Check the sources and try again.' };
+  const v = { prospectSources: parsed.data, updatedBy: actor.userId };
   await tenantTransaction((tx) =>
     tx
       .insert(organizationSettings)

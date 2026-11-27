@@ -18,6 +18,7 @@ import {
 } from '@/lib/ai/suggestions/validate';
 import { tenantTransaction } from '@/lib/db-context';
 import { captureError } from '@/lib/observability';
+import { isOfferingsEnabled } from '@/lib/offerings/queries';
 import { getOrgSettings } from '@/lib/org-settings/queries';
 
 import { answerText } from './import/parse';
@@ -263,6 +264,9 @@ export async function enrichProspect(tenantId: string, prospectId: string, deps:
   if (!ps.aiSuggestionsEnabled) return { status: 'skipped', reason: 'AI suggestions are turned off for this workspace.' };
   if (!(await getOrgSettings(tenantId)).aiEnabled) return { status: 'skipped', reason: 'AI is turned off for this workspace.' };
   if (!deps.create && !enrichmentConfigured()) return { status: 'skipped', reason: 'ANTHROPIC_API_KEY is not set.' };
+  // Product fit follows the workspace "Offerings" switch: with no offerings listed,
+  // validation drops any product_fit answer.
+  const offeringsOn = await isOfferingsEnabled(tenantId);
 
   const ctx = await tenantTransaction(async (tx) => {
     if (!(await claimSource(tx, tenantId, SOURCE, prospectId))) return 'claimed' as const;
@@ -272,11 +276,13 @@ export async function enrichProspect(tenantId: string, prospectId: string, deps:
       .where(and(eq(prospects.id, prospectId), eq(prospects.tenantId, tenantId)))
       .limit(1);
     if (!p || p.deletedAt || p.promotedDealId) return 'gone' as const;
-    const offs = await tx
-      .select({ id: offerings.id, name: offerings.name })
-      .from(offerings)
-      .where(and(eq(offerings.tenantId, tenantId), eq(offerings.active, true)))
-      .orderBy(asc(offerings.name));
+    const offs = offeringsOn
+      ? await tx
+          .select({ id: offerings.id, name: offerings.name })
+          .from(offerings)
+          .where(and(eq(offerings.tenantId, tenantId), eq(offerings.active, true)))
+          .orderBy(asc(offerings.name))
+      : [];
     return { p, offs };
   });
   if (ctx === 'claimed') return { status: 'skipped', reason: 'already processed' };

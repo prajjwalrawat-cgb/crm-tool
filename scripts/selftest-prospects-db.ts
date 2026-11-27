@@ -301,7 +301,7 @@ async function main() {
     const ps = await import('../src/lib/prospects/settings');
     const rules = await import('../src/lib/prospects/rules');
     const defs = await runWithTenantContext({ tenantId: B, userId: 'usr_b' }, () => ps.getProspectSettings(B));
-    check('settings: defaults with no row', JSON.stringify(defs) === JSON.stringify({ claimDays: 14, claimExpiryEnabled: true, autoParkDays: 45, autoParkEnabled: true, enrichmentEnabled: false, aiSuggestionsEnabled: false }), defs);
+    check('settings: defaults with no row', JSON.stringify(defs) === JSON.stringify({ claimDays: 14, claimExpiryEnabled: true, autoParkDays: 45, autoParkEnabled: true, enrichmentEnabled: false, aiSuggestionsEnabled: false, sources: ['WhatsApp', 'Mail', 'Call', 'LinkedIn', 'Found by myself'] }), defs);
 
     const full = { claimDays: 30, claimExpiryEnabled: true, autoParkDays: 60, autoParkEnabled: false, enrichmentEnabled: true };
     const setUpd = await asU(ownerU, () => ps.updateProspectSettings(A, owner, full));
@@ -1191,7 +1191,22 @@ async function main() {
       const off2 = await sysE(() => en.enrichProspect(E, pid, { create: create(answer()) }));
       check('enrich: flags off → skipped', off1.status === 'skipped' && off2.status === 'skipped' && calls === 0 && (await suggestionsFor(pid)).length === 0, { off1, off2, calls });
 
+      // Product fit follows the workspace Offerings switch: off -> no offerings sent, no product_fit suggestion.
+      const { setWorkspaceFlags } = await import('../src/lib/workspace-settings/queries');
       await setFlags(true, true);
+      await sysE(() => setWorkspaceFlags(E, { offeringsEnabled: false }));
+      const offOff = await sysE(() => en.enrichProspect(E, pid, { create: create(answer()) }));
+      const offOffSg = await suggestionsFor(pid);
+      check(
+        'enrich: offerings switched off -> no offerings sent, no product_fit suggestion',
+        offOff.status === 'done' && !lastUser.includes(offE!.id) && !offOffSg.some((x) => x.field === 'product_fit'),
+        { offOff, fields: offOffSg.map((x) => x.field) },
+      );
+      // Reset so the run below starts clean (no suggestions, source not yet claimed).
+      await inE((tx) => tx.delete(s.aiSuggestions).where(eq(s.aiSuggestions.entityId, pid)));
+      await inE((tx) => tx.delete(s.aiSuggestionSources).where(eq(s.aiSuggestionSources.sourceId, pid)));
+      await sysE(() => setWorkspaceFlags(E, { offeringsEnabled: true }));
+
       const before = await prospectRow(pid);
       const r1 = await sysE(() => en.enrichProspect(E, pid, { create: create(answer()) }));
       const sg = await suggestionsFor(pid);

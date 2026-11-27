@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { Button, Card } from '../../../settings/lead-capture/_components/ui';
 import { confirmImportAction, discardImportAction } from '../../actions';
 
-type Row = DumpRow & { key: number; tags: string };
+type Row = DumpRow & { key: number };
 type TextField =
   | 'companyName'
   | 'contactName'
@@ -45,46 +45,54 @@ const HINT_PREFIX: Record<DedupHint['kind'], string> = {
   contact: 'Contact exists',
 };
 
-const HEADERS = ['Company *', 'Contact', 'Designation', 'Email', 'Phone', 'City', 'State', 'Industry', 'Size', 'Product fit', 'Tags', ''];
+const HEADERS = ['Company *', 'Contact', 'Designation', 'Email', 'Phone', 'City', 'State', 'Industry', 'Size'];
 
 const cellCls =
   'w-full min-w-[7rem] rounded border border-slate-200 bg-white px-1.5 py-1 text-[12.5px] text-slate-900 outline-none focus:border-indigo-500 dark:border-[#2A2A2A] dark:bg-[#111111] dark:text-[#FAFAFA]';
 const badCls = 'border-red-500 ring-1 ring-red-500';
 
-/** The row as the server expects it: no grid-only fields, tags split, source tag added. */
-function toInput(r: Row, sourceTag: string) {
+/**
+ * The row as the server expects it: no grid-only fields, source tag added.
+ * Tags are not used any more, so tags the parser or a CSV filled in are
+ * dropped rather than saved where nobody can see them.
+ */
+function toInput(r: Row, sourceTag: string, productFit: boolean) {
   const rest: Record<string, unknown> = { ...r };
   delete rest.key;
-  delete rest.tags;
   delete rest.confidence;
   delete rest.note;
   return {
     ...rest,
-    clusterTags: r.tags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean),
+    clusterTags: [],
+    productFitOfferingId: productFit ? r.productFitOfferingId : null,
     sourceTag,
   };
 }
 
-function invalidFields(r: Row, sourceTag: string): Set<string> {
-  const res = prospectInputSchema.safeParse(toInput(r, sourceTag));
+function invalidFields(r: Row, sourceTag: string, productFit: boolean): Set<string> {
+  const res = prospectInputSchema.safeParse(toInput(r, sourceTag, productFit));
   const bad = new Set<string>();
   if (!res.success) {
-    for (const issue of res.error.issues) {
-      const f = String(issue.path[0] ?? '');
-      bad.add(f === 'clusterTags' ? 'tags' : f);
-    }
+    for (const issue of res.error.issues) bad.add(String(issue.path[0] ?? ''));
   }
   return bad;
 }
 
-export function PreviewGrid({ importId, sourceTag, initialRows, dropped, capped, hints, offerings, onDiscarded }: Props) {
+export function PreviewGrid({
+  importId,
+  sourceTag,
+  initialRows,
+  dropped,
+  capped,
+  hints,
+  offerings,
+  onDiscarded,
+}: Props) {
   const router = useRouter();
-  const [rows, setRows] = useState<Row[]>(() =>
-    initialRows.map((r, i) => ({ ...r, key: i, tags: (r.clusterTags ?? []).join(', ') })),
-  );
+  // Empty when offerings are turned off: no Product fit column.
+  const productFit = offerings.length > 0;
+  const headers = [...HEADERS, ...(productFit ? ['Product fit'] : []), ''];
+  const [rows, setRows] = useState<Row[]>(() => initialRows.map((r, i) => ({ ...r, key: i })));
   const [serverErrors, setServerErrors] = useState<Map<number, string>>(new Map());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +107,10 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, capped,
     return m;
   }, [hints]);
 
-  const invalid = useMemo(() => new Map(rows.map((r) => [r.key, invalidFields(r, sourceTag)])), [rows, sourceTag]);
+  const invalid = useMemo(
+    () => new Map(rows.map((r) => [r.key, invalidFields(r, sourceTag, productFit)])),
+    [rows, sourceTag, productFit],
+  );
   const anyInvalid = [...invalid.values()].some((s) => s.size > 0);
 
   function patch(key: number, p: Partial<Row>) {
@@ -126,7 +137,7 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, capped,
     try {
       const r = await confirmImportAction(
         importId,
-        sent.map((row) => toInput(row, sourceTag)),
+        sent.map((row) => toInput(row, sourceTag, productFit)),
       );
       if (r.ok) {
         // Stay busy: the board is loading.
@@ -195,7 +206,7 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, capped,
             <table className="w-full border-collapse text-[12.5px]">
               <thead>
                 <tr>
-                  {HEADERS.map((h, i) => (
+                  {headers.map((h, i) => (
                     <th key={i} className="px-1.5 py-2 text-left text-[11.5px] font-medium text-slate-500">
                       {h}
                     </th>
@@ -245,31 +256,28 @@ export function PreviewGrid({ importId, sourceTag, initialRows, dropped, capped,
                           ))}
                         </select>
                       </td>
-                      <td className="p-1">
-                        <select
-                          aria-label="Product fit"
-                          className={cn(cellCls, bad?.has('productFitOfferingId') && badCls)}
-                          value={r.productFitOfferingId ?? ''}
-                          onChange={(e) => patch(r.key, { productFitOfferingId: e.target.value || null })}
-                          disabled={busy}
-                        >
-                          <option value="">-</option>
-                          {offerings.map((o) => (
-                            <option key={o.id} value={o.id}>
-                              {o.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="p-1">
-                        <input
-                          aria-label="Tags"
-                          className={cn(cellCls, bad?.has('tags') && badCls)}
-                          value={r.tags}
-                          onChange={(e) => patch(r.key, { tags: e.target.value })}
-                          disabled={busy}
-                        />
-                      </td>
+                      {productFit ? (
+                        <td className="p-1">
+                          <select
+                            aria-label="Product fit"
+                            className={cn(cellCls, bad?.has('productFitOfferingId') && badCls)}
+                            value={r.productFitOfferingId ?? ''}
+                            onChange={(e) =>
+                              patch(r.key, {
+                                productFitOfferingId: e.target.value || null,
+                              })
+                            }
+                            disabled={busy}
+                          >
+                            <option value="">-</option>
+                            {offerings.map((o) => (
+                              <option key={o.id} value={o.id}>
+                                {o.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      ) : null}
                       <td className="p-1">
                         <button
                           type="button"

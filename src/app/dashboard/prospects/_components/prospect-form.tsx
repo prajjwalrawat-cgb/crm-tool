@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import type { z } from 'zod';
 
 import type { Prospect } from '@/db/schema';
-import { prospectInputSchema, SIZE_BANDS } from '@/lib/prospects/rules';
+import { prospectInputSchema, SIZE_BANDS, sourceChoices } from '@/lib/prospects/rules';
 
 import { createProspectAction, updateProspectAction } from '../actions';
 
@@ -16,8 +16,10 @@ type FormOut = z.output<typeof prospectInputSchema>;
 type Props = {
   mode: 'create' | 'edit';
   prospect?: Prospect;
+  /** Empty when offerings are turned off (or none are active): Product fit is hidden. */
   offerings: { id: string; name: string }[];
-  sourceTags: string[];
+  /** The workspace's Source dropdown choices. */
+  sources: string[];
   /** Disables every field and hides the submit button. */
   readOnly?: boolean;
   onSaved: (id: string) => void;
@@ -42,7 +44,6 @@ function defaultsFor(p?: Prospect): FormIn {
     state: p?.state ?? '',
     productFitOfferingId: p?.productFitOfferingId ?? '',
     icpScore: p?.icpScore ?? '',
-    clusterTags: p?.clusterTags ?? [],
     sourceTag: p?.sourceTag ?? '',
     notes: p?.notes ?? '',
   } as FormIn;
@@ -59,16 +60,16 @@ type TextName =
   | 'city'
   | 'state';
 
-export function ProspectForm({ mode, prospect, offerings, sourceTags, readOnly, onSaved, onCancel }: Props) {
+export function ProspectForm({ mode, prospect, offerings, sources: sourceList, readOnly, onSaved, onCancel }: Props) {
   const listId = useId();
   const [pending, startTransition] = useTransition();
   const [serverError, setServerError] = useState<string | null>(null);
-  const [tagsText, setTagsText] = useState((prospect?.clusterTags ?? []).join(', '));
+  // An older free-text source on this prospect stays selectable so editing never drops it.
+  const sources = sourceChoices(sourceList, [prospect?.sourceTag]);
 
   const {
     register,
     handleSubmit,
-    setValue,
     getValues,
     formState: { errors, dirtyFields },
   } = useForm<FormIn, unknown, FormOut>({
@@ -151,19 +152,21 @@ export function ProspectForm({ mode, prospect, offerings, sourceTags, readOnly, 
             ))}
           </select>
         </div>
-        <div>
-          <label className={labelCls} htmlFor={`${listId}-fit`}>
-            Product fit
-          </label>
-          <select id={`${listId}-fit`} disabled={dis} className={inputCls} {...register('productFitOfferingId')}>
-            <option value="">-</option>
-            {offerings.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {offerings.length > 0 ? (
+          <div>
+            <label className={labelCls} htmlFor={`${listId}-fit`}>
+              Product fit
+            </label>
+            <select id={`${listId}-fit`} disabled={dis} className={inputCls} {...register('productFitOfferingId')}>
+              <option value="">-</option>
+              {offerings.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         {field('city', 'City')}
         {field('state', 'State')}
         <div>
@@ -184,41 +187,24 @@ export function ProspectForm({ mode, prospect, offerings, sourceTags, readOnly, 
         </div>
         <div>
           <label className={labelCls} htmlFor={`${listId}-source`}>
-            Source tag *
+            Source *
           </label>
-          <input
+          <select
             id={`${listId}-source`}
-            list={`${listId}-sources`}
             disabled={dis}
             className={inputCls}
             aria-invalid={!!errors.sourceTag}
             {...register('sourceTag')}
-          />
-          <datalist id={`${listId}-sources`}>
-            {sourceTags.map((s) => (
-              <option key={s} value={s} />
+          >
+            <option value="">Select source</option>
+            {sources.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
-          </datalist>
+          </select>
           {errors.sourceTag ? (
             <p className="mt-1 text-[12px] text-red-600">{String(errors.sourceTag.message)}</p>
-          ) : null}
-        </div>
-        <div className="sm:col-span-2">
-          <label className={labelCls} htmlFor={`${listId}-tags`}>
-            Tags (comma separated)
-          </label>
-          <input
-            id={`${listId}-tags`}
-            disabled={dis}
-            className={inputCls}
-            value={tagsText}
-            onChange={(e) => {
-              setTagsText(e.target.value);
-              setValue('clusterTags', e.target.value.split(','), { shouldDirty: true, shouldValidate: true });
-            }}
-          />
-          {errors.clusterTags ? (
-            <p className="mt-1 text-[12px] text-red-600">{String(errors.clusterTags.message)}</p>
           ) : null}
         </div>
         <div className="sm:col-span-2">

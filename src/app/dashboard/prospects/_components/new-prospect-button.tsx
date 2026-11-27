@@ -7,11 +7,11 @@ import { ProspectForm } from './prospect-form';
 
 type Props = {
   offerings: { id: string; name: string }[];
-  sourceTags: string[];
+  sources: string[];
 };
 
 /** "New prospect" opens the shared right-side create drawer, like "New deal". */
-export function NewProspectButton({ offerings, sourceTags }: Props) {
+export function NewProspectButton({ offerings, sources }: Props) {
   const router = useRouter();
 
   return (
@@ -26,7 +26,7 @@ export function NewProspectButton({ offerings, sourceTags }: Props) {
           <ProspectForm
             mode="create"
             offerings={offerings}
-            sourceTags={sourceTags}
+            sources={sources}
             onCancel={close}
             onSaved={() => {
               close();

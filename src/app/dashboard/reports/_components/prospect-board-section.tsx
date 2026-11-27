@@ -52,15 +52,12 @@ export function ProspectBoardSection({ report }: { report: ProspectBoardReport }
 
       <Block title="Conversion">
         {hasAny ? (
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid gap-4 lg:grid-cols-2">
             <ConversionTable
               heading="By source"
               rows={report.conversionBySource.map((r) => ({ ...r, label: r.key }))}
             />
-            <ConversionTable
-              heading="By tag"
-              rows={report.conversionByTag.map((r) => ({ ...r, label: r.key }))}
-            />
+            {/* No "By tag" table: prospects no longer have tags. */}
             <ConversionTable
               heading="By rep"
               rows={report.conversionByRep.map((r) => ({ ...r, key: r.userId || 'none', label: r.name }))}

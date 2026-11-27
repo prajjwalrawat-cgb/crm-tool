@@ -114,6 +114,11 @@ export const organizationSettings = pgTable('organization_settings', {
   prospectAutoParkDays: integer('prospect_auto_park_days').notNull().default(45),
   prospectAutoParkEnabled: boolean('prospect_auto_park_enabled').notNull().default(true),
   prospectEnrichmentEnabled: boolean('prospect_enrichment_enabled').notNull().default(false),
+  /** 0082: the Source dropdown choices for new prospects (Settings -> Prospect board). */
+  prospectSources: text('prospect_sources')
+    .array()
+    .notNull()
+    .default(['WhatsApp', 'Mail', 'Call', 'LinkedIn', 'Found by myself']),
 
   aiAggressiveness: text('ai_aggressiveness').notNull().default('balanced'),
   insightRefresh: text('insight_refresh').notNull().default('on_change'),

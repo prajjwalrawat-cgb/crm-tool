@@ -3,7 +3,7 @@ import { toSuggestionView } from '@/lib/ai/suggestions/view';
 import { withTenantSession } from '@/lib/auth-guard';
 import { listCommentsForEntity } from '@/lib/comments/queries';
 import { requireMembership } from '@/lib/membership';
-import { listOfferingOptions } from '@/lib/offerings/queries';
+import { isOfferingsEnabled, listOfferingOptions } from '@/lib/offerings/queries';
 import {
   getProspect,
   getVoteCounts,
@@ -12,7 +12,8 @@ import {
   listProspectStageHistory,
   listSourceTags,
 } from '@/lib/prospects/queries';
-import { parseProspectFilters } from '@/lib/prospects/rules';
+import { parseProspectFilters, sourceChoices } from '@/lib/prospects/rules';
+import { getProspectSettings } from '@/lib/prospects/settings';
 import { scopeUsers } from '@/lib/reports/manager/scope';
 import { listTeammates } from '@/lib/teammates/queries';
 
@@ -36,14 +37,22 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
     const sp = await searchParams;
     const filters = parseProspectFilters(sp);
     const p = Array.isArray(sp.p) ? sp.p[0] : sp.p;
-    const [{ cards, truncated }, sourceTags, teammates, offerings, openProspect, openHistory] = await Promise.all([
+    // Product fit follows the workspace "Offerings" switch, like deals do.
+    const offeringsOn = await isOfferingsEnabled(tenant.id);
+    if (!offeringsOn && filters.groupBy === 'product_fit') delete filters.groupBy;
+    const [{ cards: rawCards, truncated }, usedSources, { sources }, teammates, offerings, openProspect, openHistory] = await Promise.all([
       listProspectsForBoard(tenant.id, userId, filters),
       listSourceTags(tenant.id),
+      getProspectSettings(tenant.id),
       listTeammates(tenant.id, tenant.name),
-      listOfferingOptions(tenant.id, { activeOnly: true }),
+      offeringsOn ? listOfferingOptions(tenant.id, { activeOnly: true }) : Promise.resolve([]),
       p ? getProspect(tenant.id, p) : Promise.resolve(null),
       p ? listProspectStageHistory(tenant.id, p) : Promise.resolve([]),
     ]);
+
+    const cards = offeringsOn ? rawCards : rawCards.map((c) => ({ ...c, productFitOfferingId: null, productFitName: null }));
+    // The workspace's sources first, then any older ones still on prospects so they stay filterable.
+    const sourceTags = sourceChoices(sources, usedSources);
 
     // Only after the prospect is known to exist (getProspect UUID-guards `p`).
     const scopeP = openProspect ? scopeUsers({ tenantId: tenant.id, userId, role: membership.role }) : null;
@@ -85,6 +94,7 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Se
           truncated={truncated}
           filters={filters}
           sourceTags={sourceTags}
+          sources={sources}
           teammates={teammates}
           offerings={offerings.map((o) => ({ id: o.id, name: o.name }))}
           role={membership.role}

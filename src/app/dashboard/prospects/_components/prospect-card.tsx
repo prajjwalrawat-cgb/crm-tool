@@ -100,11 +100,6 @@ function ProspectCardImpl({ card, teammates, interactive, currentUserId, selecte
             {card.productFitName}
           </span>
         ) : null}
-        {card.clusterTags.map((t) => (
-          <span key={t} className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
-            {t}
-          </span>
-        ))}
       </div>
       {territory ? <p className="mt-1 truncate text-[11px] text-slate-400">{territory}</p> : null}
 
